@@ -51,8 +51,8 @@ async function recordTrack(stream, name) {
   return { name, peak, blob: new Blob(chunks, { type: 'audio/webm' }) };
 }
 
-async function captureTest(mode, withTone) {
-  const label = mode === 'screen' ? 'А (через экран)' : 'Б (без экрана)';
+async function captureTest(mode, withTone, restrictOwn = false) {
+  const label = restrictOwn ? 'В (без своего звука)' : mode === 'screen' ? 'А (через экран)' : 'Б (без экрана)';
   log(`— Запись 10 с, вариант ${label}${withTone ? ', с тестовым тоном' : ''}`);
   await window.spike.setCaptureMode(mode);
 
@@ -67,12 +67,24 @@ async function captureTest(mode, withTone) {
     log(`  FAIL микрофон — ${err.name}: ${err.message}`);
   }
   try {
+    const audioConstraint = restrictOwn
+      ? {
+          restrictOwnAudio: true,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 2,
+        }
+      : true;
     display = await navigator.mediaDevices.getDisplayMedia({
-      audio: true,
+      audio: audioConstraint,
       video: { width: 320, height: 240, frameRate: 1 },
     });
     const tracks = display.getAudioTracks();
     log(`  системный звук: дорожек ${tracks.length}; состояние ${tracks.map((t) => t.readyState).join('/') || '—'}`);
+    if (tracks.length > 0) {
+      log(`  настройки дорожки: ${JSON.stringify(tracks[0].getSettings())}`);
+    }
   } catch (err) {
     log(`  FAIL системный звук — ${err.name}: ${err.message}`);
   }
@@ -87,8 +99,9 @@ async function captureTest(mode, withTone) {
   if (tone) tone.stop();
   for (const stream of [mic, display]) stream?.getTracks().forEach((t) => t.stop());
 
+  const filePrefix = restrictOwn ? 'own-excluded' : mode;
   for (const r of results) {
-    const saved = await window.spike.save(`${mode}-${r.name}-${Date.now()}.webm`, await r.blob.arrayBuffer());
+    const saved = await window.spike.save(`${filePrefix}-${r.name}-${Date.now()}.webm`, await r.blob.arrayBuffer());
     const silent = r.peak < 0.001 ? ' — ТИШИНА' : '';
     log(`  ${r.name}: ${Math.round(r.blob.size / 1024)} КБ, пик ${r.peak.toFixed(3)}${silent} → ${saved}`);
   }
@@ -97,6 +110,7 @@ async function captureTest(mode, withTone) {
 document.getElementById('asr').onclick = () => asrTest();
 document.getElementById('capA').onclick = () => captureTest('screen', false);
 document.getElementById('capB').onclick = () => captureTest('frame', false);
+document.getElementById('capC').onclick = () => captureTest('screen', false, true);
 document.getElementById('open').onclick = () => window.spike.openOutDir();
 document.getElementById('copy').onclick = () => navigator.clipboard.writeText(logEl.textContent);
 
@@ -107,6 +121,7 @@ document.getElementById('copy').onclick = () => navigator.clipboard.writeText(lo
   await asrTest();
   await captureTest('screen', true);
   await captureTest('frame', true);
+  await captureTest('screen', false, true);
   log('— Авто-проверка завершена');
   await window.spike.quit();
 })();

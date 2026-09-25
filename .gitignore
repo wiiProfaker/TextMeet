@@ -1,0 +1,20 @@
+node_modules/
+out/
+dist/
+release/
+coverage/
+*.log
+.env
+.env.*
+
+# Модели и записи никогда не попадают в репозиторий
+models/
+samples/
+*.wav
+*.mp3
+*.m4a
+*.ogg
+*.opus
+*.webm
+*.onnx
+*.bin

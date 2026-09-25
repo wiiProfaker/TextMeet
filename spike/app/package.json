@@ -1,0 +1,32 @@
+{
+  "name": "textmeet-spike-app",
+  "productName": "TextMeet Spike",
+  "version": "0.0.1",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "auto": "electron . --auto",
+    "dist:mac": "electron-builder --mac dir --arm64 --publish never"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "^1.13.8"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.textmeet.spike",
+    "asar": false,
+    "files": ["main.js", "preload.js", "worker.js", "index.html", "renderer.js", "package.json"],
+    "mac": {
+      "target": "dir",
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "TextMeet Spike записывает микрофон для проверки.",
+        "NSAudioCaptureUsageDescription": "TextMeet Spike записывает звук компьютера для проверки."
+      }
+    }
+  }
+}

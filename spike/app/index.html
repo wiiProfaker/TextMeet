@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:"
+    />
+    <title>TextMeet Spike</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 16px; }
+      button { margin: 4px 8px 4px 0; padding: 8px 12px; font-size: 14px; }
+      pre { background: #f4f4f4; padding: 12px; white-space: pre-wrap; height: 480px; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <h3>TextMeet — проверка</h3>
+    <p>Для проверки записи включи любое видео со звуком (например, на YouTube) и нажми кнопку записи.</p>
+    <button id="asr">1. Проверить распознавание</button>
+    <button id="capA">2. Запись 10 с — вариант А (через экран)</button>
+    <button id="capB">3. Запись 10 с — вариант Б (без экрана)</button>
+    <button id="open">Открыть папку с записями</button>
+    <button id="copy">Скопировать лог</button>
+    <pre id="log"></pre>
+    <script src="renderer.js"></script>
+  </body>
+</html>

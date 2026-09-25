@@ -1,0 +1,30 @@
+name: spike-mac
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: spike/app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run dist:mac
+      - name: Ad-hoc sign and zip
+        run: |
+          APP="$(find dist -maxdepth 2 -name '*.app' -type d | head -n 1)"
+          echo "App: $APP"
+          find "$APP" \( -name '*.node' -o -name '*.dylib' \) -type f -exec codesign --force --sign - {} \;
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --verbose=2 "$APP"
+          ditto -c -k --keepParent "$APP" TextMeetSpike-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TextMeetSpike-mac
+          path: spike/app/TextMeetSpike-mac.zip

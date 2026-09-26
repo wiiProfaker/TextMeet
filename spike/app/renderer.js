@@ -51,8 +51,23 @@ async function recordTrack(stream, name) {
   return { name, peak, blob: new Blob(chunks, { type: 'audio/webm' }) };
 }
 
-async function captureTest(mode, withTone, restrictOwn = false) {
-  const label = restrictOwn ? 'В (без своего звука)' : mode === 'screen' ? 'А (через экран)' : 'Б (без экрана)';
+const RAW_AUDIO = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: 2,
+};
+
+const VARIANTS = {
+  A: { key: 'A', label: 'А (через экран)', mode: 'screen', audio: true },
+  B: { key: 'B', label: 'Б (без экрана)', mode: 'frame', audio: true },
+  V: { key: 'V', label: 'В (без своего звука)', mode: 'screen', audio: { restrictOwnAudio: true, ...RAW_AUDIO } },
+  G: { key: 'G', label: 'Г (без экрана, без своего звука)', mode: 'frame', audio: { restrictOwnAudio: true, ...RAW_AUDIO } },
+  D: { key: 'D', label: 'Д (без экрана, без обработки)', mode: 'frame', audio: { ...RAW_AUDIO } },
+};
+
+async function captureTest(variant, withTone) {
+  const { key, label, mode, audio } = variant;
   log(`— Запись 10 с, вариант ${label}${withTone ? ', с тестовым тоном' : ''}`);
   await window.spike.setCaptureMode(mode);
 
@@ -67,17 +82,8 @@ async function captureTest(mode, withTone, restrictOwn = false) {
     log(`  FAIL микрофон — ${err.name}: ${err.message}`);
   }
   try {
-    const audioConstraint = restrictOwn
-      ? {
-          restrictOwnAudio: true,
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          channelCount: 2,
-        }
-      : true;
     display = await navigator.mediaDevices.getDisplayMedia({
-      audio: audioConstraint,
+      audio,
       video: { width: 320, height: 240, frameRate: 1 },
     });
     const tracks = display.getAudioTracks();
@@ -99,18 +105,19 @@ async function captureTest(mode, withTone, restrictOwn = false) {
   if (tone) tone.stop();
   for (const stream of [mic, display]) stream?.getTracks().forEach((t) => t.stop());
 
-  const filePrefix = restrictOwn ? 'own-excluded' : mode;
   for (const r of results) {
-    const saved = await window.spike.save(`${filePrefix}-${r.name}-${Date.now()}.webm`, await r.blob.arrayBuffer());
+    const saved = await window.spike.save(`${key}-${r.name}-${Date.now()}.webm`, await r.blob.arrayBuffer());
     const silent = r.peak < 0.001 ? ' — ТИШИНА' : '';
     log(`  ${r.name}: ${Math.round(r.blob.size / 1024)} КБ, пик ${r.peak.toFixed(3)}${silent} → ${saved}`);
   }
 }
 
 document.getElementById('asr').onclick = () => asrTest();
-document.getElementById('capA').onclick = () => captureTest('screen', false);
-document.getElementById('capB').onclick = () => captureTest('frame', false);
-document.getElementById('capC').onclick = () => captureTest('screen', false, true);
+document.getElementById('capA').onclick = () => captureTest(VARIANTS.A, false);
+document.getElementById('capB').onclick = () => captureTest(VARIANTS.B, false);
+document.getElementById('capC').onclick = () => captureTest(VARIANTS.V, false);
+document.getElementById('capD').onclick = () => captureTest(VARIANTS.G, false);
+document.getElementById('capE').onclick = () => captureTest(VARIANTS.D, false);
 document.getElementById('open').onclick = () => window.spike.openOutDir();
 document.getElementById('copy').onclick = () => navigator.clipboard.writeText(logEl.textContent);
 
@@ -119,9 +126,11 @@ document.getElementById('copy').onclick = () => navigator.clipboard.writeText(lo
   log(`Платформа: ${info.platform} ${info.osVersion}; Electron ${info.electron}`);
   if (!info.auto) return;
   await asrTest();
-  await captureTest('screen', true);
-  await captureTest('frame', true);
-  await captureTest('screen', false, true);
+  await captureTest(VARIANTS.A, true);
+  await captureTest(VARIANTS.B, true);
+  await captureTest(VARIANTS.V, false);
+  await captureTest(VARIANTS.G, false);
+  await captureTest(VARIANTS.D, false);
   log('— Авто-проверка завершена');
   await window.spike.quit();
 })();

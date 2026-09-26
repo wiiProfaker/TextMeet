@@ -9,6 +9,7 @@ const logFile = () => path.join(outDir(), 'spike-log.txt');
 
 let win = null;
 let captureMode = 'screen'; // 'screen' — вариант А, 'frame' — вариант Б
+let logQueue = Promise.resolve();
 
 function runAsrTest() {
   return new Promise((resolve) => {
@@ -60,7 +61,7 @@ app.whenReady().then(async () => {
     await fsp.writeFile(file, Buffer.from(bytes));
     return file;
   });
-  ipcMain.handle('log:append', (_e, line) => fsp.appendFile(logFile(), `${line}\n`, 'utf8'));
+  ipcMain.handle('log:append', (_e, line) => (logQueue = logQueue.then(() => fsp.appendFile(logFile(), `${line}\n`, 'utf8'))));
   ipcMain.handle('out:open', () => shell.openPath(outDir()));
   ipcMain.handle('asr:run', () => runAsrTest());
   ipcMain.handle('app:info', () => ({

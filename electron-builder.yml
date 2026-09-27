@@ -1,0 +1,22 @@
+appId: dev.textmeet.app
+productName: TextMeet
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+nsis:
+  oneClick: true
+  perMachine: false
+  artifactName: TextMeet-Setup-${version}.exe
+mac:
+  target: dir
+  identity: null
+  category: public.app-category.productivity
+  extendInfo:
+    NSMicrophoneUsageDescription: TextMeet записывает ваш микрофон во время встречи.
+    NSAudioCaptureUsageDescription: TextMeet записывает звук компьютера во время встречи.

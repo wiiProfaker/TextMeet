@@ -7,6 +7,7 @@ export const MeetingIdSchema = z.string().regex(MEETING_ID_PATTERN);
 export const MeetingSourceSchema = z.enum(['recording', 'import']);
 export const MeetingStatusSchema = z.enum(['recording', 'recorded', 'queued', 'transcribing', 'done', 'error']);
 
+// Новые поля добавляются с .default(...) — иначе все уже записанные встречи станут «повреждёнными».
 export const MeetingSchema = z.object({
   schemaVersion: z.literal(1),
   id: MeetingIdSchema,

@@ -59,8 +59,14 @@ async function appendWithRotation(file: string, line: string, maxBytes: number):
     () => 0,
   );
   if (size > 0 && size + Buffer.byteLength(line) > maxBytes) {
-    await fsp.rm(`${file}.1`, { force: true });
-    await fsp.rename(file, `${file}.1`);
+    // Файл может ненадолго держать антивирус или OneDrive: тогда пишем дальше в тот же файл,
+    // а повернуть журнал попробуем при следующей строке.
+    await rotate(file).catch((err: unknown) => console.error('TextMeet: не удалось повернуть журнал', err));
   }
   await fsp.appendFile(file, line, 'utf8');
+}
+
+async function rotate(file: string): Promise<void> {
+  await fsp.rm(`${file}.1`, { force: true });
+  await fsp.rename(file, `${file}.1`);
 }

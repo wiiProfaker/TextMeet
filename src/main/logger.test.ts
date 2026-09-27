@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -54,6 +54,21 @@ describe('createLogger', () => {
     expect(readFileSync(`${file}.1`, 'utf8')).toContain('первая');
     expect(readFileSync(file, 'utf8')).toContain('вторая');
     expect(readFileSync(file, 'utf8')).not.toContain('первая');
+  });
+
+  it('keeps writing to the same file when rotation fails', async () => {
+    const file = logFile();
+    const logger = createLogger(file, { now: fixedNow, maxBytes: 80 });
+    logger.info('первая строка журнала');
+    await logger.flush();
+    // Место для копии занято непустой папкой — как будто файл держит антивирус.
+    mkdirSync(`${file}.1`);
+    writeFileSync(join(`${file}.1`, 'keep'), 'x');
+    logger.info('вторая строка журнала');
+    await logger.flush();
+    const text = readFileSync(file, 'utf8');
+    expect(text).toContain('первая');
+    expect(text).toContain('вторая');
   });
 
   it('keeps working when the log cannot be written', async () => {

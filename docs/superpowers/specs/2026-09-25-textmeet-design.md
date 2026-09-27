@@ -165,13 +165,30 @@
 ### 5.3 Захват звука
 - **Микрофон:** `getUserMedia` в Recorder window, эхоподавление и шумоподавление браузера **выключены**
   (они портят распознавание и могут «съесть» речь).
-- **Системный звук, Windows:** `getDisplayMedia` + `setDisplayMediaRequestHandler({ audio: 'loopback' })`.
-  Видеодорожка сразу отбрасывается.
-- **Системный звук, macOS:** основной путь — тот же механизм Electron: начиная с Electron 39 Chromium на
-  macOS 14.2+ пишет системный звук через Core Audio Tap (разрешение «Запись системного звука»,
-  ключ `NSAudioCaptureUsageDescription` в Info.plist). **Проверяется на спайке**, т.к. неизвестно,
-  потребует ли источник видео (экрана) разрешение «Запись экрана».
-  Запасной путь — маленький Swift-помощник на Core Audio Taps, который отдаёт PCM в main через stdout.
+- **Системный звук, Windows и macOS — один рецепт** (проверен на спайке, см.
+  [итоги спайка](../spike-results.md), вариант Г):
+  ```js
+  // main
+  session.setDisplayMediaRequestHandler((request, callback) =>
+    callback({ video: request.frame, audio: 'loopback' }));
+  // Recorder window
+  navigator.mediaDevices.getDisplayMedia({
+    video: { width: 320, height: 240, frameRate: 1 },
+    audio: { restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false,
+             autoGainControl: false, channelCount: 2 },
+  });
+  ```
+  Видеодорожка сразу отбрасывается. Источник — `request.frame`, **не экран**: с источником-экраном macOS
+  отвечает AbortError «Invalid capture constraints».
+  - **Windows:** `restrictOwnAudio` включает захват процессов (process loopback, Windows 10 build 20348+ /
+    Windows 11): пишется весь звук, кроме звука самого TextMeet; не зависит от формата устройства вывода
+    (захват всего устройства падал с NotReadableError на гарнитуре 7.1). Уровень зависит от системной громкости.
+  - **macOS:** Chromium пишет системный звук через Core Audio Tap (разрешение «Запись системного звука»,
+    ключ `NSAudioCaptureUsageDescription` в Info.plist). Нужна ли ещё «Запись экрана» — уточняется в Плане 2.
+  - **Самопроверка:** NotReadableError / AbortError из `getDisplayMedia` → понятное сообщение
+    «Не удалось захватить звук компьютера» с причиной; запись микрофона при этом продолжается.
+  - Запасной путь (только если рецепт перестанет работать) — маленький помощник на Core Audio Taps (macOS) /
+    WASAPI (Windows), отдающий PCM в main через stdout.
 - **Запись на диск:** `MediaRecorder` (WebM/Opus) по каждой дорожке, кусок раз в секунду → main дописывает в файл.
   Время старта каждой дорожки фиксируется для выравнивания.
 - **Индикаторы уровня:** `AnalyserNode` → уровни в UI ~15 раз/с.
@@ -197,8 +214,14 @@ interface AsrEngine {
   dispose(): Promise<void>;
 }
 ```
-- GigaAM — `OfflineRecognizer` sherpa-onnx в worker. Какой вариант (e2e_rnnt или e2e_ctc) — решается на спайке
-  по качеству и скорости на записях пользователя.
+- GigaAM — `OfflineRecognizer` sherpa-onnx в worker, вариант **e2e_rnnt** (решение спайка: текст заметно
+  чище e2e_ctc при почти той же скорости, RTF ≈ 0,13 на процессоре).
+- Диаризация — модель отпечатков голоса **eres2net** (`3dspeaker_speech_eres2net_sv_en_voxceleb_16k`):
+  разделяет собеседников заметно лучше titanet. Подсказка числа участников **настойчиво рекомендуется**
+  (диалог после «Стоп»): порог авто-режима не подобран (0,5 дал 58 спикеров на записи с двумя) —
+  подбирается в плане расшифровки.
+- sherpa-onnx внутри Electron: во все вызовы, возвращающие массивы (`readWave`, `vad.front` и т. п.),
+  всегда передавать `enableExternalBuffer = false` — иначе ошибка «External buffers are not allowed».
 - Whisper — `whisper-server` (модель загружается один раз), куски отправляются по HTTP на `127.0.0.1`,
   язык `ru`.
 
@@ -210,7 +233,7 @@ interface AsrEngine {
   - GigaAM v3 e2e — ONNX для sherpa-onnx с Hugging Face (`Smirnov75/GigaAM-v3-sherpa-onnx`, MIT;
     `e2e_rnnt` int8 ≈ 320 МБ). Если источник пропадёт — сами конвертируем из официального
     `salute-developers/GigaAM` скриптами sherpa-onnx.
-  - Silero VAD, pyannote segmentation, модель отпечатков голоса — из релизов sherpa-onnx (десятки МБ).
+  - Silero VAD, pyannote segmentation, модель отпечатков голоса (eres2net) — из релизов sherpa-onnx (десятки МБ).
   - Whisper large-v3-turbo — ggml-модель whisper.cpp (≈ 1,6 ГБ), только если выбран Whisper.
 
 ### 5.6 Хранение данных
@@ -285,13 +308,15 @@ interface AsrEngine {
 
 ## 9. Риски и проверки на старте (спайк)
 
-| # | Риск | Как проверяем | Запасной план |
-|---|---|---|---|
-| 1 | Качество GigaAM e2e + диаризации на реальных встречах | Прогон на записях из `D:\TextMeet-samples`, пользователь оценивает | Настройка порогов, подсказка числа участников; иначе пересмотр модели диаризации |
-| 2 | sherpa-onnx-node внутри Electron (защита памяти V8) | Мини-приложение Electron с распознаванием файла | Вызов готовых CLI-программ sherpa-onnx как дочерних процессов |
-| 3 | Системный звук на macOS 27 через Electron | Тестовая сборка из CI на Mac пользователя | Swift-помощник на Core Audio Taps |
-| 4 | Разрешения macOS сбрасываются у неподписанной сборки после обновления | Проверка при второй установке | Инструкция; при необходимости — постоянная ad-hoc подпись |
-| 5 | Источник моделей GigaAM e2e пропадёт | — | Собственная конвертация из официального репозитория |
+| # | Риск | Как проверяем | Запасной план | Статус |
+|---|---|---|---|---|
+| 1 | Качество GigaAM e2e + диаризации на реальных встречах | Прогон на записях из `D:\TextMeet-samples`, пользователь оценивает | Настройка порогов, подсказка числа участников; иначе пересмотр модели диаризации | закрыт спайком: rnnt + eres2net устраивают при подсказке числа участников; порог авто-режима — открыт |
+| 2 | sherpa-onnx-node внутри Electron (защита памяти V8) | Мини-приложение Electron с распознаванием файла | Вызов готовых CLI-программ sherpa-onnx как дочерних процессов | закрыт спайком: работает с `enableExternalBuffer = false` |
+| 3 | Системный звук на macOS 27 через Electron | Тестовая сборка из CI на Mac пользователя | Swift-помощник на Core Audio Taps | закрыт спайком: вариант Г (§5.3) работает на обеих ОС |
+| 4 | Разрешения macOS сбрасываются у неподписанной сборки после обновления | Проверка при второй установке | Инструкция; при необходимости — постоянная ad-hoc подпись | открыт |
+| 5 | Источник моделей GigaAM e2e пропадёт | — | Собственная конвертация из официального репозитория | открыт |
+
+Подробности: [итоги спайка](../spike-results.md).
 
 ## 10. Порядок работ (крупно)
 

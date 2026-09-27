@@ -17,7 +17,7 @@ export async function readJsonFile<S extends z.ZodType>(file: string, schema: S)
   }
   let raw: unknown;
   try {
-    raw = JSON.parse(text.replace(/^﻿/, ''));
+    raw = JSON.parse(text.replace(/^\uFEFF/, ''));
   } catch (err) {
     return { ok: false, reason: 'invalid-json', message: (err as Error).message };
   }

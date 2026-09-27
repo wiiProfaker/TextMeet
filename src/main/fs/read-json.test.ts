@@ -17,7 +17,7 @@ describe('readJsonFile', () => {
 
   it('accepts a UTF-8 BOM', async () => {
     const file = join(tempDir(), 'a.json');
-    writeFileSync(file, '﻿{"n": 1}');
+    writeFileSync(file, '\uFEFF{"n": 1}');
     expect(await readJsonFile(file, Schema)).toEqual({ ok: true, value: { n: 1 } });
   });
 

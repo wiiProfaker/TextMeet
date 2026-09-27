@@ -24,7 +24,8 @@ export async function writeFileAtomic(
     }
     await renameWithRetry(tmp, file, rename);
   } catch (err) {
-    await fsp.rm(tmp, { force: true });
+    // Уборка — по возможности: если временный файл тоже занят, наружу должна уйти исходная ошибка.
+    await fsp.rm(tmp, { force: true }).catch(() => undefined);
     throw err;
   }
 }

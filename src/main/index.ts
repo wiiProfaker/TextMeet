@@ -3,13 +3,20 @@ import { app, dialog, Menu, type BrowserWindow, type Tray } from 'electron';
 import { currentLaunchAtLoginNotice, startedAtLogin, syncLaunchAtLogin } from './autostart';
 import { registerIpc } from './ipc';
 import { createLogger, type Logger } from './logger';
-import { resolveLibraryDir } from './paths';
+import { DEV_FOLDER_NAME, LIBRARY_FOLDER_NAME, resolveLibraryDir } from './paths';
 import { createSettingsStore } from './settings/settings-store';
 import { createTray } from './tray';
 import { createMainWindow, createRecorderWindow } from './windows';
 
+// Версия для разработки (npm run dev / npm start) иначе делила бы с установленной программой папку данных
+// и блокировку «один экземпляр»: запуск молча уступал бы установленной версии, а тестовые данные попадали
+// бы в настоящие. Поэтому у неё своя папка данных и своя библиотека по умолчанию.
+const isDevRun = !app.isPackaged && !process.env.TEXTMEET_USER_DATA;
+
 // Только для автотестов: отдельные папки данных и «домашняя» папка, чтобы не трогать настоящие.
+// Папка данных задаётся до requestSingleInstanceLock(): блокировка привязана к ней.
 if (process.env.TEXTMEET_USER_DATA) app.setPath('userData', process.env.TEXTMEET_USER_DATA);
+else if (isDevRun) app.setPath('userData', join(app.getPath('appData'), DEV_FOLDER_NAME));
 const homeDir = (): string => process.env.TEXTMEET_HOME ?? app.getPath('home');
 const logFile = (): string => join(app.getPath('userData'), 'logs', 'textmeet.log');
 
@@ -79,7 +86,8 @@ async function start(logger: Logger): Promise<void> {
   registerIpc({
     settings,
     logger,
-    libraryDir: () => resolveLibraryDir(settings.get().libraryDir, homeDir()),
+    libraryDir: () =>
+      resolveLibraryDir(settings.get().libraryDir, homeDir(), isDevRun ? DEV_FOLDER_NAME : LIBRARY_FOLDER_NAME),
     launchAtLoginNotice: currentLaunchAtLoginNotice,
     applyLaunchAtLogin: syncLaunchAtLogin,
     mainContents: () => mainWindow?.webContents ?? null,

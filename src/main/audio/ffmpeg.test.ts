@@ -58,6 +58,14 @@ describe('runFfmpeg', () => {
     );
   });
 
+  it('stops ffmpeg that stays silent too long', async () => {
+    // -stats_period 100: о ходе работы ffmpeg сообщит только через 100 с, -re: читает тон в реальном времени.
+    const args = ['-stats_period', '100', '-re', '-f', 'lavfi', '-i', 'sine=duration=30', '-f', 'null', '-'];
+    const started = Date.now();
+    await expect(runFfmpeg(resolveFfmpegPath(), args, { stallMs: 500 })).rejects.toThrow('ffmpeg завис');
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
   it('rejects when the binary cannot be started', async () => {
     await expect(runFfmpeg(join(makeTempDir(), 'no-ffmpeg.exe'), [])).rejects.toMatchObject({ code: 'ENOENT' });
   });

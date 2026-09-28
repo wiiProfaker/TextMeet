@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { app, Menu, type BrowserWindow, type Tray } from 'electron';
+import { app, dialog, Menu, type BrowserWindow, type Tray } from 'electron';
 import { currentLaunchAtLoginNotice, startedAtLogin, syncLaunchAtLogin } from './autostart';
 import { registerIpc } from './ipc';
 import { createLogger, type Logger } from './logger';
@@ -11,6 +11,7 @@ import { createMainWindow, createRecorderWindow } from './windows';
 // Только для автотестов: отдельные папки данных и «домашняя» папка, чтобы не трогать настоящие.
 if (process.env.TEXTMEET_USER_DATA) app.setPath('userData', process.env.TEXTMEET_USER_DATA);
 const homeDir = (): string => process.env.TEXTMEET_HOME ?? app.getPath('home');
+const logFile = (): string => join(app.getPath('userData'), 'logs', 'textmeet.log');
 
 let quitting = false;
 let mainWindow: BrowserWindow | null = null;
@@ -18,9 +19,20 @@ let recorderWindow: BrowserWindow | null = null;
 // Ссылку на трей держим всё время работы, иначе сборщик мусора уберёт значок.
 let tray: Tray | null = null;
 let recorderReady = false;
+// Второй запуск или щелчок по Dock могут прийти, пока start() ещё не создал окна:
+// тогда просьбу показать окно только запоминаем, иначе появится второе, «чужое» главное окно.
+let windowsCreated = false;
+let showRequested = false;
 
 function openMainWindow(logger: Logger): void {
-  if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createMainWindow(logger, { show: true });
+  if (!windowsCreated) {
+    showRequested = true;
+    return;
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = createMainWindow(logger, { show: true });
+    hideInsteadOfClose(mainWindow);
+  }
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
@@ -31,12 +43,17 @@ function hideInsteadOfClose(win: BrowserWindow): void {
   win.on('close', (event) => {
     if (quitting) return;
     event.preventDefault();
+    // macOS: окно во весь экран, спрятанное сразу, оставляет пустой чёрный экран — сначала выходим из полноэкранного режима.
+    if (win.isFullScreen()) {
+      win.once('leave-full-screen', () => win.hide());
+      win.setFullScreen(false);
+      return;
+    }
     win.hide();
   });
 }
 
-async function start(): Promise<void> {
-  const logger = createLogger(join(app.getPath('userData'), 'logs', 'textmeet.log'));
+async function start(logger: Logger): Promise<void> {
   process.on('uncaughtException', (err) => logger.error('Необработанная ошибка', err));
   process.on('unhandledRejection', (reason) => logger.error('Необработанный отказ промиса', reason));
 
@@ -70,7 +87,7 @@ async function start(): Promise<void> {
     appInfo: () => ({
       version: app.getVersion(),
       platform: process.platform,
-      logFile: join(app.getPath('userData'), 'logs', 'textmeet.log'),
+      logFile: logFile(),
       recorderReady,
     }),
     onRecorderReady: () => {
@@ -81,17 +98,28 @@ async function start(): Promise<void> {
 
   recorderWindow = createRecorderWindow(logger);
   hideInsteadOfClose(recorderWindow);
-  mainWindow = createMainWindow(logger, { show: !startedAtLogin() });
+  mainWindow = createMainWindow(logger, { show: showRequested || !startedAtLogin() });
   hideInsteadOfClose(mainWindow);
+  windowsCreated = true;
   tray = createTray({ openWindow: () => openMainWindow(logger), quit: () => app.quit() });
   logger.info(`TextMeet ${app.getVersion()} запущен (${process.platform})`);
 }
 
+/** Сбой запуска не должен быть молчаливым: пишем в журнал и показываем окно с путём к нему. */
+async function reportStartupFailure(logger: Logger, err: unknown): Promise<void> {
+  logger.error('Не удалось запуститься', err);
+  await logger.flush();
+  dialog.showErrorBox(
+    'TextMeet не запустился',
+    `Подробности — в журнале ошибок:\n${logFile()}\n\n${err instanceof Error ? err.message : String(err)}`,
+  );
+}
+
 if (app.requestSingleInstanceLock()) {
-  start().catch((err: unknown) => {
-    console.error('TextMeet: не удалось запуститься', err);
-    app.exit(1);
-  });
+  // Журнал создаём до start(): иначе ошибку самого запуска некуда записать.
+  const logger = createLogger(logFile());
+  start(logger)
+    .catch((err: unknown) => reportStartupFailure(logger, err).finally(() => app.exit(1)));
 } else {
   // Программа уже запущена — она сама покажет окно по событию second-instance.
   app.exit(0);

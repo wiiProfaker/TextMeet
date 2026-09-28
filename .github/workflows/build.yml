@@ -5,8 +5,13 @@ on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    # Минуты закрытого репозитория ограничены, а macOS считается с множителем — зависшая сборка не должна их съесть.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

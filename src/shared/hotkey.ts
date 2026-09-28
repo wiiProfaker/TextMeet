@@ -92,7 +92,7 @@ export function needsModifierMessage(platform: string): string {
 
 export function shiftOnlyMessage(platform: string): string {
   return (
-    'Shift с клавишей — это просто заглавная буква или знак, печатать их станет нельзя. ' +
+    'Shift с этой клавишей нужен для обычной работы — заглавные буквы, знаки, выделение текста. ' +
     `Добавьте ${modifierWords(platform)}.`
   );
 }

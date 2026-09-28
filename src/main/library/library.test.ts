@@ -1,11 +1,20 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { Meeting } from '../../shared/meeting';
-import { createMeeting, listMeetings, meetingDir, readMeeting, saveMeeting } from './library';
+import {
+  audioDir,
+  createMeeting,
+  listMeetings,
+  meetingDir,
+  readMeeting,
+  removeMeetingDir,
+  saveMeeting,
+  updateMeeting,
+} from './library';
+import { makeTempDir } from '../../test-support/temp-dir';
 
-const tempLibrary = () => join(mkdtempSync(join(tmpdir(), 'textmeet-lib-')), 'library');
+const tempLibrary = () => join(makeTempDir('textmeet-lib-'), 'library');
 const at = new Date(2026, 8, 25, 14, 30);
 const suffixes = (...values: string[]) => {
   const queue = [...values];
@@ -60,6 +69,14 @@ describe('createMeeting', () => {
       randomSuffix: suffixes('aaaaaa', 'bbbbbb'),
     });
     expect(meeting.id).toBe('2026-09-25_1430_bbbbbb');
+  });
+
+  it('removes the half-created folder when creation fails', async () => {
+    const lib = tempLibrary();
+    await expect(
+      createMeeting(lib, { source: 'recording', status: 'recording', title: '   ', now: at, randomSuffix: suffixes('a1b2c3') }),
+    ).rejects.toThrow();
+    expect(existsSync(join(lib, '2026-09-25_1430_a1b2c3'))).toBe(false);
   });
 
   it('gives up after repeated collisions', async () => {
@@ -122,8 +139,16 @@ describe('listMeetings', () => {
       '2026-09-22_1200_cccccc',
       older.id,
     ]);
-    expect(list[1]).toEqual({ kind: 'broken', id: '2026-09-23_1200_dddddd', reason: 'нет файла meeting.json' });
+    expect(list[0]).toMatchObject({ kind: 'ok', mixReady: false });
+    expect(list[1]).toEqual({ kind: 'creating', id: '2026-09-23_1200_dddddd' });
     expect(list[2]).toMatchObject({ kind: 'broken', id: '2026-09-22_1200_cccccc' });
+  });
+
+  it('reports whether the listening mix is ready', async () => {
+    const lib = tempLibrary();
+    const meeting = await createMeeting(lib, { source: 'recording', status: 'recorded', now: at });
+    writeFileSync(join(audioDir(lib, meeting.id), 'mix.opus'), 'x');
+    expect(await listMeetings(lib)).toEqual([{ kind: 'ok', meeting, mixReady: true }]);
   });
 
   it('marks a meeting whose id does not match its folder', async () => {
@@ -143,5 +168,47 @@ describe('listMeetings', () => {
     mkdirSync(join(lib, '2026-09-26_1000_ffffff', 'meeting.json'), { recursive: true });
     const list = await listMeetings(lib);
     expect(list[0]).toMatchObject({ kind: 'broken', id: '2026-09-26_1000_ffffff' });
+  });
+});
+
+describe('updateMeeting', () => {
+  it('keeps fields written by a newer version of the app', async () => {
+    const lib = tempLibrary();
+    const meeting = await createMeeting(lib, { source: 'recording', status: 'recording', now: at });
+    const file = join(meetingDir(lib, meeting.id), 'meeting.json');
+    writeFileSync(file, JSON.stringify({ ...meeting, futureField: { keep: true } }));
+
+    const updated = await updateMeeting(lib, meeting.id, (m) => ({ ...m, status: 'recorded' }));
+
+    expect(updated.status).toBe('recorded');
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toMatchObject({ status: 'recorded', futureField: { keep: true } });
+  });
+
+  it('applies concurrent changes of one meeting in order without losing any', async () => {
+    const lib = tempLibrary();
+    const meeting = await createMeeting(lib, { source: 'recording', status: 'recording', now: at });
+    await Promise.all([
+      updateMeeting(lib, meeting.id, (m) => ({ ...m, title: 'Планёрка' })),
+      updateMeeting(lib, meeting.id, (m) => ({ ...m, durationSec: 90 })),
+      updateMeeting(lib, meeting.id, (m) => ({ ...m, participantsHint: 3 })),
+    ]);
+    expect(await readMeeting(lib, meeting.id)).toMatchObject({ title: 'Планёрка', durationSec: 90, participantsHint: 3 });
+  });
+
+  it('reports a failed change and keeps serving the next ones', async () => {
+    const lib = tempLibrary();
+    const meeting = await createMeeting(lib, { source: 'recording', status: 'recording', now: at });
+    await expect(updateMeeting(lib, meeting.id, (m) => ({ ...m, title: '' }))).rejects.toThrow();
+    await expect(updateMeeting(lib, meeting.id, (m) => ({ ...m, title: 'Ок' }))).resolves.toMatchObject({ title: 'Ок' });
+  });
+});
+
+describe('removeMeetingDir', () => {
+  it('removes the meeting folder and refuses bad ids', async () => {
+    const lib = tempLibrary();
+    const meeting = await createMeeting(lib, { source: 'recording', status: 'recording', now: at });
+    await removeMeetingDir(lib, meeting.id);
+    expect(existsSync(meetingDir(lib, meeting.id))).toBe(false);
+    await expect(removeMeetingDir(lib, '..')).rejects.toThrow(RangeError);
   });
 });

@@ -22,8 +22,9 @@ export function registerIpc(deps: IpcDeps): void {
   /** Каналы главного окна отвечают только главному окну; ошибки пишутся в журнал и уходят в окно. */
   const handleFromMain = <T>(channel: string, handler: (event: IpcMainInvokeEvent, arg: unknown) => Promise<T> | T) => {
     ipcMain.handle(channel, async (event, arg: unknown) => {
-      if (event.sender !== deps.mainContents()) throw new Error(`IPC ${channel}: запрос не из главного окна`);
       try {
+        // Проверка внутри try — чтобы отказ «чужому» окну тоже попал в журнал.
+        if (event.sender !== deps.mainContents()) throw new Error(`IPC ${channel}: запрос не из главного окна`);
         return await handler(event, arg);
       } catch (err) {
         deps.logger.error(`IPC ${channel} завершился ошибкой`, err);
@@ -76,5 +77,6 @@ export function registerIpc(deps: IpcDeps): void {
 
   ipcMain.on(IPC.recorderReady, (event) => {
     if (event.sender === deps.recorderContents()) deps.onRecorderReady();
+    else deps.logger.warn(`IPC ${IPC.recorderReady}: сообщение не из окна записи`);
   });
 }

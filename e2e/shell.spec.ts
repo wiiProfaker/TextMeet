@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { launchApp, type LaunchedApp } from './helpers';
+import { launchApp, recorderWindow, type LaunchedApp } from './helpers';
 
 let launched: LaunchedApp | null = null;
 
@@ -28,4 +28,10 @@ test('closing the window hides it to the tray; the recorder window stays hidden 
   });
 
   await expect.poll(windowStates).toEqual(['TextMeet — запись: скрыто', 'TextMeet: скрыто']);
+});
+
+test('the recorder window cannot use the main window API', async () => {
+  launched = await launchApp();
+  const recorder = await recorderWindow(launched.app);
+  await expect(recorder.evaluate(() => window.textmeet.getSettings())).rejects.toThrow('не из главного окна');
 });

@@ -44,10 +44,18 @@ export function meetingJson(id: string, overrides: Record<string, unknown> = {})
   };
 }
 
+async function windowByPage(app: ElectronApplication, pagePath: string): Promise<Page> {
+  const matches = (page: Page) => page.url().includes(pagePath);
+  return app.windows().find(matches) ?? (await app.waitForEvent('window', { predicate: matches }));
+}
+
 /** Главное окно ищем по адресу: скрытое окно записи может открыться раньше. */
-export async function mainWindow(app: ElectronApplication): Promise<Page> {
-  const isMain = (page: Page) => page.url().includes('/main/index.html');
-  return app.windows().find(isMain) ?? (await app.waitForEvent('window', { predicate: isMain }));
+export function mainWindow(app: ElectronApplication): Promise<Page> {
+  return windowByPage(app, '/main/index.html');
+}
+
+export function recorderWindow(app: ElectronApplication): Promise<Page> {
+  return windowByPage(app, '/recorder/index.html');
 }
 
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
@@ -67,11 +75,20 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     await writeFile(join(libraryDir, meeting.id, 'meeting.json'), serialize(meeting.json));
   }
 
-  const app = await electron.launch({
-    args: ['.'],
-    env: { ...process.env, TEXTMEET_USER_DATA: userDataDir, TEXTMEET_HOME: homeDir },
-  });
-  const page = await mainWindow(app);
+  let app: ElectronApplication | undefined;
+  let page: Page;
+  try {
+    app = await electron.launch({
+      args: ['.'],
+      env: { ...process.env, TEXTMEET_USER_DATA: userDataDir, TEXTMEET_HOME: homeDir },
+    });
+    page = await mainWindow(app);
+  } catch (err) {
+    // Запуск не удался — не оставляем за собой ни процесс, ни временные папки.
+    await app?.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+    throw err;
+  }
   return {
     app,
     page,

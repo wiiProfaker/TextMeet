@@ -109,12 +109,16 @@ interface Session {
   pendingEnded: TrackKind[];
   /** Окно записи упало во время остановки: последние куски могли не дойти. */
   interrupted: boolean;
+  /** Диск отказал, пока запись ещё начиналась: остановить сразу, как только она пойдёт. */
+  diskError: boolean;
   startedAt: number;
   silence: SilenceWatch;
   systemSilence: SystemSilenceWatch;
   lowDisk: LowDiskWatch;
   diskTimer: ReturnType<typeof setInterval> | null;
   started: Deferred<StartProblem | null>;
+  /** Идущее открытие файлов после «началось» (не отклоняется): старт, от которого отказались, дожидается его. */
+  accepting: Promise<void> | null;
   stopped: Deferred<void>;
 }
 
@@ -168,9 +172,11 @@ export class RecordingController {
 
   stop(reason: StopReason = 'user'): Promise<void> {
     if (this.state.phase !== 'recording') return this.busy;
+    const session = this.session;
     this.busy = this.runStop(reason).catch((err: unknown) => {
       this.deps.logger.error('Не удалось корректно остановить запись', err);
-      this.resetToIdle(null);
+      this.resetToIdle(session, null);
+      this.saveFailed(err);
     });
     return this.busy;
   }
@@ -186,7 +192,7 @@ export class RecordingController {
   onStarted(message: RecorderStarted): void {
     const session = this.sessionFor(message.meetingId);
     if (!session || this.state.phase !== 'starting') return;
-    this.acceptStarted(session, message).catch((err: unknown) => {
+    session.accepting = this.acceptStarted(session, message).catch((err: unknown) => {
       this.deps.logger.error('Не удалось открыть файлы дорожек', err);
       session.started.resolve({ message: humanFsError('Не удалось начать запись', err).message, settings: null });
     });
@@ -256,9 +262,12 @@ export class RecordingController {
       return;
     }
     if (this.state.phase !== 'recording') return;
+    // Сразу «останавливается»: клавиша или ошибка диска не должны запустить вторую остановку этой же записи.
+    this.update({ phase: 'stopping' });
     this.busy = this.finishInterrupted(session).catch((err: unknown) => {
       this.deps.logger.error('Не удалось сохранить прерванную запись', err);
-      this.resetToIdle(null);
+      this.resetToIdle(session, null);
+      this.saveFailed(err);
     });
   }
 
@@ -289,30 +298,42 @@ export class RecordingController {
       pendingChunks: [],
       pendingEnded: [],
       interrupted: false,
+      diskError: false,
       startedAt: this.deps.now(),
       silence: new SilenceWatch(this.deps.now()),
       systemSilence: new SystemSilenceWatch(this.deps.now()),
       lowDisk: new LowDiskWatch(),
       diskTimer: null,
       started: deferred(),
+      accepting: null,
       stopped: deferred(),
     };
     this.session = session;
     this.update({ meetingId: meeting.id, freeBytes: free });
     this.deps.libraryChanged();
 
-    if (this.deps.settings().recordSounds) this.deps.recorder.playSound('start');
-    this.deps.recorder.start({
-      meetingId: meeting.id,
-      micDeviceId: this.deps.settings().microphoneId,
-      systemAudio: session.systemRequested,
-    });
+    // Окно записи могло перезапуститься, пока висели окно «Мало места» или запрос доступа к микрофону:
+    // тогда команду не отправляем, а пустая встреча убирается как при любом несостоявшемся старте.
+    if (!this.deps.recorder.isReady()) {
+      session.started.resolve(RECORDER_NOT_READY);
+    } else {
+      if (this.deps.settings().recordSounds) this.deps.recorder.playSound('start');
+      this.deps.recorder.start({
+        meetingId: meeting.id,
+        micDeviceId: this.deps.settings().microphoneId,
+        systemAudio: session.systemRequested,
+      });
+    }
 
     const problem = await within(session.started.promise, this.deps.timeouts?.startMs ?? START_TIMEOUT_MS, RECORDER_TIMEOUT);
     if (problem) {
-      this.deps.recorder.stop();
-      await session.files?.close();
+      // Сразу отвязать запись: поздние сообщения окна игнорируются, а acceptStarted видит, что от старта отказались.
       this.session = null;
+      this.clearTimers(session);
+      this.deps.recorder.stop();
+      // Файлы могли открыться уже после отказа — закрыть их до удаления папки.
+      await session.accepting;
+      await session.files?.close();
       await removeMeetingDir(libraryDir, meeting.id).catch((err: unknown) =>
         this.deps.logger.error(`Не удалось удалить папку несостоявшейся записи ${meeting.id}`, err),
       );
@@ -334,10 +355,13 @@ export class RecordingController {
       tracks.map((t) => t.kind),
       (err) => this.onDiskError(err),
     );
+    // Запоминаем файлы и при отказе от старта: runStart закроет их.
     session.files = files;
+    if (!this.isStarting(session)) return;
     for (const chunk of session.pendingChunks.splice(0)) files.append(chunk.kind, chunk.bytes);
     // Дорожки и сдвиги — сразу в meeting.json: после сбоя по ним восстановится запись.
     session.meeting = await updateMeeting(libraryDir, session.meeting.id, (m) => ({ ...m, tracks }));
+    if (!this.isStarting(session)) return;
 
     const now = this.deps.now();
     session.startedAt = now;
@@ -358,6 +382,11 @@ export class RecordingController {
     this.deps.notify(notificationTexts.started(this.deps.hotkeyLabel()), true);
     this.deps.logger.info(`Запись началась: ${session.meeting.id} (${tracks.map((t) => t.kind).join(', ')})`);
     session.started.resolve(null);
+    // Во время старта stop() ничего не делает — остановка по ошибке диска откладывалась до этого места.
+    if (session.diskError) {
+      void this.stop('disk');
+      return;
+    }
     for (const kind of session.pendingEnded.splice(0)) this.onTrackEnded({ meetingId: session.meeting.id, kind });
   }
 
@@ -367,7 +396,11 @@ export class RecordingController {
     this.update({ phase: 'stopping' });
     this.clearTimers(session);
     this.deps.recorder.stop();
-    await within(session.stopped.promise, this.deps.timeouts?.stopMs ?? STOP_TIMEOUT_MS, undefined);
+    const stopMs = this.deps.timeouts?.stopMs ?? STOP_TIMEOUT_MS;
+    const confirmed = await within(session.stopped.promise.then(() => true), stopMs, false);
+    if (!confirmed) {
+      this.deps.logger.warn(`Окно записи не подтвердило остановку за ${stopMs} мс: конец звука мог не сохраниться`);
+    }
     await session.files?.close();
 
     const libraryDir = this.deps.libraryDir();
@@ -383,12 +416,12 @@ export class RecordingController {
     this.deps.logger.info(`Запись остановлена: ${meeting.id}, ${durationSec} с (${reason})`);
 
     if (reason === 'quit') {
-      this.resetToIdle(null);
+      this.resetToIdle(session, null);
     } else {
       if (session.interrupted) this.deps.notify(notificationTexts.interrupted());
       else if (reason === 'user') this.deps.notify(notificationTexts.stopped(durationSec), true);
       if (reason === 'mic-ended') this.deps.notify(notificationTexts.micEnded());
-      this.resetToIdle({ meetingId: meeting.id, title: meeting.title, durationSec });
+      this.resetToIdle(session, { meetingId: meeting.id, title: meeting.title, durationSec });
       this.deps.showMainWindow();
     }
     this.deps.libraryChanged();
@@ -400,14 +433,22 @@ export class RecordingController {
     const meeting = await finalizeInterrupted(this.deps.libraryDir(), session.meeting.id);
     this.deps.enqueueMix(meeting.id);
     this.deps.notify(notificationTexts.interrupted());
-    this.resetToIdle(null);
+    this.resetToIdle(session, null);
     this.deps.libraryChanged();
   }
 
   private onDiskError(err: unknown): void {
     this.deps.logger.error('Не удалось записать кусок дорожки на диск', err);
     this.deps.notify(notificationTexts.stoppedByDisk(fsErrorReason(err)));
-    void this.stop('disk');
+    // Куски, пришедшие до открытия файлов, пишутся ещё во время старта: остановить можно, только когда запись пойдёт.
+    if (this.state.phase === 'starting' && this.session) this.session.diskError = true;
+    else void this.stop('disk');
+  }
+
+  /** meeting.json не обновился: встреча пока числится «идёт запись», её исправит восстановление при запуске. */
+  private saveFailed(err: unknown): void {
+    this.deps.notify(notificationTexts.saveFailed(fsErrorReason(err)));
+    this.deps.libraryChanged();
   }
 
   private async checkDisk(session: Session): Promise<void> {
@@ -427,8 +468,12 @@ export class RecordingController {
     this.deps.notify(notificationTexts.startFailed(problem), true);
   }
 
-  /** После каждой записи переключатель «Звук компьютера» снова включён. */
-  private resetToIdle(stopDialog: RecordingState['stopDialog']): void {
+  /**
+   * После каждой записи переключатель «Звук компьютера» снова включён.
+   * session — запись, которую завершаем: запоздавшая остановка старой записи не должна сбросить новую.
+   */
+  private resetToIdle(session: Session | null, stopDialog: RecordingState['stopDialog']): void {
+    if (this.session !== session) return;
     if (this.session) this.clearTimers(this.session);
     this.session = null;
     this.update({ ...IDLE_RECORDING_STATE, stopDialog: stopDialog ?? this.state.stopDialog });
@@ -437,6 +482,11 @@ export class RecordingController {
   private clearTimers(session: Session): void {
     if (session.diskTimer) clearInterval(session.diskTimer);
     session.diskTimer = null;
+  }
+
+  /** Старт этой записи ещё идёт: пока открывались файлы, его могли прервать таймаут или сбой окна. */
+  private isStarting(session: Session): boolean {
+    return this.session === session && this.state.phase === 'starting';
   }
 
   private sessionFor(meetingId: string): Session | null {

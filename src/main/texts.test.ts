@@ -34,6 +34,13 @@ describe('notificationTexts', () => {
     expect(notificationTexts.interrupted().title).toBe('Запись прервалась');
     expect(notificationTexts.micEnded().body).toContain('Микрофон отключился');
   });
+
+  it('explains a recording whose details could not be saved', () => {
+    expect(notificationTexts.saveFailed('на диске закончилось место')).toEqual({
+      title: 'Запись остановлена',
+      body: 'Не удалось сохранить сведения о записи: на диске закончилось место. Звук сохранён — встреча восстановится при следующем запуске TextMeet.',
+    });
+  });
 });
 
 describe('dialogTexts', () => {

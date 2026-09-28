@@ -17,6 +17,8 @@ import { defaultMeetingTitle, makeMeetingId, randomMeetingSuffix } from './namin
 export const MEETING_FILE = 'meeting.json';
 export const AUDIO_DIR = 'audio';
 const MAX_ID_ATTEMPTS = 3;
+// OneDrive и антивирус иногда ненадолго держат только что закрытый файл — удаление папки повторяем.
+const REMOVE_DIR_OPTIONS = { recursive: true, force: true, maxRetries: 4, retryDelay: 100 } as const;
 
 /** Путь к папке встречи. id проверяется, чтобы из IPC нельзя было выйти за пределы библиотеки. */
 export function meetingDir(libraryDir: string, id: string): string {
@@ -69,7 +71,7 @@ export async function createMeeting(libraryDir: string, input: NewMeeting): Prom
       return meeting;
     } catch (err) {
       // Не оставляем полусозданную папку: в списке она висела бы «создаётся» навсегда.
-      await fsp.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      await fsp.rm(dir, REMOVE_DIR_OPTIONS).catch(() => undefined);
       throw err;
     }
   }
@@ -77,7 +79,7 @@ export async function createMeeting(libraryDir: string, input: NewMeeting): Prom
 
 /** Удаляет папку встречи целиком (например, запись не началась — в ней ничего нет). */
 export async function removeMeetingDir(libraryDir: string, id: string): Promise<void> {
-  await fsp.rm(meetingDir(libraryDir, id), { recursive: true, force: true });
+  await fsp.rm(meetingDir(libraryDir, id), REMOVE_DIR_OPTIONS);
 }
 
 export async function readMeeting(libraryDir: string, id: string): Promise<Meeting> {

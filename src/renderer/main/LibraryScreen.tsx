@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MeetingListEntry } from '../../shared/meeting';
 import { errorText } from './errors';
 import { formatDuration, formatMeetingDate, statusLabel } from './format';
@@ -10,12 +10,18 @@ export function LibraryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // Перечитывания могут наложиться (повторный фокус окна) — показываем только ответ на последний запрос.
+  const latestRequest = useRef(0);
+
   const reload = useCallback(async () => {
+    const request = ++latestRequest.current;
     try {
-      setEntries(await window.textmeet.listMeetings());
+      const list = await window.textmeet.listMeetings();
+      if (request !== latestRequest.current) return;
+      setEntries(list);
       setError(null);
     } catch (err) {
-      setError(errorText(err));
+      if (request === latestRequest.current) setError(errorText(err));
     }
   }, []);
 

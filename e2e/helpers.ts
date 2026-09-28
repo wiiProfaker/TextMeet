@@ -25,6 +25,9 @@ export interface LaunchedApp {
   close(): Promise<void>;
 }
 
+// Меньше тайм-аута теста (30 с): если окно не появилось, уборка в launchApp ещё успеет выполниться.
+const WINDOW_TIMEOUT_MS = 15_000;
+
 const serialize = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value, null, 2));
 
 export function meetingJson(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -46,7 +49,10 @@ export function meetingJson(id: string, overrides: Record<string, unknown> = {})
 
 async function windowByPage(app: ElectronApplication, pagePath: string): Promise<Page> {
   const matches = (page: Page) => page.url().includes(pagePath);
-  return app.windows().find(matches) ?? (await app.waitForEvent('window', { predicate: matches }));
+  return (
+    app.windows().find(matches) ??
+    (await app.waitForEvent('window', { predicate: matches, timeout: WINDOW_TIMEOUT_MS }))
+  );
 }
 
 /** Главное окно ищем по адресу: скрытое окно записи может открыться раньше. */

@@ -18,3 +18,7 @@ samples/
 *.webm
 *.onnx
 *.bin
+
+# Результаты Playwright
+test-results/
+playwright-report/

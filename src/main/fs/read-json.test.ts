@@ -1,12 +1,12 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { readJsonFile } from './read-json';
+import { makeTempDir } from '../../test-support/temp-dir';
 
 const Schema = z.object({ n: z.number() });
-const tempDir = () => mkdtempSync(join(tmpdir(), 'textmeet-readjson-'));
+const tempDir = () => makeTempDir('textmeet-readjson-');
 
 describe('readJsonFile', () => {
   it('returns the parsed value', async () => {

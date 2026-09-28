@@ -1,11 +1,11 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createLogger, describeError, formatLogLine } from './logger';
+import { makeTempDir } from '../test-support/temp-dir';
 
 const fixedNow = () => new Date('2026-09-27T10:00:00.000Z');
-const logFile = () => join(mkdtempSync(join(tmpdir(), 'textmeet-log-')), 'logs', 'textmeet.log');
+const logFile = () => join(makeTempDir('textmeet-log-'), 'logs', 'textmeet.log');
 
 describe('formatLogLine', () => {
   it('formats time, level and message', () => {
@@ -72,7 +72,7 @@ describe('createLogger', () => {
   });
 
   it('keeps working when the log cannot be written', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'textmeet-log-'));
+    const dir = makeTempDir('textmeet-log-');
     // Путь проходит «через» файл — mkdir упадёт, логгер должен проглотить ошибку.
     const blocker = join(dir, 'blocker');
     const logger = createLogger(blocker, { now: fixedNow });

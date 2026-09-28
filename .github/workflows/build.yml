@@ -1,0 +1,57 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: TextMeet-windows
+          - os: macos-latest
+            artifact: TextMeet-mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright test
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: npx electron-builder --win --publish never
+
+      - name: Package (macOS, ad-hoc signed .dmg)
+        if: runner.os == 'macOS'
+        run: |
+          npx electron-builder --mac dir --arm64 --publish never
+          APP="$(find release -maxdepth 2 -name 'TextMeet.app' -type d | head -n 1)"
+          echo "App: $APP"
+          # Неподписанное arm64-приложение macOS не запускает — подписываем ad-hoc, как в спайке.
+          find "$APP" \( -name '*.node' -o -name '*.dylib' \) -type f -exec codesign --force --sign - {} \;
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --verbose=2 "$APP"
+          mkdir -p dmg
+          ditto "$APP" dmg/TextMeet.app
+          ln -s /Applications dmg/Applications
+          VERSION="$(node -p "require('./package.json').version")"
+          hdiutil create -volname TextMeet -srcfolder dmg -ov -format UDZO "release/TextMeet-$VERSION-arm64.dmg"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            release/*.exe
+            release/*.dmg
+          if-no-files-found: error

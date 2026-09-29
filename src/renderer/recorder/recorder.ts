@@ -35,7 +35,14 @@ async function start(command: RecorderStartCommand): Promise<void> {
       },
       testSystemAudio,
     );
-    const meter = new LevelMeter(capture.streams);
+    let meter: LevelMeter;
+    try {
+      meter = new LevelMeter(capture.streams);
+    } catch (err) {
+      // Устройства уже включены — выключаем, иначе микрофон остался бы занятым до перезапуска.
+      await capture.stop().catch(() => undefined);
+      throw err;
+    }
     const timer = setInterval(() => window.recorder.peaks({ meetingId, ...meter.peaks() }), PEAKS_INTERVAL_MS);
     session = { meetingId, capture, meter, timer };
     window.recorder.started({
@@ -54,9 +61,13 @@ async function stop(): Promise<void> {
   if (!current) return;
   session = null;
   clearInterval(current.timer);
-  await current.capture.stop();
-  await current.meter.close().catch(() => undefined);
-  window.recorder.stopped({ meetingId: current.meetingId });
+  try {
+    await current.capture.stop();
+    await current.meter.close().catch(() => undefined);
+  } finally {
+    // main ждёт «остановлено», чтобы дописать файлы, — сообщаем и после ошибки.
+    window.recorder.stopped({ meetingId: current.meetingId });
+  }
 }
 
 window.recorder.onStart((command) => enqueue(() => start(command)));

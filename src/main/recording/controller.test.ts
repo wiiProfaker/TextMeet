@@ -705,6 +705,31 @@ describe('RecordingController — crashes and quitting', () => {
     await quitting;
     expect(h.state().phase).toBe('idle');
   });
+
+  it('waits for a stop that began on its own while quitting', async () => {
+    const h = harness({
+      openTracks: async (_dir, _kinds, onError) => ({
+        append: () => onError(Object.assign(new Error('io'), { code: 'EIO' })),
+        close: async () => undefined,
+        bytesWritten: () => 0,
+      }),
+    });
+    const { command } = await h.begin();
+    h.controller.lockForQuit();
+    const quitting = h.controller.stopForQuit();
+    h.controller.onChunk(command.meetingId, 'mic', bytes(1));
+    h.controller.onStarted({ meetingId: command.meetingId, tracks: [{ kind: 'mic', startedAt: 1 }], micLabel: 'Mic', systemFailure: null });
+    await vi.waitFor(() => expect(h.recorder.stop).toHaveBeenCalled());
+    let finished = false;
+    void quitting.then(() => {
+      finished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finished).toBe(false);
+    h.controller.onStopped({ meetingId: command.meetingId });
+    await quitting;
+    expect(h.state().phase).toBe('idle');
+  });
 });
 
 describe('RecordingController — stop dialog', () => {

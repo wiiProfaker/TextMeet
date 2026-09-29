@@ -56,7 +56,9 @@ const Bytes = z
   .custom<ArrayBuffer | Uint8Array>((v) => v instanceof ArrayBuffer || v instanceof Uint8Array)
   .refine((v) => v.byteLength <= MAX_CHUNK_BYTES, `кусок дорожки больше ${MAX_CHUNK_BYTES} байт`);
 const LIBRARY_LOCKED = 'Во время записи папку библиотеки менять нельзя.';
-const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
+// Ответ в окне «Запись остановлена» сохраняется в папку текущей библиотеки — до него папку не меняем.
+const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запись остановлена».';
+const MEETING_DIR_MISSING ='Папка встречи не найдена — возможно, её удалили.';
 
 const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
@@ -167,6 +169,7 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.chooseLibraryDir, async (_arg, event) => {
     if (deps.controller.getState().phase !== 'idle') throw new Error(LIBRARY_LOCKED);
+    if (deps.controller.getState().stopDialog) throw new Error(STOP_DIALOG_OPEN);
     const owner = BrowserWindow.fromWebContents(event.sender);
     const options: Electron.OpenDialogOptions = {
       title: 'Папка библиотеки TextMeet',
@@ -178,6 +181,7 @@ export function registerIpc(deps: IpcDeps): void {
     if (result.canceled || !picked) return settingsState();
     // Пока было открыто окно выбора, запись могли начать клавишей или из трея.
     if (deps.controller.getState().phase !== 'idle') throw new Error(LIBRARY_LOCKED);
+    if (deps.controller.getState().stopDialog) throw new Error(STOP_DIALOG_OPEN);
     await deps.settings.update({ libraryDir: picked });
     return settingsState();
   });

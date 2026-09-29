@@ -203,8 +203,14 @@ export class RecordingController {
 
   /** Перед выходом: дождаться начала, если оно идёт, и остановить без вопросов и окон. */
   async stopForQuit(): Promise<void> {
-    await this.busy;
-    if (this.state.phase === 'recording') await this.stop('quit');
+    // Пока ждём, могла начаться своя остановка (ошибка диска, сбой окна записи) — ждём и её.
+    // Цикл конечен: после lockForQuit новые записи не начинаются.
+    for (;;) {
+      const pending = this.busy;
+      await pending;
+      if (this.state.phase === 'recording') await this.stop('quit');
+      else if (this.busy === pending) return;
+    }
   }
 
   // ---- Сообщения окна записи ----

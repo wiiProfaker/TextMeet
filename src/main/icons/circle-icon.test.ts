@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { drawCircleIcon } from './circle-icon';
+import { drawCircleIcon, drawRecordingIcon, RECORDING_RED } from './circle-icon';
 
 const alphaAt = (pixels: Uint8Array, size: number, x: number, y: number): number => pixels[(y * size + x) * 4 + 3]!;
 
@@ -23,5 +23,29 @@ describe('drawCircleIcon', () => {
     expect(alphaAt(pixels, 32, 16, 16)).toBe(0);
     expect(alphaAt(pixels, 32, 3, 16)).toBe(255);
     expect(alphaAt(pixels, 32, 0, 0)).toBe(0);
+  });
+});
+
+describe('drawRecordingIcon', () => {
+  const blue = { r: 59, g: 130, b: 246 };
+  const rgbaAt = (pixels: Uint8Array, size: number, x: number, y: number) => [...pixels.subarray((y * size + x) * 4, (y * size + x) * 4 + 4)];
+
+  it('puts an opaque red dot in the lower right corner', () => {
+    const pixels = drawRecordingIcon(32, blue);
+    expect(rgbaAt(pixels, 32, 23, 23)).toEqual([RECORDING_RED.r, RECORDING_RED.g, RECORDING_RED.b, 255]);
+  });
+
+  it('keeps the rest of the ring in its own color', () => {
+    const pixels = drawRecordingIcon(32, blue);
+    expect(rgbaAt(pixels, 32, 3, 16)).toEqual([59, 130, 246, 255]);
+    expect(alphaAt(pixels, 32, 0, 0)).toBe(0);
+  });
+
+  it('cuts a transparent gap between the ring and the dot', () => {
+    const ring = drawCircleIcon(32, blue, 'ring');
+    const pixels = drawRecordingIcon(32, blue);
+    let cut = 0;
+    for (let i = 3; i < ring.length; i += 4) if (ring[i] === 255 && pixels[i] === 0) cut += 1;
+    expect(cut).toBeGreaterThan(4);
   });
 });

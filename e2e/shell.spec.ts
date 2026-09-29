@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launchApp, recorderWindow, type LaunchedApp } from './helpers';
 
@@ -34,4 +36,13 @@ test('the recorder window cannot use the main window API', async () => {
   launched = await launchApp();
   const recorder = await recorderWindow(launched.app);
   await expect(recorder.evaluate(() => window.textmeet.getSettings())).rejects.toThrow('не из главного окна');
+});
+
+test('the main window cannot pretend to be the recorder window', async () => {
+  launched = await launchApp();
+  const { page, userDataDir } = launched;
+  await page.evaluate(() => window.recorder.ready());
+  await expect
+    .poll(() => readFile(join(userDataDir, 'logs', 'textmeet.log'), 'utf8'))
+    .toContain('recorder:ready: сообщение не из окна записи');
 });

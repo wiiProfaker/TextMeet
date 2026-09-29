@@ -1,10 +1,10 @@
-import { mkdtempSync, promises as fsp, readdirSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { promises as fsp, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { writeFileAtomic, writeJsonAtomic, type RenameFn } from './atomic-write';
+import { makeTempDir } from '../../test-support/temp-dir';
 
-const tempDir = () => mkdtempSync(join(tmpdir(), 'textmeet-atomic-'));
+const tempDir = () => makeTempDir('textmeet-atomic-');
 
 function errnoError(code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(code), { code });

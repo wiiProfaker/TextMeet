@@ -20,25 +20,34 @@ test('shows the empty library', async () => {
   await expect(launched.page.getByText('Пока нет встреч.')).toBeVisible();
 });
 
-test('lists meetings newest first and flags a broken one', async () => {
+test('lists meetings by day, newest first, and marks broken and unfinished ones', async () => {
   launched = await launchApp({
     meetings: [
       { id: '2026-09-20_1000_aaaaaa', json: meetingJson('2026-09-20_1000_aaaaaa', { title: 'Старая встреча' }) },
-      { id: '2026-09-25_1430_bbbbbb', json: meetingJson('2026-09-25_1430_bbbbbb', { title: 'Новая встреча' }) },
+      {
+        id: '2026-09-25_1430_bbbbbb',
+        json: meetingJson('2026-09-25_1430_bbbbbb', { title: 'Свежая встреча', createdAt: '2026-09-25T11:30:00.000Z' }),
+      },
       { id: '2026-09-22_1200_cccccc', json: '{oops' },
     ],
   });
-  const { page } = launched;
-  await expect(page.locator('.meeting-item .meeting-title')).toHaveText([
+  const { page, libraryDir } = launched;
+  await mkdir(join(libraryDir, '2026-09-23_0900_dddddd'));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+
+  const list = page.getByRole('navigation', { name: 'Встречи' });
+  await expect(list.locator('.it b')).toHaveText([
+    'Свежая встреча',
     'Новая встреча',
     'Не удалось прочитать встречу',
     'Старая встреча',
   ]);
+  await expect(list.getByText('создаётся…')).toBeVisible();
 
-  await page.getByRole('button', { name: /Новая встреча/ }).click();
-  await expect(page.getByRole('heading', { name: 'Новая встреча' })).toBeVisible();
+  await list.getByRole('button', { name: /Свежая встреча/ }).click();
+  await expect(page.getByRole('heading', { name: 'Свежая встреча' })).toBeVisible();
 
-  await page.getByRole('button', { name: /Не удалось прочитать/ }).click();
+  await list.getByRole('button', { name: /Не удалось прочитать/ }).click();
   await expect(page.getByText('Папка: 2026-09-22_1200_cccccc')).toBeVisible();
 });
 
@@ -52,21 +61,38 @@ test('re-reads the library when the window gets focus', async () => {
   await expect(page.getByText('Из OneDrive')).toBeVisible();
 });
 
-test('settings show the library folder and save the autostart switch', async () => {
+test('settings show the library folder and save the switches', async () => {
   launched = await launchApp();
   const { page, libraryDir, userDataDir } = launched;
+  const settingsFile = async () => JSON.parse(await readFile(join(userDataDir, 'settings.json'), 'utf8'));
   await page.getByRole('button', { name: 'Настройки' }).click();
 
   await expect(page.getByTestId('library-dir')).toHaveText(libraryDir);
   // Тесты запускают версию для разработки — автозапуск в системе не прописывается.
   await expect(page.getByTestId('launch-notice')).toContainText('установленной программе');
 
-  const toggle = page.getByLabel('Запускать TextMeet при входе в систему');
-  await expect(toggle).toBeChecked();
-  await toggle.uncheck();
+  const autostart = page.getByRole('switch', { name: 'Запускать TextMeet при входе в систему' });
+  await expect(autostart).toHaveAttribute('aria-checked', 'true');
+  await autostart.click();
+  await expect.poll(async () => (await settingsFile()).launchAtLogin).toBe(false);
+
+  await page.getByRole('switch', { name: 'Короткий звук при начале и остановке записи' }).click();
+  await expect.poll(async () => (await settingsFile()).recordSounds).toBe(false);
+});
+
+test('lists the microphones and saves the choice', async () => {
+  launched = await launchApp();
+  const { page, userDataDir } = launched;
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  const select = page.getByRole('combobox', { name: 'Микрофон' });
+  await expect(select.locator('option').first()).toHaveText(/^Как в системе/);
+  // Поддельные устройства Chromium: кроме «как в системе» есть хотя бы один микрофон.
+  await expect.poll(() => select.locator('option').count()).toBeGreaterThan(1);
+  const deviceId = await select.locator('option').nth(1).getAttribute('value');
+  await select.selectOption(deviceId ?? '');
   await expect
-    .poll(async () => JSON.parse(await readFile(join(userDataDir, 'settings.json'), 'utf8')).launchAtLogin)
-    .toBe(false);
+    .poll(async () => JSON.parse(await readFile(join(userDataDir, 'settings.json'), 'utf8')).microphoneId)
+    .toBe(deviceId);
 });
 
 test('changing the library folder switches the meeting list', async () => {
@@ -83,8 +109,7 @@ test('changing the library folder switches the meeting list', async () => {
   await page.getByRole('button', { name: 'Настройки' }).click();
   await page.getByRole('button', { name: 'Изменить…' }).click();
   await expect(page.getByTestId('library-dir')).toHaveText(otherDir);
-
-  await page.getByRole('button', { name: 'Встречи' }).click();
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(page.getByText('Во второй папке')).toBeVisible();
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MEETING_ID_PATTERN, MeetingSchema, type Meeting } from './meeting';
+import { entryId, MEETING_ID_PATTERN, MeetingSchema, type Meeting } from './meeting';
 
 const valid: Meeting = {
   schemaVersion: 1,
@@ -13,6 +13,8 @@ const valid: Meeting = {
   status: 'recording',
   errorMessage: null,
   speakerNames: {},
+  tracks: [],
+  recovered: false,
 };
 
 describe('MEETING_ID_PATTERN', () => {
@@ -33,6 +35,24 @@ describe('MeetingSchema', () => {
     expect(MeetingSchema.parse(valid)).toEqual(valid);
   });
 
+  it('reads a meeting written by the previous version (no tracks, no recovered flag)', () => {
+    const { tracks: _tracks, recovered: _recovered, ...old } = valid;
+    expect(MeetingSchema.parse(old)).toEqual(valid);
+  });
+
+  it('keeps fields it does not know (written by a newer version)', () => {
+    const parsed = MeetingSchema.parse({ ...valid, summaryLanguage: 'ru', extra: { a: 1 } });
+    expect(parsed).toMatchObject({ summaryLanguage: 'ru', extra: { a: 1 } });
+  });
+
+  it('accepts tracks with offsets', () => {
+    const tracks = [
+      { kind: 'mic', file: 'mic.webm', startOffsetMs: 0 },
+      { kind: 'system', file: 'system.webm', startOffsetMs: 35 },
+    ];
+    expect(MeetingSchema.parse({ ...valid, tracks }).tracks).toEqual(tracks);
+  });
+
   it('trims the title and speaker names', () => {
     const parsed = MeetingSchema.parse({ ...valid, title: '  План  ', speakerNames: { S1: ' Иван ' } });
     expect(parsed.title).toBe('План');
@@ -47,7 +67,19 @@ describe('MeetingSchema', () => {
     ['zero participants', { participantsHint: 0 }],
     ['fractional participants', { participantsHint: 2.5 }],
     ['future schema version', { schemaVersion: 2 }],
+    ['unknown track kind', { tracks: [{ kind: 'video', file: 'v.webm', startOffsetMs: 0 }] }],
+    ['track file with a path', { tracks: [{ kind: 'mic', file: '../mic.webm', startOffsetMs: 0 }] }],
+    ['negative track offset', { tracks: [{ kind: 'mic', file: 'mic.webm', startOffsetMs: -5 }] }],
+    ['recovered not a boolean', { recovered: 'yes' }],
   ])('rejects %s', (_name, patch) => {
     expect(MeetingSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+  });
+});
+
+describe('entryId', () => {
+  it('returns the id of every kind of entry', () => {
+    expect(entryId({ kind: 'ok', meeting: valid, mixReady: false, mixFailed: false })).toBe(valid.id);
+    expect(entryId({ kind: 'creating', id: 'x' })).toBe('x');
+    expect(entryId({ kind: 'broken', id: 'y', reason: 'r' })).toBe('y');
   });
 });

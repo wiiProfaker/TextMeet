@@ -236,6 +236,8 @@ export class RecordingController {
     this.deps.logger.warn(`Дорожка ${message.kind} завершилась во время записи`);
     if (message.kind === 'system') {
       this.update({ system: 'failed', systemProblem: SYSTEM_TRACK_ENDED, systemSilent: false });
+      // Микрофон отключился раньше — писать больше нечего.
+      if (this.state.micEnded) void this.stop('mic-ended');
     } else if (this.state.system === 'on') {
       this.update({ micEnded: true });
     } else {
@@ -379,7 +381,7 @@ export class RecordingController {
       micLabel: message.micLabel,
     });
     session.diskTimer = setInterval(() => void this.checkDisk(session), DISK_CHECK_INTERVAL_MS);
-    this.deps.notify(notificationTexts.started(this.deps.hotkeyLabel()), true);
+    if (!session.diskError) this.deps.notify(notificationTexts.started(this.deps.hotkeyLabel()), true);
     this.deps.logger.info(`Запись началась: ${session.meeting.id} (${tracks.map((t) => t.kind).join(', ')})`);
     session.started.resolve(null);
     // Во время старта stop() ничего не делает — остановка по ошибке диска откладывалась до этого места.

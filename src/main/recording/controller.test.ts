@@ -391,6 +391,17 @@ describe('RecordingController — during a recording', () => {
     expect(h.state()).toMatchObject({ phase: 'recording', micEnded: true });
   });
 
+  it('stops when the computer sound ends after the microphone was unplugged', async () => {
+    const h = harness();
+    const command = await h.startRecording();
+    h.controller.onTrackEnded({ meetingId: command.meetingId, kind: 'mic' });
+    h.controller.onTrackEnded({ meetingId: command.meetingId, kind: 'system' });
+    await vi.waitFor(() => expect(h.recorder.stop).toHaveBeenCalled());
+    h.controller.onStopped({ meetingId: command.meetingId });
+    await vi.waitFor(() => expect(h.state().phase).toBe('idle'));
+    expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.micEnded());
+  });
+
   it('remembers a track that ended while the files were still being opened', async () => {
     const h = harness();
     const { command, starting } = await h.begin();

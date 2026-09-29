@@ -56,7 +56,8 @@ export interface ControllerDeps {
   now(): number;
   libraryDir(): string;
   settings(): Pick<Settings, 'microphoneId' | 'recordSounds'>;
-  hotkeyLabel(): string;
+  /** Горячая клавиша для уведомлений; null — её держит другая программа, остановить ею нельзя. */
+  hotkeyLabel(): string | null;
   freeBytes(dir: string): Promise<number>;
   /** Системное окно «Мало места на диске»: true — «Всё равно начать». */
   confirmLowDisk(freeBytes: number): Promise<boolean>;

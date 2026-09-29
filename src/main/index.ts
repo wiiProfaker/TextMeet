@@ -283,7 +283,7 @@ async function start(logger: Logger): Promise<void> {
     now: () => Date.now(),
     libraryDir,
     settings: () => settings.get(),
-    hotkeyLabel: () => hotkeys?.label ?? '',
+    hotkeyLabel: () => (hotkeys && !hotkeys.busy ? hotkeys.label : null),
     freeBytes: freeDiskBytes,
     confirmLowDisk,
     ensureMicAccess: async () =>

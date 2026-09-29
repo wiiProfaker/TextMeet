@@ -115,7 +115,7 @@ export function HotkeyField({ state, platform, onChange }: Props) {
           </>
         )}
       </div>
-      {capturing && !message && <small>Esc — отмена. Старая комбинация действует, пока новая не сохранится.</small>}
+      {capturing && !message && <small>Esc — отмена. Пока вы вводите комбинацию, прежняя не срабатывает.</small>}
       {message && (
         <p className="err" role="alert">
           {message}

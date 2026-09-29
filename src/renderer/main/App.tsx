@@ -43,7 +43,8 @@ export function App() {
   }, [dialogId]);
 
   const platform = info?.platform ?? 'win32';
-  const hotkey = settings?.hotkey.label ?? '';
+  // Клавишу держит другая программа — не показываем её как способ начать и остановить запись.
+  const hotkey = settings && !settings.hotkey.busy ? settings.hotkey.label : '';
   const chosenMic = microphones.devices.find((d) => d.deviceId === settings?.settings.microphoneId);
   const micLabel = chosenMic?.label ?? microphones.defaultLabel ?? 'Микрофон, выбранный в системе';
   const selectedId = selection?.kind === 'meeting' ? selection.id : null;

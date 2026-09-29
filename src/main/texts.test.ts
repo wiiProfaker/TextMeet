@@ -26,6 +26,11 @@ describe('notificationTexts', () => {
     expect(notificationTexts.startFailed(MIC_ACCESS_DENIED).body).toBe(MIC_ACCESS_DENIED.message);
   });
 
+  it('does not offer a hotkey that another program holds as the way to stop', () => {
+    expect(notificationTexts.started(null).body).toBe('Остановить — кнопкой в окне или в меню трея.');
+    expect(notificationTexts.stillRecording(null).body).toMatch(/нажмите «Остановить» в окне или в меню трея\.$/);
+  });
+
   it('counts recovered recordings', () => {
     expect(notificationTexts.recovered(1).body).toMatch(/^Прошлая запись/);
     expect(notificationTexts.recovered(3).body).toContain('(3)');

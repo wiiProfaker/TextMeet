@@ -18,7 +18,6 @@ describe('openTrackFiles', () => {
 
     expect([...readFileSync(join(dir, 'mic.webm'))]).toEqual([1, 2, 3]);
     expect([...readFileSync(join(dir, 'system.webm'))]).toEqual([9]);
-    expect(files.bytesWritten('mic')).toBe(3);
   });
 
   it('starts every file from scratch', async () => {
@@ -37,7 +36,6 @@ describe('openTrackFiles', () => {
     files.append('mic', bytes(1));
     await files.close();
     expect(existsSync(join(dir, 'system.webm'))).toBe(false);
-    expect(files.bytesWritten('system')).toBe(0);
     expect(readFileSync(join(dir, 'mic.webm')).length).toBe(0);
   });
 
@@ -54,7 +52,6 @@ describe('openTrackFiles', () => {
     expect(onError).toHaveBeenCalledOnce();
     expect(onError).toHaveBeenCalledWith(error);
     expect(write).toHaveBeenCalledOnce();
-    expect(files.bytesWritten('mic')).toBe(0);
   });
 
   it('reports a failure to close a file', async () => {

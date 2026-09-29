@@ -60,7 +60,7 @@ const Bytes = z
 const LIBRARY_LOCKED = 'Во время записи папку библиотеки менять нельзя.';
 // Ответ в окне «Запись остановлена» сохраняется в папку текущей библиотеки — до него папку не меняем.
 const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запись остановлена».';
-const MEETING_DIR_MISSING ='Папка встречи не найдена — возможно, её удалили.';
+const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 
 const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),

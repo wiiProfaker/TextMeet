@@ -162,6 +162,12 @@ describe('RecordingController — normal recording', () => {
     });
   });
 
+  it('does not suggest a hotkey that another program holds', async () => {
+    const h = harness({ hotkeyLabel: () => null });
+    await h.startRecording();
+    expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.started(null), true);
+  });
+
   it('passes through the phases in order', async () => {
     const h = harness();
     const command = await h.startRecording();
@@ -301,7 +307,7 @@ describe('RecordingController — start problems', () => {
     const h = harness({
       openTracks: () =>
         new Promise((resolve) => {
-          releaseOpen = () => resolve({ append: vi.fn(), close, bytesWritten: () => 0 });
+          releaseOpen = () => resolve({ append: vi.fn(), close });
         }),
     });
     const { command, starting } = await h.begin();
@@ -450,7 +456,7 @@ describe('RecordingController — during a recording', () => {
     const h = harness({
       openTracks: async (_dir, _kinds, onError) => {
         failWrite = onError;
-        return { append: vi.fn(), close: async () => undefined, bytesWritten: () => 0 };
+        return { append: vi.fn(), close: async () => undefined };
       },
     });
     const command = await h.startRecording();
@@ -467,7 +473,6 @@ describe('RecordingController — during a recording', () => {
       openTracks: async (_dir, _kinds, onError) => ({
         append: () => onError(Object.assign(new Error('io'), { code: 'EIO' })),
         close: async () => undefined,
-        bytesWritten: () => 0,
       }),
     });
     const { command, starting } = await h.begin();
@@ -766,7 +771,6 @@ describe('RecordingController — crashes and quitting', () => {
       openTracks: async (_dir, _kinds, onError) => ({
         append: () => onError(Object.assign(new Error('io'), { code: 'EIO' })),
         close: async () => undefined,
-        bytesWritten: () => 0,
       }),
     });
     const { command } = await h.begin();

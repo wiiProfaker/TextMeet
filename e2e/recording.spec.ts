@@ -93,7 +93,7 @@ test('keeps recording the microphone when the computer sound cannot be captured'
 
   await startRecording(page);
   await expect(page.getByText('Звук компьютера не записывается')).toBeVisible();
-  await expect(page.getByLabel('Идёт запись').getByText('не пишется')).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Идёт запись' }).getByText('не записывается')).toBeVisible();
   await page.getByRole('button', { name: /Остановить запись/ }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Пропустить' }).click();
 

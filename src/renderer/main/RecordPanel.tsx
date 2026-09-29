@@ -7,6 +7,7 @@ import { Meter } from './Meter';
 
 interface Props {
   state: RecordingState;
+  /** Пусто — клавиши нет (её держит другая программа). */
   hotkey: string;
   /** Какой микрофон будет писать (для строки под кнопкой). */
   micLabel: string;
@@ -30,7 +31,7 @@ export function RecordPanel({ state, hotkey, micLabel, onError }: Props) {
         <button type="button" className="start" onClick={toggle}>
           <span className="rdot" />
           Начать запись
-          <kbd>{hotkey}</kbd>
+          {hotkey && <kbd>{hotkey}</kbd>}
         </button>
         <div className="tog">
           <button
@@ -78,7 +79,7 @@ export function RecordPanel({ state, hotkey, micLabel, onError }: Props) {
   const elapsed = state.startedAt === null ? 0 : (now - state.startedAt) / 1000;
   const label = state.phase === 'starting' ? 'Включаем…' : state.phase === 'stopping' ? 'Сохраняем…' : 'Идёт запись';
   const systemFlag =
-    state.system === 'failed' ? 'не пишется' : state.system === 'off' ? 'выключен' : state.systemSilent ? 'не слышно' : null;
+    state.system === 'failed' ? 'не записывается' : state.system === 'off' ? 'выключен' : state.systemSilent ? 'не слышно' : null;
 
   return (
     <section className="rec" aria-label="Идёт запись">
@@ -104,7 +105,7 @@ export function RecordPanel({ state, hotkey, micLabel, onError }: Props) {
       <button type="button" className="stop" onClick={toggle} disabled={state.phase !== 'recording'}>
         <span className="sq" />
         Остановить
-        <kbd>{hotkey}</kbd>
+        {hotkey && <kbd>{hotkey}</kbd>}
       </button>
     </section>
   );

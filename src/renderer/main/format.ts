@@ -79,7 +79,7 @@ export function participantsText(n: number): string {
   return `${n} ${pluralize(n, 'участник', 'участника', 'участников')}`;
 }
 
-/** Местная дата встречи: из createdAt, а для «создаётся»/«повреждена» — из имени папки. */
+/** Местная дата встречи: из createdAt, а для «создаётся»/«не удалось прочитать» — из имени папки. */
 function entryDate(entry: MeetingListEntry): Date | null {
   if (entry.kind === 'ok') {
     const d = new Date(entry.meeting.createdAt);

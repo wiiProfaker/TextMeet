@@ -9,6 +9,7 @@ import { Meter } from './Meter';
 interface Props {
   state: RecordingState;
   title: string;
+  /** Пусто — клавиши нет (её держит другая программа). */
   hotkey: string;
   platform: string;
   onError(message: string): void;
@@ -114,11 +115,15 @@ export function LivePane({ state, title, hotkey, platform, onError }: Props) {
         >
           <span className="sq" />
           Остановить запись
-          <kbd>{hotkey}</kbd>
+          {hotkey && <kbd>{hotkey}</kbd>}
         </button>
         <p className="hint">
-          Клавиша работает из любой программы, даже поверх созвона на весь экран.
-          <br />
+          {hotkey && (
+            <>
+              Клавиша работает из любой программы, даже поверх созвона на весь экран.
+              <br />
+            </>
+          )}
           Окно можно закрыть — запись продолжится, а у значка в {isMac ? 'строке меню' : 'трее'} появится отметка записи.
         </p>
       </div>

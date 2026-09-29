@@ -8,8 +8,6 @@ export interface TrackFiles {
   append(kind: TrackKind, data: Uint8Array): void;
   /** Дожидается записи всех кусков и закрывает файлы. Повторный вызов ничего не делает. */
   close(): Promise<void>;
-  /** Сколько байт дорожки уже записано на диск. */
-  bytesWritten(kind: TrackKind): number;
 }
 
 /** Нужное от открытого файла (FileHandle); подменяется в тестах. */
@@ -25,7 +23,6 @@ const openForWriting: OpenTrackFile = (file) => fsp.open(file, 'w');
 interface OpenTrack {
   handle: TrackHandle;
   queue: Promise<void>;
-  bytes: number;
 }
 
 /** Открывает (создаёт заново) файлы дорожек в папке audio/ встречи. */
@@ -38,7 +35,7 @@ export async function openTrackFiles(
   const tracks = new Map<TrackKind, OpenTrack>();
   try {
     for (const kind of kinds) {
-      tracks.set(kind, { handle: await open(join(dir, TRACK_FILES[kind])), queue: Promise.resolve(), bytes: 0 });
+      tracks.set(kind, { handle: await open(join(dir, TRACK_FILES[kind])), queue: Promise.resolve() });
     }
   } catch (err) {
     await Promise.all([...tracks.values()].map((t) => t.handle.close().catch(() => undefined)));
@@ -61,7 +58,6 @@ export async function openTrackFiles(
         if (failed) return;
         try {
           await track.handle.write(data);
-          track.bytes += data.byteLength;
         } catch (err) {
           fail(err);
         }
@@ -76,6 +72,5 @@ export async function openTrackFiles(
       })();
       return closing;
     },
-    bytesWritten: (kind) => tracks.get(kind)?.bytes ?? 0,
   };
 }

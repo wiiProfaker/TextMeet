@@ -50,7 +50,6 @@ function Item({
         {meta}
         {meta && note ? ' · ' : ''}
         {note && <span className={`tone-${note.tone}`}>{note.text}</span>}
-        {entry.kind === 'broken' && <span className="tone-error"> · повреждена</span>}
       </span>
     </button>
   );

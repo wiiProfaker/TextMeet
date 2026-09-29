@@ -11,10 +11,11 @@ export interface NotificationText {
   silent?: boolean;
 }
 
+// hotkey — null, когда клавишу держит другая программа: тогда её не предлагаем как способ остановить.
 export const notificationTexts = {
-  started: (hotkey: string): NotificationText => ({
+  started: (hotkey: string | null): NotificationText => ({
     title: 'Запись началась',
-    body: `${hotkey} — остановить.`,
+    body: hotkey ? `${hotkey} — остановить.` : 'Остановить — кнопкой в окне или в меню трея.',
     silent: true,
   }),
   stopped: (durationSec: number): NotificationText => ({
@@ -22,9 +23,11 @@ export const notificationTexts = {
     body: 'Окно TextMeet открыто: укажите, сколько было участников.',
     silent: true,
   }),
-  stillRecording: (hotkey: string): NotificationText => ({
+  stillRecording: (hotkey: string | null): NotificationText => ({
     title: 'Запись всё ещё идёт',
-    body: `Уже 10 минут не слышно ни микрофона, ни звука компьютера. Если встреча закончилась, нажмите ${hotkey}.`,
+    body: `Уже 10 минут не слышно ни микрофона, ни звука компьютера. Если встреча закончилась, нажмите ${
+      hotkey ?? '«Остановить» в окне или в меню трея'
+    }.`,
   }),
   lowDisk: (freeBytes: number): NotificationText => ({
     title: 'Мало места на диске',

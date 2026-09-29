@@ -707,6 +707,60 @@ describe('RecordingController — crashes and quitting', () => {
     expect(h.state().phase).toBe('idle');
   });
 
+  it('does not start once the quit is decided while the low disk question is open', async () => {
+    let answer!: (start: boolean) => void;
+    const confirmLowDisk = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    const h = harness({ freeBytes: async () => LOW_DISK_BEFORE_START_BYTES - 1, confirmLowDisk });
+    const starting = h.controller.toggle();
+    await vi.waitFor(() => expect(confirmLowDisk).toHaveBeenCalled());
+
+    h.controller.lockForQuit();
+    const quitting = h.controller.stopForQuit();
+    answer(true);
+    await starting;
+    await quitting;
+
+    expect(h.deps.ensureMicAccess).not.toHaveBeenCalled();
+    expect(h.recorder.start).not.toHaveBeenCalled();
+    expect(h.state()).toMatchObject({ phase: 'idle', meetingId: null, startProblem: null });
+    expect(readdirSync(h.lib)).toEqual([]);
+    expect(h.deps.notify).not.toHaveBeenCalled();
+  });
+
+  it('does not start once the quit is decided while microphone access is being asked', async () => {
+    let grant!: (granted: boolean) => void;
+    const ensureMicAccess = vi.fn(() => new Promise<boolean>((resolve) => (grant = resolve)));
+    const h = harness({ ensureMicAccess });
+    const starting = h.controller.toggle();
+    await vi.waitFor(() => expect(ensureMicAccess).toHaveBeenCalled());
+
+    h.controller.lockForQuit();
+    grant(true);
+    await starting;
+
+    expect(h.recorder.start).not.toHaveBeenCalled();
+    expect(h.state().phase).toBe('idle');
+    expect(readdirSync(h.lib)).toEqual([]);
+  });
+
+  it('removes the meeting and does not start when the quit is decided while the meeting is being created', async () => {
+    const h: ReturnType<typeof harness> = harness({
+      ensureMicAccess: async () => {
+        // Выход подтверждают, пока создаётся папка встречи (запись на диск идёт в несколько шагов).
+        setImmediate(() => h.controller.lockForQuit());
+        return true;
+      },
+    });
+
+    await h.controller.toggle();
+
+    expect(h.recorder.start).not.toHaveBeenCalled();
+    expect(h.recorder.playSound).not.toHaveBeenCalled();
+    expect(h.state()).toMatchObject({ phase: 'idle', meetingId: null, startProblem: null });
+    expect(readdirSync(h.lib)).toEqual([]);
+    expect(h.deps.notify).not.toHaveBeenCalled();
+  });
+
   it('waits for a stop that began on its own while quitting', async () => {
     const h = harness({
       openTracks: async (_dir, _kinds, onError) => ({
@@ -769,6 +823,18 @@ describe('RecordingController — stop dialog', () => {
     await h.controller.finishStopDialog({ meetingId: first.meetingId, title: 'Первая', participantsHint: 2 });
 
     expect(h.state().stopDialog?.meetingId).toBe(second.meetingId);
+  });
+
+  it('keeps the dialog of the last recording when the next start fails', async () => {
+    const h = harness();
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    h.setReady(false);
+
+    await h.controller.toggle();
+
+    expect(h.state().startProblem).toEqual(RECORDER_NOT_READY);
+    expect(h.state().stopDialog?.meetingId).toBe(command.meetingId);
   });
 
   it('closes the dialog on skip even when the answer cannot be saved, and still reports the error', async () => {

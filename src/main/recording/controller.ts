@@ -319,20 +319,26 @@ export class RecordingController {
     this.update({ phase: 'starting', startProblem: null });
     if (!this.deps.recorder.isReady()) return this.failStart(this.recorderProblem());
 
+    // После каждого ожидания проверяем, не подтверждён ли выход: запись, начатая уже после этого,
+    // оборвалась бы вместе с программой (окно «Мало места» или запрос доступа могли висеть долго).
     const libraryDir = this.deps.libraryDir();
     await fsp.mkdir(libraryDir, { recursive: true });
     const free = await this.deps.freeBytes(libraryDir);
-    if (free < LOW_DISK_BEFORE_START_BYTES && !(await this.deps.confirmLowDisk(free))) {
-      this.update({ phase: 'idle' });
-      return;
-    }
+    if (this.quitting) return this.cancelStart();
+    if (free < LOW_DISK_BEFORE_START_BYTES && !(await this.deps.confirmLowDisk(free))) return this.cancelStart();
+    if (this.quitting) return this.cancelStart();
     if (!(await this.deps.ensureMicAccess())) return this.failStart(MIC_ACCESS_DENIED);
+    if (this.quitting) return this.cancelStart();
 
     const meeting = await createMeeting(libraryDir, {
       source: 'recording',
       status: 'recording',
       now: new Date(this.deps.now()),
     });
+    if (this.quitting) {
+      await this.removeUnstartedMeeting(libraryDir, meeting.id);
+      return this.cancelStart();
+    }
     const session: Session = {
       meeting,
       libraryDir,
@@ -377,12 +383,22 @@ export class RecordingController {
       // Файлы могли открыться уже после отказа — закрыть их до удаления папки.
       await session.accepting;
       await session.files?.close();
-      await removeMeetingDir(session.libraryDir, meeting.id).catch((err: unknown) =>
-        this.deps.logger.error(`Не удалось удалить папку несостоявшейся записи ${meeting.id}`, err),
-      );
+      await this.removeUnstartedMeeting(session.libraryDir, meeting.id);
       this.deps.libraryChanged();
       this.failStart(problem);
     }
+  }
+
+  /** Встреча несостоявшейся записи пуста — убираем её папку, чтобы не висела в списке. */
+  private async removeUnstartedMeeting(libraryDir: string, meetingId: string): Promise<void> {
+    await removeMeetingDir(libraryDir, meetingId).catch((err: unknown) =>
+      this.deps.logger.error(`Не удалось удалить папку несостоявшейся записи ${meetingId}`, err),
+    );
+  }
+
+  /** Старт отменён без ошибки (отказались в окне «Мало места» или решён выход): тихо обратно в «ожидание». */
+  private cancelStart(): void {
+    this.update({ phase: 'idle' });
   }
 
   private async acceptStarted(session: Session, message: RecorderStarted): Promise<void> {
@@ -512,7 +528,13 @@ export class RecordingController {
 
   private failStart(problem: StartProblem): void {
     this.session = null;
-    this.update({ ...IDLE_RECORDING_STATE, systemAudioNext: this.state.systemAudioNext, startProblem: problem });
+    // Окно «Запись остановлена» прошлой записи могло быть ещё открыто — его не закрываем.
+    this.update({
+      ...IDLE_RECORDING_STATE,
+      systemAudioNext: this.state.systemAudioNext,
+      stopDialog: this.state.stopDialog,
+      startProblem: problem,
+    });
     this.deps.notify(notificationTexts.startFailed(problem), true);
   }
 

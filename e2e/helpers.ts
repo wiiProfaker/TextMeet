@@ -1,18 +1,27 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
+import { promisify } from 'node:util';
+import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test';
+import ffmpegPath from 'ffmpeg-static';
 
 export interface MeetingFixture {
   id: string;
   /** Объект пишется как JSON, строка — как есть (для повреждённых файлов). */
   json: unknown;
+  /** Файлы в папке audio/: имя → сколько секунд тона записать (WebM/Opus, как у MediaRecorder). */
+  audio?: Record<string, number>;
 }
 
 export interface LaunchOptions {
   /** Объект пишется как JSON, строка — как есть. По умолчанию библиотека — во временной папке. */
   settings?: unknown;
   meetings?: MeetingFixture[];
+  /** Звук компьютера в тестовом режиме: тон или отказ. Настоящие устройства в тестах не трогаем. */
+  media?: 'tone' | 'fail';
+  /** Собранная программа вместо out/ (проверка установщика). */
+  executablePath?: string;
 }
 
 export interface LaunchedApp {
@@ -25,10 +34,31 @@ export interface LaunchedApp {
   close(): Promise<void>;
 }
 
-// Меньше тайм-аута теста (30 с): если окно не появилось, уборка в launchApp ещё успеет выполниться.
+// Меньше тайм-аута теста: если окно не появилось, уборка в launchApp ещё успеет выполниться.
 const WINDOW_TIMEOUT_MS = 15_000;
 
 const serialize = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+const run = promisify(execFile);
+
+/** Тон нужной длины в WebM/Opus — как дорожка, записанная MediaRecorder. */
+export async function toneWebm(file: string, seconds: number): Promise<void> {
+  if (!ffmpegPath) throw new Error('ffmpeg для этой системы не найден');
+  await run(ffmpegPath, [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    `sine=frequency=440:duration=${seconds}`,
+    '-c:a',
+    'libopus',
+    '-f',
+    'webm',
+    file,
+  ]);
+}
 
 export function meetingJson(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -45,6 +75,10 @@ export function meetingJson(id: string, overrides: Record<string, unknown> = {})
     speakerNames: {},
     ...overrides,
   };
+}
+
+export async function readMeetingJson(libraryDir: string, id: string): Promise<Record<string, unknown>> {
+  return JSON.parse(await readFile(join(libraryDir, id, 'meeting.json'), 'utf8')) as Record<string, unknown>;
 }
 
 async function windowByPage(app: ElectronApplication, pagePath: string): Promise<Page> {
@@ -64,6 +98,11 @@ export function recorderWindow(app: ElectronApplication): Promise<Page> {
   return windowByPage(app, '/recorder/index.html');
 }
 
+/** Окно записи загрузилось и сообщило main, что готово. */
+export async function waitForRecorder(page: Page): Promise<void> {
+  await expect.poll(() => page.evaluate(() => window.textmeet.getAppInfo().then((i) => i.recorderReady))).toBe(true);
+}
+
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
   const root = await mkdtemp(join(tmpdir(), 'textmeet-e2e-'));
   const userDataDir = join(root, 'userData');
@@ -79,14 +118,22 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   for (const meeting of options.meetings ?? []) {
     await mkdir(join(libraryDir, meeting.id, 'audio'), { recursive: true });
     await writeFile(join(libraryDir, meeting.id, 'meeting.json'), serialize(meeting.json));
+    for (const [file, seconds] of Object.entries(meeting.audio ?? {})) {
+      await toneWebm(join(libraryDir, meeting.id, 'audio', file), seconds);
+    }
   }
 
   let app: ElectronApplication | undefined;
   let page: Page;
   try {
     app = await electron.launch({
-      args: ['.'],
-      env: { ...process.env, TEXTMEET_USER_DATA: userDataDir, TEXTMEET_HOME: homeDir },
+      ...(options.executablePath ? { executablePath: options.executablePath, args: [] } : { args: ['.'] }),
+      env: {
+        ...process.env,
+        TEXTMEET_USER_DATA: userDataDir,
+        TEXTMEET_HOME: homeDir,
+        TEXTMEET_TEST_MEDIA: options.media ?? 'tone',
+      },
     });
     page = await mainWindow(app);
   } catch (err) {
@@ -103,8 +150,15 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     homeDir,
     libraryDir,
     close: async () => {
-      await app.close();
-      await rm(root, { recursive: true, force: true });
+      // Если запись ещё идёт, при выходе программа спросит системным окном — отвечаем «Остановить и выйти».
+      // Тест мог уже закрыть программу сам (выход из меню) — тогда закрывать нечего.
+      await app
+        .evaluate(({ dialog }) => {
+          dialog.showMessageBox = (async () => ({ response: 1, checkboxChecked: false })) as typeof dialog.showMessageBox;
+        })
+        .catch(() => undefined);
+      await app.close().catch(() => undefined);
+      await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     },
   };
 }

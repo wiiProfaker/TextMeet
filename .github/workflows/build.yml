@@ -22,8 +22,8 @@ jobs:
             artifact: TextMeet-mac
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: npm
@@ -37,6 +37,13 @@ jobs:
         if: runner.os == 'Windows'
         run: npx electron-builder --win --publish never
 
+      # Собранная программа пишет и сводит дорожки своим ffmpeg (из app.asar.unpacked).
+      - name: Check the packaged app (Windows)
+        if: runner.os == 'Windows'
+        run: npx playwright test e2e/packaged.spec.ts
+        env:
+          TEXTMEET_PACKAGED_APP: release/win-unpacked/TextMeet.exe
+
       - name: Package (macOS, ad-hoc signed .dmg)
         if: runner.os == 'macOS'
         run: |
@@ -44,16 +51,19 @@ jobs:
           APP="$(find release -maxdepth 2 -name 'TextMeet.app' -type d | head -n 1)"
           echo "App: $APP"
           # Неподписанное arm64-приложение macOS не запускает — подписываем ad-hoc, как в спайке.
-          find "$APP" \( -name '*.node' -o -name '*.dylib' \) -type f -exec codesign --force --sign - {} \;
+          # ffmpeg (сведение дорожек) лежит в app.asar.unpacked и тоже должен быть подписан.
+          find "$APP" \( -name '*.node' -o -name '*.dylib' -o -name 'ffmpeg' \) -type f -exec codesign --force --sign - {} \;
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --verbose=2 "$APP"
+          # Собранная программа пишет и сводит дорожки своим подписанным ffmpeg.
+          TEXTMEET_PACKAGED_APP="$APP/Contents/MacOS/TextMeet" npx playwright test e2e/packaged.spec.ts
           mkdir -p dmg
           ditto "$APP" dmg/TextMeet.app
           ln -s /Applications dmg/Applications
           VERSION="$(node -p "require('./package.json').version")"
           hdiutil create -volname TextMeet -srcfolder dmg -ov -format UDZO "release/TextMeet-$VERSION-arm64.dmg"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.artifact }}
           path: |

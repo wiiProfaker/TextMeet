@@ -75,7 +75,7 @@ export function Player({ meetingId, fallbackDuration }: { meetingId: string; fal
         }}
       />
       <span className="ptime">{formatDuration(duration)}</span>
-      <button type="button" className="speed" aria-label="Скорость воспроизведения" onClick={nextSpeed}>
+      <button type="button" className="speed" aria-label={`Скорость воспроизведения: ${speedLabel(speed)}`} onClick={nextSpeed}>
         {speedLabel(speed)}
       </button>
     </footer>

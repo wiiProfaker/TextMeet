@@ -1,9 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { StopDialogData } from '../../shared/recording';
 import { errorText } from './errors';
 import { formatDurationWithSeconds, parseParticipants } from './format';
 
 const CHOICES = [2, 3, 4, 5, 6] as const;
+
+/** Tab и Shift+Tab ходят по кругу внутри окна: кнопки за ним (например, «Начать запись») недоступны. */
+function keepFocusInside(dialog: HTMLElement, event: KeyboardEvent<HTMLDivElement>): void {
+  const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')];
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (!first || !last) return;
+  const active = document.activeElement;
+  if (event.shiftKey && (active === first || active === dialog)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 /** «Запись остановлена»: название и число участников (подсказка для разделения по голосам). */
 export function StopDialog({ data }: { data: StopDialogData }) {
@@ -60,6 +76,7 @@ export function StopDialog({ data }: { data: StopDialogData }) {
         tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !saving) void finish(null);
+          if (e.key === 'Tab' && dialog.current) keepFocusInside(dialog.current, e);
         }}
       >
         <h2 id="stop-title">Запись остановлена</h2>

@@ -26,6 +26,18 @@ export function HotkeyField({ state, platform, onChange }: Props) {
     return () => void window.textmeet.suspendHotkey(false);
   }, [capturing]);
 
+  // Окно закрыли (оно прячется в трей), не закончив ввод: иначе действующая клавиша так и осталась бы снятой.
+  useEffect(() => {
+    if (!capturing) return;
+    const onVisibility = () => {
+      if (document.visibilityState !== 'hidden') return;
+      setCapturing(false);
+      setMessage(null);
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [capturing]);
+
   const apply = async (accelerator: string | null) => {
     try {
       const result = await window.textmeet.setHotkey(accelerator);

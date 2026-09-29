@@ -4,6 +4,7 @@ import {
   MIC_ACCESS_DENIED,
   micProblem,
   notificationTexts,
+  RECORDER_BROKEN,
   systemAudioProblem,
   systemSettingsUrl,
 } from './texts';
@@ -33,6 +34,15 @@ describe('notificationTexts', () => {
   it('has texts for an interrupted recording and a lost microphone', () => {
     expect(notificationTexts.interrupted().title).toBe('Запись прервалась');
     expect(notificationTexts.micEnded().body).toContain('Микрофон отключился');
+  });
+
+  it('tells the user to restart TextMeet when the recorder window keeps crashing', () => {
+    expect(notificationTexts.recorderBroken()).toEqual({
+      title: 'Запись не работает',
+      body: 'Окно записи несколько раз закрылось из-за сбоя. Перезапустите TextMeet.',
+    });
+    // Та же причина — и в окне, если после этого попробовать начать запись.
+    expect(RECORDER_BROKEN).toEqual({ message: notificationTexts.recorderBroken().body, settings: null });
   });
 
   it('explains a recording whose details could not be saved', () => {

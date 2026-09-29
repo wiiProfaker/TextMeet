@@ -68,15 +68,19 @@ let systemEnding = false;
 let mainWindow: BrowserWindow | null = null;
 let recorderWindow: BrowserWindow | null = null;
 let tray: AppTray | null = null;
+// Автомату нужна подпись горячей клавиши, а горячей клавише — автомат; главному окну — снятие паузы клавиши.
+let hotkeys: HotkeyManager | null = null;
 let recorderReady = false;
+/** Окно записи падало снова и снова, и его больше не перезапускают. */
+let recorderBroken = false;
 const recorderCrashes: number[] = [];
 // Второй запуск или щелчок по Dock могут прийти, пока start() ещё не создал окна:
 // тогда просьбу показать окно только запоминаем, иначе появится второе, «чужое» главное окно.
 let windowsCreated = false;
 let showRequested = false;
 
-/** Окно записи перезапускается после сбоя, но не бесконечно: 3 сбоя за минуту — больше не пробуем. */
-const RECORDER_CRASH_LIMIT = 3;
+/** Окно записи перезапускается после сбоя, но не бесконечно: не больше 3 раз в минуту, 4-й сбой — больше не пробуем. */
+const RECORDER_RESTART_LIMIT = 3;
 const RECORDER_CRASH_WINDOW_MS = 60_000;
 
 function openMainWindow(logger: Logger): void {
@@ -84,13 +88,21 @@ function openMainWindow(logger: Logger): void {
     showRequested = true;
     return;
   }
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    mainWindow = createMainWindow(logger, { show: true });
-    hideInsteadOfClose(mainWindow);
-  }
+  if (!mainWindow || mainWindow.isDestroyed()) mainWindow = startMainWindow(logger, true);
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+}
+
+function startMainWindow(logger: Logger, show: boolean): BrowserWindow {
+  const win = createMainWindow(logger, { show });
+  hideInsteadOfClose(win);
+  // Пока в настройках вводят новую комбинацию, клавиша снята, и вернуть её должна сама страница.
+  // Упала или перезагрузилась посреди ввода — вернуть некому: возвращаем здесь.
+  const resumeHotkey = (): void => hotkeys?.suspend(false);
+  win.webContents.on('render-process-gone', resumeHotkey);
+  win.webContents.on('did-start-loading', resumeHotkey);
+  return win;
 }
 
 /** Закрытие окна прячет его в трей; по-настоящему окна закрываются только при выходе. */
@@ -124,7 +136,7 @@ function sendToRecorder<C extends RecorderCommandChannel>(channel: C, ...payload
   if (contents && !contents.isDestroyed()) contents.send(channel, ...payload);
 }
 
-function startRecorderWindow(logger: Logger, controller: RecordingController): BrowserWindow {
+function startRecorderWindow(logger: Logger, controller: RecordingController, notify: Notify): BrowserWindow {
   recorderReady = false;
   const win = createRecorderWindow(logger);
   hideInsteadOfClose(win);
@@ -137,12 +149,15 @@ function startRecorderWindow(logger: Logger, controller: RecordingController): B
     recorderCrashes.push(now);
     while (recorderCrashes.length > 0 && now - (recorderCrashes[0] ?? now) > RECORDER_CRASH_WINDOW_MS) recorderCrashes.shift();
     win.destroy();
-    if (recorderCrashes.length >= RECORDER_CRASH_LIMIT) {
+    if (recorderCrashes.length > RECORDER_RESTART_LIMIT) {
       logger.error('Окно записи падает снова и снова — больше не перезапускаем');
       recorderWindow = null;
+      // Иначе каждая следующая попытка записи просила бы «подождать пару секунд», а ждать нечего.
+      recorderBroken = true;
+      notify(notificationTexts.recorderBroken());
       return;
     }
-    recorderWindow = startRecorderWindow(logger, controller);
+    recorderWindow = startRecorderWindow(logger, controller, notify);
   });
   return win;
 }
@@ -181,6 +196,9 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
       });
       if (response !== 1) return;
     }
+    // Выход решён: запись, начатая сейчас кнопкой, треем или клавишей, оборвалась бы вместе с программой.
+    controller.lockForQuit();
+    hotkeys.dispose();
     await controller.stopForQuit();
   } catch (err) {
     logger.error('Ошибка при остановке записи перед выходом', err);
@@ -188,7 +206,6 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
     preparingQuit = false;
   }
   if (controller.getState().phase !== 'idle') return;
-  hotkeys.dispose();
   logger.info('TextMeet завершает работу');
   await logger.flush();
   quitApproved = true;
@@ -254,13 +271,12 @@ async function start(logger: Logger): Promise<void> {
     onMixed: () => sendToMain(IPC.libraryChanged),
   });
 
-  // Автомату нужна подпись горячей клавиши, а горячей клавише — автомат: связываем через замыкание.
-  let hotkeys: HotkeyManager | null = null;
   const controller = new RecordingController({
     platform: process.platform,
     logger,
     recorder: {
       isReady: () => recorderReady && !!recorderWindow && !recorderWindow.isDestroyed(),
+      isBroken: () => recorderBroken,
       start: (command) => sendToRecorder(IPC.recorderStart, command),
       stop: () => sendToRecorder(IPC.recorderStop),
       playSound: (kind) => sendToRecorder(IPC.recorderPlaySound, kind),
@@ -341,9 +357,8 @@ async function start(logger: Logger): Promise<void> {
   };
   powerMonitor.on('shutdown', onSystemEnding);
 
-  recorderWindow = startRecorderWindow(logger, controller);
-  mainWindow = createMainWindow(logger, { show: showRequested || !startedAtLogin() });
-  hideInsteadOfClose(mainWindow);
+  recorderWindow = startRecorderWindow(logger, controller, notify);
+  mainWindow = startMainWindow(logger, showRequested || !startedAtLogin());
   mainWindow.on('session-end', onSystemEnding);
   windowsCreated = true;
   tray = createTray(

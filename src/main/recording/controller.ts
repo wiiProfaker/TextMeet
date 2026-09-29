@@ -22,6 +22,7 @@ import type { Logger } from '../logger';
 import {
   micProblem,
   notificationTexts,
+  RECORDER_BROKEN,
   RECORDER_NOT_READY,
   RECORDER_TIMEOUT,
   systemAudioProblem,
@@ -41,6 +42,8 @@ import { openTrackFiles, type TrackFiles } from './track-files';
 /** Окно записи, каким его видит автомат. */
 export interface RecorderLink {
   isReady(): boolean;
+  /** Окно записи падало снова и снова, и его больше не перезапускают: ждать бесполезно. */
+  isBroken(): boolean;
   start(command: RecorderStartCommand): void;
   stop(): void;
   playSound(kind: SoundKind): void;
@@ -102,6 +105,11 @@ function within<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
 
 interface Session {
   meeting: Meeting;
+  /**
+   * Папка библиотеки на момент старта. Папку в настройках могут сменить, пока идёт запись
+   * (окно выбора папки открыли до старта): встреча всё равно дописывается туда, где создана.
+   */
+  libraryDir: string;
   systemRequested: boolean;
   files: TrackFiles | null;
   pendingChunks: { kind: TrackKind; bytes: Uint8Array }[];
@@ -127,6 +135,8 @@ export class RecordingController {
   private state: RecordingState = { ...IDLE_RECORDING_STATE };
   private session: Session | null = null;
   private busy: Promise<void> = Promise.resolve();
+  /** Выход решён: новые записи не начинаются, кнопки и клавиша ничего не делают. */
+  private quitting = false;
 
   constructor(private readonly deps: ControllerDeps) {}
 
@@ -136,6 +146,8 @@ export class RecordingController {
 
   /** Кнопка, пункт трея, горячая клавиша: начать, если не идёт; остановить, если идёт. */
   toggle(): Promise<void> {
+    // Идущую запись при выходе останавливает stopForQuit — без окна «Запись остановлена».
+    if (this.quitting) return Promise.resolve();
     if (this.state.phase === 'idle') return this.start();
     if (this.state.phase === 'recording') return this.stop('user');
     return Promise.resolve();
@@ -162,7 +174,7 @@ export class RecordingController {
   }
 
   start(): Promise<void> {
-    if (this.state.phase !== 'idle') return this.busy;
+    if (this.quitting || this.state.phase !== 'idle') return this.busy;
     this.busy = this.runStart().catch((err: unknown) => {
       this.deps.logger.error('Запись не началась', err);
       this.failStart({ message: humanFsError('Не удалось начать запись', err).message, settings: null });
@@ -179,6 +191,14 @@ export class RecordingController {
       this.saveFailed(err);
     });
     return this.busy;
+  }
+
+  /**
+   * Выход подтверждён: запись, начатая в последние мгновения (щелчок по трею, клавиша),
+   * оборвалась бы вместе с программой — поэтому больше ничего не начинаем.
+   */
+  lockForQuit(): void {
+    this.quitting = true;
   }
 
   /** Перед выходом: дождаться начала, если оно идёт, и остановить без вопросов и окон. */
@@ -277,7 +297,7 @@ export class RecordingController {
 
   private async runStart(): Promise<void> {
     this.update({ phase: 'starting', startProblem: null });
-    if (!this.deps.recorder.isReady()) return this.failStart(RECORDER_NOT_READY);
+    if (!this.deps.recorder.isReady()) return this.failStart(this.recorderProblem());
 
     const libraryDir = this.deps.libraryDir();
     await fsp.mkdir(libraryDir, { recursive: true });
@@ -295,6 +315,7 @@ export class RecordingController {
     });
     const session: Session = {
       meeting,
+      libraryDir,
       systemRequested: this.state.systemAudioNext,
       files: null,
       pendingChunks: [],
@@ -317,7 +338,7 @@ export class RecordingController {
     // Окно записи могло перезапуститься, пока висели окно «Мало места» или запрос доступа к микрофону:
     // тогда команду не отправляем, а пустая встреча убирается как при любом несостоявшемся старте.
     if (!this.deps.recorder.isReady()) {
-      session.started.resolve(RECORDER_NOT_READY);
+      session.started.resolve(this.recorderProblem());
     } else {
       if (this.deps.settings().recordSounds) this.deps.recorder.playSound('start');
       this.deps.recorder.start({
@@ -336,7 +357,7 @@ export class RecordingController {
       // Файлы могли открыться уже после отказа — закрыть их до удаления папки.
       await session.accepting;
       await session.files?.close();
-      await removeMeetingDir(libraryDir, meeting.id).catch((err: unknown) =>
+      await removeMeetingDir(session.libraryDir, meeting.id).catch((err: unknown) =>
         this.deps.logger.error(`Не удалось удалить папку несостоявшейся записи ${meeting.id}`, err),
       );
       this.deps.libraryChanged();
@@ -345,7 +366,7 @@ export class RecordingController {
   }
 
   private async acceptStarted(session: Session, message: RecorderStarted): Promise<void> {
-    const libraryDir = this.deps.libraryDir();
+    const { libraryDir } = session;
     const earliest = Math.min(...message.tracks.map((t) => t.startedAt));
     const tracks: Track[] = message.tracks.map((t) => ({
       kind: t.kind,
@@ -405,7 +426,7 @@ export class RecordingController {
     }
     await session.files?.close();
 
-    const libraryDir = this.deps.libraryDir();
+    const { libraryDir } = session;
     const durationSec = Math.max(0, Math.round((this.deps.now() - session.startedAt) / 100) / 10);
     const meeting = await updateMeeting(libraryDir, session.meeting.id, (m) => ({
       ...m,
@@ -432,7 +453,7 @@ export class RecordingController {
   private async finishInterrupted(session: Session): Promise<void> {
     this.clearTimers(session);
     await session.files?.close();
-    const meeting = await finalizeInterrupted(this.deps.libraryDir(), session.meeting.id);
+    const meeting = await finalizeInterrupted(session.libraryDir, session.meeting.id);
     this.deps.enqueueMix(meeting.id);
     this.deps.notify(notificationTexts.interrupted());
     this.resetToIdle(session, null);
@@ -455,13 +476,18 @@ export class RecordingController {
 
   private async checkDisk(session: Session): Promise<void> {
     try {
-      const free = await this.deps.freeBytes(this.deps.libraryDir());
+      const free = await this.deps.freeBytes(session.libraryDir);
       if (this.session !== session) return;
       this.update({ freeBytes: free });
       if (session.lowDisk.update(free)) this.deps.notify(notificationTexts.lowDisk(free));
     } catch (err) {
       this.deps.logger.warn('Не удалось узнать свободное место на диске', err);
     }
+  }
+
+  /** Окно записи не готово: скоро будет (перезапускается) или уже не будет (сдались после сбоев). */
+  private recorderProblem(): StartProblem {
+    return this.deps.recorder.isBroken() ? RECORDER_BROKEN : RECORDER_NOT_READY;
   }
 
   private failStart(problem: StartProblem): void {

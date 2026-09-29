@@ -50,7 +50,13 @@ const StopDialogAnswerSchema = z.object({
   participantsHint: z.number().int().min(1).max(50).nullable(),
 });
 const FailureSchema = z.object({ name: z.string().max(200), message: z.string().max(2000) });
-const Bytes = z.custom<ArrayBuffer | Uint8Array>((v) => v instanceof ArrayBuffer || v instanceof Uint8Array);
+/** Кусок дорожки — около секунды Opus (~8 КБ); куда больший — уже не кусок записи, а сбой или чужие данные. */
+const MAX_CHUNK_BYTES = 8 * 1024 * 1024;
+const Bytes = z
+  .custom<ArrayBuffer | Uint8Array>((v) => v instanceof ArrayBuffer || v instanceof Uint8Array)
+  .refine((v) => v.byteLength <= MAX_CHUNK_BYTES, `кусок дорожки больше ${MAX_CHUNK_BYTES} байт`);
+const LIBRARY_LOCKED = 'Во время записи папку библиотеки менять нельзя.';
+const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 
 const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
@@ -124,13 +130,30 @@ export function registerIpc(deps: IpcDeps): void {
   };
 
   const openFolder = async (dir: string): Promise<void> => {
+    const failure = await shell.openPath(dir);
+    if (failure) throw new Error(`Не удалось открыть папку: ${failure}`);
+  };
+
+  /** Библиотеки может ещё не быть (ни одной записи) — создаём, чтобы было что открыть. */
+  const openLibraryFolder = async (dir: string): Promise<void> => {
     try {
       await fsp.mkdir(dir, { recursive: true });
     } catch (err) {
       throw humanFsError('Не удалось открыть папку', err);
     }
-    const failure = await shell.openPath(dir);
-    if (failure) throw new Error(`Не удалось открыть папку: ${failure}`);
+    await openFolder(dir);
+  };
+
+  /** Папку встречи не создаём: пустая папка без meeting.json так и висела бы в списке. */
+  const openMeetingFolder = async (dir: string): Promise<void> => {
+    try {
+      await fsp.stat(dir);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') throw new Error(MEETING_DIR_MISSING, { cause: err });
+      throw humanFsError('Не удалось открыть папку', err);
+    }
+    await openFolder(dir);
   };
 
   handle(IPC.getSettings, () => settingsState());
@@ -143,9 +166,7 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.chooseLibraryDir, async (_arg, event) => {
-    if (deps.controller.getState().phase !== 'idle') {
-      throw new Error('Во время записи папку библиотеки менять нельзя.');
-    }
+    if (deps.controller.getState().phase !== 'idle') throw new Error(LIBRARY_LOCKED);
     const owner = BrowserWindow.fromWebContents(event.sender);
     const options: Electron.OpenDialogOptions = {
       title: 'Папка библиотеки TextMeet',
@@ -154,7 +175,10 @@ export function registerIpc(deps: IpcDeps): void {
     };
     const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
     const picked = result.filePaths[0];
-    if (!result.canceled && picked) await deps.settings.update({ libraryDir: picked });
+    if (result.canceled || !picked) return settingsState();
+    // Пока было открыто окно выбора, запись могли начать клавишей или из трея.
+    if (deps.controller.getState().phase !== 'idle') throw new Error(LIBRARY_LOCKED);
+    await deps.settings.update({ libraryDir: picked });
     return settingsState();
   });
 
@@ -181,9 +205,9 @@ export function registerIpc(deps: IpcDeps): void {
     deps.hotkeys.suspend(z.boolean().parse(arg));
   });
 
-  handle(IPC.openLibraryDir, () => openFolder(deps.libraryDir()));
+  handle(IPC.openLibraryDir, () => openLibraryFolder(deps.libraryDir()));
 
-  handle(IPC.openMeetingDir, (arg) => openFolder(meetingDir(deps.libraryDir(), MeetingIdSchema.parse(arg))));
+  handle(IPC.openMeetingDir, (arg) => openMeetingFolder(meetingDir(deps.libraryDir(), MeetingIdSchema.parse(arg))));
 
   handle(IPC.listMeetings, () => listMeetings(deps.libraryDir()));
 

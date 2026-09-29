@@ -2,6 +2,8 @@
 import { formatBytes, formatDurationShort } from '../shared/format';
 import type { MediaFailure, StartProblem, SystemSettingsKind } from '../shared/recording';
 
+const RECORDER_BROKEN_TEXT = 'Окно записи несколько раз закрылось из-за сбоя. Перезапустите TextMeet.';
+
 export interface NotificationText {
   title: string;
   body: string;
@@ -56,6 +58,7 @@ export const notificationTexts = {
     title: 'Запись остановлена',
     body: 'Микрофон отключился, а звук компьютера не записывается. Записанное сохранено.',
   }),
+  recorderBroken: (): NotificationText => ({ title: 'Запись не работает', body: RECORDER_BROKEN_TEXT }),
 };
 
 export interface DialogText {
@@ -85,6 +88,8 @@ export const RECORDER_NOT_READY: StartProblem = {
   message: 'Запись ещё не готова — подождите пару секунд и попробуйте снова.',
   settings: null,
 };
+/** Окно записи падало снова и снова — его больше не перезапускают, поможет только перезапуск программы. */
+export const RECORDER_BROKEN: StartProblem = { message: RECORDER_BROKEN_TEXT, settings: null };
 export const RECORDER_TIMEOUT: StartProblem = {
   message: 'Окно записи не ответило. Попробуйте ещё раз.',
   settings: null,

@@ -5,7 +5,7 @@ import type { RecorderStartCommand, RecordingState } from '../../shared/recordin
 import { makeTempDir } from '../../test-support/temp-dir';
 import { audioDir, MEETING_FILE, meetingDir, readMeeting } from '../library/library';
 import type { Logger } from '../logger';
-import { MIC_ACCESS_DENIED, notificationTexts, RECORDER_NOT_READY, RECORDER_TIMEOUT } from '../texts';
+import { MIC_ACCESS_DENIED, notificationTexts, RECORDER_BROKEN, RECORDER_NOT_READY, RECORDER_TIMEOUT } from '../texts';
 import { RecordingController, type ControllerDeps } from './controller';
 import { DISK_CHECK_INTERVAL_MS, LOW_DISK_BEFORE_START_BYTES, SILENCE_REMINDER_MS, SYSTEM_SILENT_AFTER_MS } from './monitors';
 
@@ -24,8 +24,10 @@ function harness(overrides: Partial<ControllerDeps> = {}) {
   const lib = makeTempDir();
   const clock = { now: 1_700_000_000_000 };
   let ready = true;
+  let broken = false;
   const recorder = {
     isReady: () => ready,
+    isBroken: () => broken,
     start: vi.fn<(command: RecorderStartCommand) => void>(),
     stop: vi.fn(),
     playSound: vi.fn(),
@@ -101,6 +103,9 @@ function harness(overrides: Partial<ControllerDeps> = {}) {
     stopRecording,
     setReady: (value: boolean) => {
       ready = value;
+    },
+    setBroken: (value: boolean) => {
+      broken = value;
     },
   };
 }
@@ -241,6 +246,15 @@ describe('RecordingController — start problems', () => {
     expect(h.state()).toMatchObject({ phase: 'idle', startProblem: RECORDER_NOT_READY });
     expect(existsSync(h.lib) ? readdirSync(h.lib) : []).toEqual([]);
     expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.startFailed(RECORDER_NOT_READY), true);
+  });
+
+  it('explains that only a restart helps once the recorder window is no longer restarted', async () => {
+    const h = harness();
+    h.setReady(false);
+    h.setBroken(true);
+    await h.controller.toggle();
+    expect(h.state()).toMatchObject({ phase: 'idle', startProblem: RECORDER_BROKEN });
+    expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.startFailed(RECORDER_BROKEN), true);
   });
 
   it('does not start when the recorder window restarted during the questions before the start', async () => {
@@ -482,6 +496,26 @@ describe('RecordingController — during a recording', () => {
     expect(h.deps.logger.error).toHaveBeenCalled();
   });
 
+  it('finishes the recording in the library it started in when the folder is changed meanwhile', async () => {
+    const other = makeTempDir();
+    let current: string | null = null;
+    const h: ReturnType<typeof harness> = harness({ libraryDir: () => current ?? h.lib });
+    const free = vi.mocked(h.deps.freeBytes);
+    const command = await h.startRecording();
+
+    // Окно выбора папки открыли до старта, а ответили уже во время записи.
+    current = other;
+    h.controller.onChunk(command.meetingId, 'mic', bytes(1));
+    h.clock.now += 5_000;
+    await h.stopRecording(command.meetingId);
+
+    expect(await readMeeting(h.lib, command.meetingId)).toMatchObject({ status: 'recorded', durationSec: 5 });
+    expect([...readFileSync(join(audioDir(h.lib, command.meetingId), 'mic.webm'))]).toEqual([1]);
+    expect(readdirSync(other)).toEqual([]);
+    expect(free).not.toHaveBeenCalledWith(other);
+    expect(h.deps.notify).not.toHaveBeenCalledWith(saveFailedText);
+  });
+
   it('checks free space every minute and warns once', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const free = vi.fn(async () => 50 * GB);
@@ -630,6 +664,34 @@ describe('RecordingController — crashes and quitting', () => {
     expect(h.state()).toMatchObject({ phase: 'idle', stopDialog: null });
     expect(h.recorder.playSound).not.toHaveBeenCalledWith('stop');
     expect(h.deps.showMainWindow).not.toHaveBeenCalled();
+    expect((await readMeeting(h.lib, command.meetingId)).status).toBe('recorded');
+  });
+
+  it('ignores toggles once the quit is decided', async () => {
+    const h = harness();
+    h.controller.lockForQuit();
+
+    await h.controller.toggle();
+    await h.controller.start();
+
+    expect(h.recorder.start).not.toHaveBeenCalled();
+    expect(h.states).toEqual([]);
+  });
+
+  it('leaves a recording to the quit once the quit is decided', async () => {
+    const h = harness();
+    const command = await h.startRecording();
+    h.controller.lockForQuit();
+
+    await h.controller.toggle();
+    expect(h.recorder.stop).not.toHaveBeenCalled();
+    expect(h.state().phase).toBe('recording');
+
+    const quitting = h.controller.stopForQuit();
+    await vi.waitFor(() => expect(h.recorder.stop).toHaveBeenCalled());
+    h.controller.onStopped({ meetingId: command.meetingId });
+    await quitting;
+    expect(h.state()).toMatchObject({ phase: 'idle', stopDialog: null });
     expect((await readMeeting(h.lib, command.meetingId)).status).toBe('recorded');
   });
 

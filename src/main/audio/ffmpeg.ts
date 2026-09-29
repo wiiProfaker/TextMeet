@@ -59,7 +59,9 @@ export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: 
       clearTimeout(watchdog);
       watchdog = setTimeout(() => {
         stalled = true;
-        child.kill();
+        // Жёстко: зависший ffmpeg может не ответить на SIGTERM (ffmpeg 7 с -re так и висит), а результат всё равно
+        // выбрасывается. На Windows любой kill и так жёсткий.
+        child.kill('SIGKILL');
       }, stallMs);
     };
     rearmWatchdog();

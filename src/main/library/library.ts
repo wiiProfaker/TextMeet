@@ -118,12 +118,18 @@ export function updateMeeting(
   return run;
 }
 
-/** Все встречи библиотеки, новые сверху. Повреждённые не роняют список, а помечаются. */
-export async function listMeetings(libraryDir: string): Promise<MeetingListEntry[]> {
+/**
+ * Все встречи библиотеки, новые сверху. Повреждённые не роняют список, а помечаются.
+ * mixFailed — встречи, которые не удалось свести (это знает только очередь сведения).
+ */
+export async function listMeetings(
+  libraryDir: string,
+  mixFailed: (meetingId: string) => boolean = () => false,
+): Promise<MeetingListEntry[]> {
   await fsp.mkdir(libraryDir, { recursive: true });
   const dirents = await fsp.readdir(libraryDir, { withFileTypes: true });
   const ids = dirents.filter((d) => d.isDirectory() && MEETING_ID_PATTERN.test(d.name)).map((d) => d.name);
-  const entries = await Promise.all(ids.map((id) => readEntry(libraryDir, id)));
+  const entries = await Promise.all(ids.map((id) => readEntry(libraryDir, id, mixFailed)));
   return entries.sort((a, b) => entryId(b).localeCompare(entryId(a)));
 }
 
@@ -134,7 +140,11 @@ async function fileExists(file: string): Promise<boolean> {
   );
 }
 
-async function readEntry(libraryDir: string, id: string): Promise<MeetingListEntry> {
+async function readEntry(
+  libraryDir: string,
+  id: string,
+  mixFailed: (meetingId: string) => boolean,
+): Promise<MeetingListEntry> {
   try {
     const result = await readJsonFile(join(libraryDir, id, MEETING_FILE), MeetingSchema);
     if (!result.ok) {
@@ -145,7 +155,7 @@ async function readEntry(libraryDir: string, id: string): Promise<MeetingListEnt
       return { kind: 'broken', id, reason: `id в meeting.json (${result.value.id}) не совпадает с именем папки` };
     }
     const mixReady = await fileExists(join(libraryDir, id, AUDIO_DIR, MIX_FILE));
-    return { kind: 'ok', meeting: result.value, mixReady };
+    return { kind: 'ok', meeting: result.value, mixReady, mixFailed: mixFailed(id) };
   } catch (err) {
     return { kind: 'broken', id, reason: (err as Error).message };
   }

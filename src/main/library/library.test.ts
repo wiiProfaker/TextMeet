@@ -139,7 +139,7 @@ describe('listMeetings', () => {
       '2026-09-22_1200_cccccc',
       older.id,
     ]);
-    expect(list[0]).toMatchObject({ kind: 'ok', mixReady: false });
+    expect(list[0]).toMatchObject({ kind: 'ok', mixReady: false, mixFailed: false });
     expect(list[1]).toEqual({ kind: 'creating', id: '2026-09-23_1200_dddddd' });
     expect(list[2]).toMatchObject({ kind: 'broken', id: '2026-09-22_1200_cccccc' });
   });
@@ -148,7 +148,14 @@ describe('listMeetings', () => {
     const lib = tempLibrary();
     const meeting = await createMeeting(lib, { source: 'recording', status: 'recorded', now: at });
     writeFileSync(join(audioDir(lib, meeting.id), 'mix.opus'), 'x');
-    expect(await listMeetings(lib)).toEqual([{ kind: 'ok', meeting, mixReady: true }]);
+    expect(await listMeetings(lib)).toEqual([{ kind: 'ok', meeting, mixReady: true, mixFailed: false }]);
+  });
+
+  it('reports the meetings whose mix failed', async () => {
+    const lib = tempLibrary();
+    const failed = await createMeeting(lib, { source: 'recording', status: 'recorded', now: at });
+    const list = await listMeetings(lib, (id) => id === failed.id);
+    expect(list).toEqual([{ kind: 'ok', meeting: failed, mixReady: false, mixFailed: true }]);
   });
 
   it('marks a meeting whose id does not match its folder', async () => {

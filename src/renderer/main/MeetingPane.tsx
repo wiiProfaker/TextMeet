@@ -49,7 +49,7 @@ export function MeetingPane({ entry, onError }: Props) {
     );
   }
 
-  const { meeting, mixReady } = entry;
+  const { meeting, mixReady, mixFailed } = entry;
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
   if (meeting.participantsHint !== null) meta.push(participantsText(meeting.participantsHint));
   const hasAudio = meeting.tracks.length > 0;
@@ -88,7 +88,13 @@ export function MeetingPane({ entry, onError }: Props) {
       {mixReady ? (
         <Player meetingId={meeting.id} fallbackDuration={meeting.durationSec} />
       ) : (
-        hasAudio && <footer className="player pending">Готовим запись для прослушивания…</footer>
+        hasAudio && (
+          <footer className="player pending">
+            {mixFailed
+              ? 'Не удалось подготовить запись для прослушивания — дорожки лежат в папке встречи.'
+              : 'Готовим запись для прослушивания…'}
+          </footer>
+        )
       )}
     </main>
   );

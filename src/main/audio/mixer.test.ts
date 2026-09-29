@@ -113,58 +113,84 @@ describe('meetingsNeedingMix', () => {
   const meeting = (id: string, patch: Partial<Meeting>): Meeting =>
     ({ id, status: 'recorded', tracks: [{ kind: 'mic', file: 'mic.webm', startOffsetMs: 0 }], ...patch }) as Meeting;
 
-  it('picks finished recordings with tracks and without a mix', () => {
+  it('picks finished recordings with tracks and without a mix, skipping recordings that ended in an error', () => {
     const entries: MeetingListEntry[] = [
-      { kind: 'ok', meeting: meeting('a', {}), mixReady: false },
-      { kind: 'ok', meeting: meeting('b', {}), mixReady: true },
-      { kind: 'ok', meeting: meeting('c', { status: 'recording' }), mixReady: false },
-      { kind: 'ok', meeting: meeting('d', { tracks: [] }), mixReady: false },
-      { kind: 'ok', meeting: meeting('e', { status: 'error' }), mixReady: false },
+      { kind: 'ok', meeting: meeting('a', {}), mixReady: false, mixFailed: false },
+      { kind: 'ok', meeting: meeting('b', {}), mixReady: true, mixFailed: false },
+      { kind: 'ok', meeting: meeting('c', { status: 'recording' }), mixReady: false, mixFailed: false },
+      { kind: 'ok', meeting: meeting('d', { tracks: [] }), mixReady: false, mixFailed: false },
+      { kind: 'ok', meeting: meeting('e', { status: 'error' }), mixReady: false, mixFailed: false },
       { kind: 'broken', id: 'f', reason: 'x' },
       { kind: 'creating', id: 'g' },
     ];
-    expect(meetingsNeedingMix(entries)).toEqual(['a', 'e']);
+    expect(meetingsNeedingMix(entries)).toEqual(['a']);
   });
 });
 
 describe('Mixer', () => {
+  function mixerWith(mix: (libraryDir: string, meetingId: string) => Promise<void>, logger = fakeLogger()) {
+    const onSettled = vi.fn<(meetingId: string) => void>();
+    const mixer = new Mixer({ ffmpegPath: () => 'ffmpeg', logger, onSettled, mix });
+    return { mixer, onSettled, logger };
+  }
+
   it('mixes queued meetings one by one without duplicates', async () => {
     const order: string[] = [];
-    const onMixed = vi.fn();
-    const mixer = new Mixer({
-      libraryDir: () => 'lib',
-      ffmpegPath: () => 'ffmpeg',
-      logger: fakeLogger(),
-      onMixed,
-      mix: async (_lib, id) => {
-        order.push(id);
-      },
+    const { mixer, onSettled } = mixerWith(async (lib, id) => {
+      order.push(`${lib}/${id}`);
     });
-    mixer.enqueue('a');
-    mixer.enqueue('b');
-    mixer.enqueue('b');
-    await mixer.whenIdle();
-    expect(order).toEqual(['a', 'b']);
-    expect(onMixed).toHaveBeenCalledTimes(2);
+    mixer.enqueue('lib', 'a');
+    mixer.enqueue('lib', 'b');
+    mixer.enqueue('lib', 'b');
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledTimes(2));
+    expect(order).toEqual(['lib/a', 'lib/b']);
   });
 
-  it('logs a failure and goes on with the next meeting', async () => {
-    const logger = fakeLogger();
-    const onMixed = vi.fn();
-    const mixer = new Mixer({
-      libraryDir: () => 'lib',
-      ffmpegPath: () => 'ffmpeg',
-      logger,
-      onMixed,
-      mix: async (_lib, id) => {
-        if (id === 'bad') throw new Error('boom');
-      },
+  it('mixes each meeting in the library it was queued from', async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const first = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    mixer.enqueue('bad');
-    mixer.enqueue('good');
-    await mixer.whenIdle();
+    const { mixer, onSettled } = mixerWith(async (lib, id) => {
+      order.push(`${lib}/${id}`);
+      if (order.length === 1) await first;
+    });
+    mixer.enqueue('old-lib', 'a');
+    mixer.enqueue('old-lib', 'b');
+    mixer.enqueue('new-lib', 'b');
+    release();
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledTimes(3));
+    expect(order).toEqual(['old-lib/a', 'old-lib/b', 'new-lib/b']);
+  });
+
+  it('logs a failure, remembers it and goes on with the next meeting', async () => {
+    const { mixer, onSettled, logger } = mixerWith(async (_lib, id) => {
+      if (id === 'bad') throw new Error('boom');
+    });
+    mixer.enqueue('lib', 'bad');
+    mixer.enqueue('lib', 'good');
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledTimes(2));
     expect(logger.error).toHaveBeenCalledOnce();
-    expect(onMixed).toHaveBeenCalledWith('good');
-    await expect(new Mixer({ libraryDir: () => '', ffmpegPath: () => '', logger, onMixed }).whenIdle()).resolves.toBeUndefined();
+    expect(onSettled).toHaveBeenNthCalledWith(1, 'bad');
+    expect(onSettled).toHaveBeenNthCalledWith(2, 'good');
+    expect(mixer.hasFailed('lib', 'bad')).toBe(true);
+    expect(mixer.hasFailed('lib', 'good')).toBe(false);
+    expect(mixer.hasFailed('other-lib', 'bad')).toBe(false);
+  });
+
+  it('forgets a failure once the meeting is mixed after all', async () => {
+    let attempts = 0;
+    const { mixer, onSettled } = mixerWith(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('busy');
+    });
+    mixer.enqueue('lib', 'a');
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    expect(mixer.hasFailed('lib', 'a')).toBe(true);
+
+    mixer.enqueue('lib', 'a');
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledTimes(2));
+    expect(mixer.hasFailed('lib', 'a')).toBe(false);
   });
 });

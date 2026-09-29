@@ -45,7 +45,14 @@ export type TrackKind = z.infer<typeof TrackKindSchema>;
 export type Track = z.infer<typeof TrackSchema>;
 
 export type MeetingListEntry =
-  | { kind: 'ok'; meeting: Meeting; /** Готово ли сведение для прослушивания (audio/mix.opus). */ mixReady: boolean }
+  | {
+      kind: 'ok';
+      meeting: Meeting;
+      /** Готово ли сведение для прослушивания (audio/mix.opus). */
+      mixReady: boolean;
+      /** Сведение в этом запуске программы не удалось: ждать «Готовим…» бесполезно. */
+      mixFailed: boolean;
+    }
   /** Папка есть, meeting.json ещё нет: встреча только что создаётся (или создание прервалось). */
   | { kind: 'creating'; id: string }
   | { kind: 'broken'; id: string; reason: string };

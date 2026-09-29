@@ -68,7 +68,8 @@ export interface ControllerDeps {
   emitState(state: RecordingState): void;
   emitPeaks(peaks: Peaks): void;
   libraryChanged(): void;
-  enqueueMix(meetingId: string): void;
+  /** Свести дорожки встречи из этой библиотеки (папку могли сменить, пока шла запись). */
+  enqueueMix(libraryDir: string, meetingId: string): void;
   openTracks?: typeof openTrackFiles;
   timeouts?: { startMs: number; stopMs: number };
 }
@@ -161,15 +162,28 @@ export class RecordingController {
     this.update({ startProblem: null });
   }
 
-  /** Ответ в окне «Запись остановлена». */
+  /**
+   * Ответ в окне «Запись остановлена».
+   * «Пропустить» (participantsHint === null) закрывает окно, даже если ответ не сохранился (папку встречи
+   * удалили, нет прав, кончилось место): иначе окно на всё главное окно не закрыть ничем. Ошибка всё равно
+   * уходит в окно — там её покажут в боковой панели. При «Расшифровать» окно остаётся открытым с ошибкой.
+   */
   async finishStopDialog(answer: StopDialogAnswer): Promise<void> {
     const title = answer.title.trim();
-    await updateMeeting(this.deps.libraryDir(), answer.meetingId, (m) => ({
-      ...m,
-      title: title === '' ? m.title : title,
-      participantsHint: answer.participantsHint,
-    }));
-    if (this.state.stopDialog?.meetingId === answer.meetingId) this.update({ stopDialog: null });
+    const skipped = answer.participantsHint === null;
+    let saved = false;
+    try {
+      await updateMeeting(this.deps.libraryDir(), answer.meetingId, (m) => ({
+        ...m,
+        title: title === '' ? m.title : title,
+        participantsHint: answer.participantsHint,
+      }));
+      saved = true;
+    } catch (err) {
+      throw humanFsError('Не удалось сохранить ответ в окне «Запись остановлена»', err);
+    } finally {
+      if ((saved || skipped) && this.state.stopDialog?.meetingId === answer.meetingId) this.update({ stopDialog: null });
+    }
     this.deps.libraryChanged();
   }
 
@@ -441,7 +455,7 @@ export class RecordingController {
       recovered: m.recovered || session.interrupted,
     }));
     if (reason !== 'quit' && this.deps.settings().recordSounds) this.deps.recorder.playSound('stop');
-    this.deps.enqueueMix(meeting.id);
+    this.deps.enqueueMix(libraryDir, meeting.id);
     this.deps.logger.info(`Запись остановлена: ${meeting.id}, ${durationSec} с (${reason})`);
 
     if (reason === 'quit') {
@@ -460,7 +474,7 @@ export class RecordingController {
     this.clearTimers(session);
     await session.files?.close();
     const meeting = await finalizeInterrupted(session.libraryDir, session.meeting.id);
-    this.deps.enqueueMix(meeting.id);
+    this.deps.enqueueMix(session.libraryDir, meeting.id);
     this.deps.notify(notificationTexts.interrupted());
     this.resetToIdle(session, null);
     this.deps.libraryChanged();

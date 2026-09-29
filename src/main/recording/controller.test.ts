@@ -151,7 +151,7 @@ describe('RecordingController — normal recording', () => {
     expect([...readFileSync(join(dir, 'system.webm'))]).toEqual([7]);
     expect(await readMeeting(h.lib, command.meetingId)).toMatchObject({ status: 'recorded', durationSec: 42.5 });
     expect(h.recorder.playSound).toHaveBeenLastCalledWith('stop');
-    expect(h.deps.enqueueMix).toHaveBeenCalledWith(command.meetingId);
+    expect(h.deps.enqueueMix).toHaveBeenCalledWith(h.lib, command.meetingId);
     expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.stopped(42.5), true);
     expect(h.deps.showMainWindow).toHaveBeenCalled();
     expect(h.state()).toMatchObject({
@@ -512,6 +512,7 @@ describe('RecordingController — during a recording', () => {
     expect(await readMeeting(h.lib, command.meetingId)).toMatchObject({ status: 'recorded', durationSec: 5 });
     expect([...readFileSync(join(audioDir(h.lib, command.meetingId), 'mic.webm'))]).toEqual([1]);
     expect(readdirSync(other)).toEqual([]);
+    expect(h.deps.enqueueMix).toHaveBeenCalledWith(h.lib, command.meetingId);
     expect(free).not.toHaveBeenCalledWith(other);
     expect(h.deps.notify).not.toHaveBeenCalledWith(saveFailedText);
   });
@@ -577,7 +578,7 @@ describe('RecordingController — crashes and quitting', () => {
     await vi.waitFor(() => expect(h.state().phase).toBe('idle'));
     expect(await readMeeting(h.lib, command.meetingId)).toMatchObject({ status: 'recorded', recovered: true });
     expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.interrupted());
-    expect(h.deps.enqueueMix).toHaveBeenCalledWith(command.meetingId);
+    expect(h.deps.enqueueMix).toHaveBeenCalledWith(h.lib, command.meetingId);
     expect(h.state().stopDialog).toBeNull();
   });
 
@@ -768,5 +769,31 @@ describe('RecordingController — stop dialog', () => {
     await h.controller.finishStopDialog({ meetingId: first.meetingId, title: 'Первая', participantsHint: 2 });
 
     expect(h.state().stopDialog?.meetingId).toBe(second.meetingId);
+  });
+
+  it('closes the dialog on skip even when the answer cannot be saved, and still reports the error', async () => {
+    const h = harness();
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    breakMeetingFile(h.lib, command.meetingId);
+
+    await expect(
+      h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: null }),
+    ).rejects.toThrow(/^Не удалось сохранить ответ/);
+
+    expect(h.state().stopDialog).toBeNull();
+  });
+
+  it('keeps the dialog open when the number of participants cannot be saved', async () => {
+    const h = harness();
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    breakMeetingFile(h.lib, command.meetingId);
+
+    await expect(
+      h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: 3 }),
+    ).rejects.toThrow(/^Не удалось сохранить ответ/);
+
+    expect(h.state().stopDialog?.meetingId).toBe(command.meetingId);
   });
 });

@@ -144,9 +144,9 @@ describe('groupByDay', () => {
 
   it('groups consecutive meetings of one day', () => {
     const entries: MeetingListEntry[] = [
-      { kind: 'ok', meeting: meeting('a', new Date(2026, 8, 28, 14, 30)), mixReady: false },
+      { kind: 'ok', meeting: meeting('a', new Date(2026, 8, 28, 14, 30)), mixReady: false, mixFailed: false },
       { kind: 'creating', id: '2026-09-28_1100_bbbbbb' },
-      { kind: 'ok', meeting: meeting('c', new Date(2026, 8, 27, 16, 20)), mixReady: false },
+      { kind: 'ok', meeting: meeting('c', new Date(2026, 8, 27, 16, 20)), mixReady: false, mixFailed: false },
       { kind: 'broken', id: '2026-09-25_2109_dddddd', reason: 'x' },
       { kind: 'broken', id: 'странная-папка', reason: 'x' },
     ];

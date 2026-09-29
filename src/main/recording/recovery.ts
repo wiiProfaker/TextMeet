@@ -26,6 +26,7 @@ async function tracksOnDisk(dir: string): Promise<Track[]> {
 /**
  * Закрывает прерванную запись: «записано» с пометкой «восстановлена после сбоя»,
  * а если звука не осталось — «ошибка». Длительность заполнит сведение (mixer).
+ * У «ошибки» дорожек нет: пустые файлы сводить нечего, а с дорожками встреча вечно ждала бы сведения.
  */
 export async function finalizeInterrupted(libraryDir: string, meetingId: string): Promise<Meeting> {
   const meeting = await readMeeting(libraryDir, meetingId);
@@ -35,7 +36,7 @@ export async function finalizeInterrupted(libraryDir: string, meetingId: string)
   return updateMeeting(libraryDir, meetingId, (m) =>
     hasAudio
       ? { ...m, status: 'recorded', recovered: true, tracks }
-      : { ...m, status: 'error', recovered: true, tracks, errorMessage: INTERRUPTED_WITHOUT_AUDIO },
+      : { ...m, status: 'error', recovered: true, tracks: [], errorMessage: INTERRUPTED_WITHOUT_AUDIO },
   );
 }
 

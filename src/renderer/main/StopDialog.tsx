@@ -22,7 +22,7 @@ function keepFocusInside(dialog: HTMLElement, event: KeyboardEvent<HTMLDivElemen
 }
 
 /** «Запись остановлена»: название и число участников (подсказка для разделения по голосам). */
-export function StopDialog({ data }: { data: StopDialogData }) {
+export function StopDialog({ data, onError }: { data: StopDialogData; onError(message: string): void }) {
   const [title, setTitle] = useState(data.title);
   const [choice, setChoice] = useState<number | null>(null);
   const [other, setOther] = useState('');
@@ -43,7 +43,9 @@ export function StopDialog({ data }: { data: StopDialogData }) {
     try {
       await window.textmeet.finishStopDialog({ meetingId: data.meetingId, title, participantsHint });
     } catch (err) {
-      setError(errorText(err));
+      // «Пропустить» и Esc закрывают окно и при ошибке (main уже убрал его) — ошибку показывает боковая панель.
+      if (participantsHint === null) onError(errorText(err));
+      else setError(errorText(err));
       setSaving(false);
     }
   };

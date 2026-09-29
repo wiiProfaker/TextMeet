@@ -78,7 +78,7 @@ describe('MeetingSchema', () => {
 
 describe('entryId', () => {
   it('returns the id of every kind of entry', () => {
-    expect(entryId({ kind: 'ok', meeting: valid, mixReady: false })).toBe(valid.id);
+    expect(entryId({ kind: 'ok', meeting: valid, mixReady: false, mixFailed: false })).toBe(valid.id);
     expect(entryId({ kind: 'creating', id: 'x' })).toBe('x');
     expect(entryId({ kind: 'broken', id: 'y', reason: 'r' })).toBe('y');
   });

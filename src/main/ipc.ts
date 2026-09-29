@@ -34,6 +34,8 @@ export interface IpcDeps {
   hotkeys: HotkeyManager;
   controller: RecordingController;
   libraryDir(): string;
+  /** Сведение этой встречи в этом запуске не удалось (очередь сведения). */
+  mixFailed(libraryDir: string, meetingId: string): boolean;
   launchAtLoginNotice(enabled: boolean): LaunchAtLoginNotice;
   applyLaunchAtLogin(enabled: boolean): void;
   mainContents(): WebContents | null;
@@ -213,7 +215,10 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.openMeetingDir, (arg) => openMeetingFolder(meetingDir(deps.libraryDir(), MeetingIdSchema.parse(arg))));
 
-  handle(IPC.listMeetings, () => listMeetings(deps.libraryDir()));
+  handle(IPC.listMeetings, () => {
+    const libraryDir = deps.libraryDir();
+    return listMeetings(libraryDir, (id) => deps.mixFailed(libraryDir, id));
+  });
 
   handle(IPC.getAppInfo, () => deps.appInfo());
 

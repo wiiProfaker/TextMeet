@@ -230,7 +230,7 @@ async function recoverAndMix(
       notify(notificationTexts.recovered(recovered.length));
       sendToMain(IPC.libraryChanged);
     }
-    for (const id of meetingsNeedingMix(await listMeetings(libraryDir))) mixer.enqueue(id);
+    for (const id of meetingsNeedingMix(await listMeetings(libraryDir))) mixer.enqueue(libraryDir, id);
   } catch (err) {
     logger.error('Не удалось проверить прерванные записи', err);
   }
@@ -265,10 +265,9 @@ async function start(logger: Logger): Promise<void> {
     isWindowActive: () => mainVisible() && !!mainWindow?.isFocused(),
   });
   const mixer = new Mixer({
-    libraryDir,
     ffmpegPath: () => resolveFfmpegPath(),
     logger,
-    onMixed: () => sendToMain(IPC.libraryChanged),
+    onSettled: () => sendToMain(IPC.libraryChanged),
   });
 
   const controller = new RecordingController({
@@ -299,7 +298,7 @@ async function start(logger: Logger): Promise<void> {
       if (mainVisible()) sendToMain(IPC.recordingPeaks, peaks);
     },
     libraryChanged: () => sendToMain(IPC.libraryChanged),
-    enqueueMix: (id) => mixer.enqueue(id),
+    enqueueMix: (dir, id) => mixer.enqueue(dir, id),
   });
   const hotkeyManager = new HotkeyManager(globalShortcut, process.platform, () => void controller.toggle());
   hotkeys = hotkeyManager;
@@ -329,6 +328,7 @@ async function start(logger: Logger): Promise<void> {
     hotkeys: hotkeyManager,
     controller,
     libraryDir,
+    mixFailed: (dir, id) => mixer.hasFailed(dir, id),
     launchAtLoginNotice: currentLaunchAtLoginNotice,
     applyLaunchAtLogin: syncLaunchAtLogin,
     mainContents: () => mainWindow?.webContents ?? null,

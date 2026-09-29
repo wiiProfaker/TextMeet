@@ -104,7 +104,7 @@ export function App() {
         </div>
       </aside>
       {pane}
-      {recording.stopDialog && <StopDialog data={recording.stopDialog} />}
+      {recording.stopDialog && <StopDialog data={recording.stopDialog} onError={setError} />}
     </div>
   );
 }

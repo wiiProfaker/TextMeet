@@ -40,13 +40,14 @@ describe('finalizeInterrupted', () => {
     expect(result.status).toBe('recorded');
   });
 
-  it('marks a recording without any audio as an error', async () => {
+  it('marks a recording without any audio as an error with no tracks to mix', async () => {
     const lib = makeTempDir();
     const meeting = await meetingWith(lib, 'recording', [mic], { 'mic.webm': '' });
     expect(await finalizeInterrupted(lib, meeting.id)).toMatchObject({
       status: 'error',
       recovered: true,
       errorMessage: INTERRUPTED_WITHOUT_AUDIO,
+      tracks: [],
     });
   });
 });

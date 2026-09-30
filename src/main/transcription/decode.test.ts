@@ -1,6 +1,8 @@
 import { execFileSync } from 'node:child_process';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { resolveFfmpegPath } from '../audio/ffmpeg';
 import { decodeToMono16k, SAMPLE_RATE } from './decode';
@@ -13,6 +15,22 @@ function toneWebm(seconds: number): string {
     '-ac', '2', '-c:a', 'libopus', '-f', 'webm', file,
   ]);
   return file;
+}
+
+const servers: Server[] = [];
+afterEach(async () => {
+  for (const server of servers.splice(0)) {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+/** «Дорожка», которую ffmpeg читает по сети, а сервер молчит: так выглядит зависший ffmpeg. */
+async function silentTrack(): Promise<string> {
+  const server = createServer(() => undefined);
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}/mic.webm`;
 }
 
 describe('decodeToMono16k', () => {
@@ -29,7 +47,31 @@ describe('decodeToMono16k', () => {
 
   it('explains a file ffmpeg cannot read', async () => {
     const file = join(makeTempDir(), 'broken.webm');
-    await expect(decodeToMono16k(resolveFfmpegPath(), file, 1)).rejects.toThrow('ffmpeg не прочитал дорожку');
+    await expect(decodeToMono16k(resolveFfmpegPath(), file, 1)).rejects.toThrow(
+      /^ffmpeg не прочитал дорожку \(завершился с кодом \d+\): .+/,
+    );
+  });
+
+  it('stops ffmpeg that stays silent too long', async () => {
+    const started = Date.now();
+    await expect(decodeToMono16k(resolveFfmpegPath(), await silentTrack(), 1, { stallMs: 500 })).rejects.toThrow('ffmpeg завис');
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('stops ffmpeg when asked to', async () => {
+    const controller = new AbortController();
+    const decoding = decodeToMono16k(resolveFfmpegPath(), await silentTrack(), 1, { signal: controller.signal });
+    setTimeout(() => controller.abort(new Error('отменено')), 200);
+    await expect(decoding).rejects.toThrow('отменено');
+  });
+
+  it('does not start ffmpeg when already stopped', async () => {
+    const controller = new AbortController();
+    controller.abort(new Error('отменено'));
+    // Несуществующий ffmpeg: если бы запуск был, ошибка была бы ENOENT.
+    await expect(decodeToMono16k(join(makeTempDir(), 'no-ffmpeg'), 'x', 1, { signal: controller.signal })).rejects.toThrow(
+      'отменено',
+    );
   });
 
   it('rejects when ffmpeg cannot be started', async () => {

@@ -28,3 +28,15 @@ export interface Engines {
   diarizer(threads: number): Diarizer;
   voiceprints(threads: number): VoiceprintExtractor;
 }
+
+/**
+ * Движки процесса расшифровки: один объект на папку моделей, общий для всех встреч, — модели загружаются один раз
+ * на процесс, а не для каждой встречи. Другая папка — новые движки.
+ */
+export function enginesByModelsDir(create: (modelsDir: string) => Engines): (modelsDir: string) => Engines {
+  let last: { modelsDir: string; engines: Engines } | null = null;
+  return (modelsDir) => {
+    if (last?.modelsDir !== modelsDir) last = { modelsDir, engines: create(modelsDir) };
+    return last.engines;
+  };
+}

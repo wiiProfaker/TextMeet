@@ -18,7 +18,9 @@ beforeAll(async () => {
   four = await fixture('fourSpeakers');
 });
 
-const engines = () => sherpaEngines(modelPaths(MODELS_ROOT));
+// Одни движки на все проверки — как в процессе расшифровки: модели загружаются один раз.
+let shared: Engines | null = null;
+const engines = (): Engines => (shared ??= sherpaEngines(modelPaths(MODELS_ROOT)));
 /** Запись четырёх человек — на китайском: русская GigaAM даёт по ней пустой текст, а пустые реплики не пишутся.
  *  Поэтому разделение по голосам проверяется с настоящими моделями голосов, но с «текстом» вместо распознавания. */
 const withoutAsr = (): Engines => ({ ...engines(), recognizer: () => ({ recognize: () => 'реплика' }) });
@@ -31,6 +33,14 @@ const run = (input: PipelineInput, useAsr = true) =>
   });
 
 describe('sherpa-onnx engines', () => {
+  it('keeps one loaded engine per number of threads', () => {
+    const e = sherpaEngines(modelPaths(MODELS_ROOT));
+    expect(e.recognizer(2)).toBe(e.recognizer(2));
+    expect(e.recognizer(1)).not.toBe(e.recognizer(2));
+    expect(e.diarizer(2)).toBe(e.diarizer(2));
+    expect(e.voiceprints(2)).toBe(e.voiceprints(2));
+  });
+
   it('GigaAM recognizes the reference recording', async () => {
     const samples = await decodeToMono16k(resolveFfmpegPath(), example, 12);
     const text = engines().recognizer(THREADS).recognize(samples);

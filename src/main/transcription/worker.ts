@@ -2,7 +2,7 @@
 // Одна задача за раз; main присылает команды, процесс — прогресс и результат. Падение процесса ловит main.
 import { modelPaths } from '../models/registry';
 import { decodeToMono16k } from './decode';
-import type { Engines } from './engines';
+import { enginesByModelsDir } from './engines';
 import { fakeEngines } from './fake-engines';
 import { runPipeline } from './pipeline';
 import { MainToWorkerSchema, WORKER_REFUSALS, type TranscribeCommand, type WorkerToMain } from './protocol';
@@ -15,12 +15,13 @@ const fake = process.env.TEXTMEET_TEST_ASR === 'fake';
 
 let threads = 1;
 let busy = false;
+/** Загруженные модели остаются в процессе между встречами (он закрывается сам после простоя). */
+const enginesFor = enginesByModelsDir((modelsDir) => (fake ? fakeEngines() : sherpaEngines(modelPaths(modelsDir))));
 
 async function transcribe(command: TranscribeCommand): Promise<void> {
   threads = command.threads;
-  const engines: Engines = fake ? fakeEngines() : sherpaEngines(modelPaths(command.modelsDir));
   const result = await runPipeline(command.input, {
-    engines,
+    engines: enginesFor(command.modelsDir),
     decode: (track, expectedSec) => decodeToMono16k(command.ffmpegPath, track.file, expectedSec),
     threads: () => threads,
     onProgress: (progress) => post({ type: 'progress', jobId: command.jobId, progress }),

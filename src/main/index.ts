@@ -428,16 +428,21 @@ async function start(logger: Logger): Promise<void> {
   });
   const onSystemEnding = (): void => {
     systemEnding = true;
-    // before-quit может и не наступить: система закроет процесс расшифровки сама, и без dispose() очередь
-    // посчитала бы это сбоем. Остановленная очередь оставляет встречу «расшифровывается» — до следующего запуска.
-    transcription?.dispose();
     void controller.stopForQuit();
   };
+  // macOS: выключение ещё можно отменить — остановленная очередь молча пропускала бы новые встречи до перезапуска.
+  // Состоявшийся выход и так пройдёт через before-quit → prepareQuit, а он остановит очередь.
   powerMonitor.on('shutdown', onSystemEnding);
 
   recorderWindow = startRecorderWindow(logger, controller, notify);
   mainWindow = startMainWindow(logger, showRequested || !startedAtLogin());
-  mainWindow.on('session-end', onSystemEnding);
+  mainWindow.on('session-end', () => {
+    // Windows: сеанс уже заканчивается, а before-quit может и не наступить: система закроет процесс расшифровки
+    // сама, и без dispose() очередь посчитала бы это сбоем. Остановленная очередь оставляет встречу
+    // «расшифровывается» — до следующего запуска.
+    transcription?.dispose();
+    onSystemEnding();
+  });
   windowsCreated = true;
   tray = createTray(
     { openWindow: () => openMainWindow(logger), toggleRecording: () => void controller.toggle(), quit: () => app.quit() },

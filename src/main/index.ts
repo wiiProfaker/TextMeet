@@ -406,6 +406,9 @@ async function start(logger: Logger): Promise<void> {
   });
   const onSystemEnding = (): void => {
     systemEnding = true;
+    // before-quit может и не наступить: система закроет процесс расшифровки сама, и без dispose() очередь
+    // посчитала бы это сбоем. Остановленная очередь оставляет встречу «расшифровывается» — до следующего запуска.
+    transcription?.dispose();
     void controller.stopForQuit();
   };
   powerMonitor.on('shutdown', onSystemEnding);

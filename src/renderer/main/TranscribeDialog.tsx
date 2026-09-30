@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { errorText } from './errors';
 import { keepFocusInside } from './focus';
 import { choiceFor, readChoice } from './participants';
@@ -19,8 +19,14 @@ export function TranscribeDialog({ meetingId, again, participantsHint, onClose }
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
-  useEffect(() => dialog.current?.focus(), []);
+  useEffect(() => {
+    // Окно закрылось — фокус возвращается на кнопку, которая его открыла.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialog.current?.focus();
+    return () => opener?.focus();
+  }, []);
 
   const confirm = async () => {
     const n = readChoice(participants);
@@ -46,14 +52,14 @@ export function TranscribeDialog({ meetingId, again, participantsHint, onClose }
         className="dlg"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="transcribe-title"
+        aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !saving) onClose();
           if (e.key === 'Tab' && dialog.current) keepFocusInside(dialog.current, e);
         }}
       >
-        <h2 id="transcribe-title">{title}</h2>
+        <h2 id={titleId}>{title}</h2>
         {again && <div className="meta">Текст заменится, когда новая расшифровка закончится.</div>}
         <ParticipantsPicker
           value={participants}

@@ -123,6 +123,7 @@ test('«Расшифровать заново» replaces the text and keeps the 
   await dialog.getByRole('button', { name: '2', exact: true }).click();
   await dialog.getByRole('button', { name: 'Расшифровать' }).click();
   await expect(dialog).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Расшифровать заново' })).toBeFocused();
 
   // Пока новая расшифровка идёт, старый текст виден, а над ним — её ход.
   await expect(page.getByText('Текст заменится, когда новая расшифровка закончится.')).toBeVisible();

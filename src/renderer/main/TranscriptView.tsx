@@ -23,16 +23,16 @@ export const TranscriptView = memo(function TranscriptView({ transcript, names }
   }
   return (
     <>
-      <div className="spk" aria-label="Спикеры">
-        <span>Спикеры</span>
+      <div className="spk" role="list" aria-label="Спикеры">
+        <span aria-hidden="true">Спикеры</span>
         {transcript.speakers.map((s) => (
-          <span key={s.id} className="chip">
+          <span key={s.id} className="chip" role="listitem">
             <span className={`pip ${speakerTone(s.id)}`} />
             {speakerLabel(s.id, names)}
           </span>
         ))}
       </div>
-      <div className="tx" aria-label="Текст встречи">
+      <div className="tx" role="region" aria-label="Текст встречи">
         {transcript.segments.map((segment) => (
           <div key={segment.id} className="row">
             <span className="t">{formatTimestamp(segment.start)}</span>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { StopDialogData } from '../../shared/recording';
 import { errorText } from './errors';
 import { formatDurationWithSeconds } from './format';
@@ -13,6 +13,7 @@ export function StopDialog({ data, onError }: { data: StopDialogData; onError(me
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     setTitle(data.title);
@@ -53,14 +54,14 @@ export function StopDialog({ data, onError }: { data: StopDialogData; onError(me
         className="dlg"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="stop-title"
+        aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !saving) void finish(null);
           if (e.key === 'Tab' && dialog.current) keepFocusInside(dialog.current, e);
         }}
       >
-        <h2 id="stop-title">Запись остановлена</h2>
+        <h2 id={titleId}>Запись остановлена</h2>
         <div className="meta">{formatDurationWithSeconds(data.durationSec)} · уже сохранена в библиотеке</div>
         <label className="lab">
           Название

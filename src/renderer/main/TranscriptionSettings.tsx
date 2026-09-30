@@ -79,9 +79,9 @@ export function TranscriptionSettings() {
           {installed.length === 0 ? (
             <small>Пока ничего не скачано.</small>
           ) : (
-            <div className="mlist" aria-label="Скачанные модели">
+            <div className="mlist" role="list" aria-label="Скачанные модели">
               {installed.map((group) => (
-                <div key={group.id}>
+                <div key={group.id} role="listitem">
                   {group.title}
                   <span>{formatBytes(group.sizeBytes)}</span>
                   <button

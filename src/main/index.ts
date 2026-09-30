@@ -118,7 +118,9 @@ function startMainWindow(logger: Logger, show: boolean): BrowserWindow {
   const resumeHotkey = (): void => hotkeys?.suspend(false);
   win.webContents.on('render-process-gone', resumeHotkey);
   win.webContents.on('did-start-loading', resumeHotkey);
-  win.webContents.on('did-finish-load', () => {
+  // Не did-finish-load: после него страница может ещё грузиться (isLoading() — true), и щелчок в этот момент
+  // ждал бы события, которое уже прошло. did-stop-loading наступает, когда isLoading() становится false.
+  win.webContents.on('did-stop-loading', () => {
     const id = pendingMeetingId;
     pendingMeetingId = null;
     if (id) win.webContents.send(IPC.showMeeting, id);

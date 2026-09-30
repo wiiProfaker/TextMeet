@@ -178,6 +178,16 @@ describe('meetingNote', () => {
     expect(meetingNote(meeting('a', at, { status: 'transcribing' }))?.text).toBe('расшифровка…');
     expect(meetingNote(meeting('a', at, { status: 'error' }))).toEqual({ text: 'ошибка', tone: 'error' });
   });
+
+  it('shows the progress of transcription and its errors', () => {
+    const tracks = [{ kind: 'mic' as const, file: 'mic.webm', startOffsetMs: 0 }];
+    const progress = { meetingId: 'a', stage: 'others' as const, fraction: 0.624, download: null };
+    expect(meetingNote(meeting('a', at, { status: 'transcribing' }), progress)?.text).toBe('расшифровка 62%');
+    expect(
+      meetingNote(meeting('a', at, { status: 'transcribing' }), { ...progress, stage: 'download', fraction: 0 })?.text,
+    ).toBe('скачиваем модель…');
+    expect(meetingNote(meeting('a', at, { status: 'error', tracks }))).toEqual({ text: 'ошибка расшифровки', tone: 'error' });
+  });
 });
 
 describe('cleanDeviceLabel', () => {

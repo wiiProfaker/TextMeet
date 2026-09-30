@@ -3,7 +3,7 @@ import type { AppInfo, SettingsState } from '../../shared/ipc';
 import { entryId } from '../../shared/meeting';
 import { IDLE_RECORDING_STATE } from '../../shared/recording';
 import { errorText } from './errors';
-import { useMeetings, useMicrophones, useRecordingState } from './hooks';
+import { useMeetings, useMicrophones, useRecordingState, useTranscriptionProgress } from './hooks';
 import { SettingsIcon } from './icons';
 import { LivePane } from './LivePane';
 import { MeetingList } from './MeetingList';
@@ -18,6 +18,7 @@ export function App() {
   const recording = useRecordingState() ?? IDLE_RECORDING_STATE;
   const { entries, error: listError } = useMeetings();
   const microphones = useMicrophones();
+  const progress = useTranscriptionProgress();
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -37,6 +38,8 @@ export function App() {
   useEffect(() => {
     if (liveId) setSelection({ kind: 'meeting', id: liveId });
   }, [liveId]);
+  // Щелчок по уведомлению «Текст встречи готов» — показать эту встречу.
+  useEffect(() => window.textmeet.onShowMeeting((id) => setSelection({ kind: 'meeting', id })), []);
   const dialogId = recording.stopDialog?.meetingId ?? null;
   useEffect(() => {
     if (dialogId) setSelection({ kind: 'meeting', id: dialogId });
@@ -57,7 +60,15 @@ export function App() {
     const title = selectedEntry?.kind === 'ok' ? selectedEntry.meeting.title : 'Новая встреча';
     pane = <LivePane state={recording} title={title} hotkey={hotkey} platform={platform} onError={setError} />;
   } else if (selectedEntry) {
-    pane = <MeetingPane entry={selectedEntry} onError={setError} />;
+    // key: у другой встречи — своё состояние (открытое окно «Расшифровать заново» к ней не переходит).
+    pane = (
+      <MeetingPane
+        key={entryId(selectedEntry)}
+        entry={selectedEntry}
+        progress={progress.get(entryId(selectedEntry)) ?? null}
+        onError={setError}
+      />
+    );
   } else {
     pane = (
       <main className="pane" aria-label="Встреча">
@@ -83,6 +94,7 @@ export function App() {
           error={listError}
           recording={recording}
           selectedId={selectedId}
+          progress={progress}
           onSelect={(id) => setSelection({ kind: 'meeting', id })}
         />
         <div className="foot">

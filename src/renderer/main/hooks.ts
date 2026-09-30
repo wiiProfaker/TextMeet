@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { MeetingListEntry } from '../../shared/meeting';
+import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
+import type { Transcript } from '../../shared/transcript';
+import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { cleanDeviceLabel } from './format';
 
@@ -116,4 +118,56 @@ export function useMicrophones(): { devices: Microphone[]; defaultLabel: string 
     };
   }, []);
   return result;
+}
+
+/** Ход расшифровки по встречам: сначала запрос, дальше — события. */
+export function useTranscriptionProgress(): ReadonlyMap<string, TranscriptionProgress> {
+  const [list, setList] = useState<TranscriptionProgress[]>([]);
+  useEffect(() => {
+    let active = true;
+    let gotEvent = false;
+    const unsubscribe = window.textmeet.onTranscriptionProgress((next) => {
+      gotEvent = true;
+      setList(next);
+    });
+    window.textmeet
+      .getTranscriptionProgress()
+      .then((initial) => {
+        if (active && !gotEvent) setList(initial);
+      })
+      .catch((err: unknown) => console.error('TextMeet: ход расшифровки не получен', errorText(err)));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+  return new Map(list.map((p) => [p.meetingId, p]));
+}
+
+export type TranscriptLoad =
+  | { kind: 'loading' }
+  | { kind: 'none' }
+  | { kind: 'ready'; transcript: Transcript }
+  | { kind: 'error'; message: string };
+
+/**
+ * Текст встречи; перечитывается, когда меняется статус (например, расшифровка закончилась).
+ * Пока грузится текст другой встречи, прежний не показывается.
+ */
+export function useTranscript(meetingId: string, status: MeetingStatus): TranscriptLoad {
+  const [state, setState] = useState<{ meetingId: string; load: TranscriptLoad } | null>(null);
+  useEffect(() => {
+    let active = true;
+    const done = (load: TranscriptLoad) => {
+      if (active) setState({ meetingId, load });
+    };
+    window.textmeet
+      .getTranscript(meetingId)
+      .then((transcript) => done(transcript ? { kind: 'ready', transcript } : { kind: 'none' }))
+      .catch((err: unknown) => done({ kind: 'error', message: errorText(err) }));
+    return () => {
+      active = false;
+    };
+  }, [meetingId, status]);
+  return state?.meetingId === meetingId ? state.load : { kind: 'loading' };
 }

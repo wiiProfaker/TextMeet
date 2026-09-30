@@ -5,6 +5,7 @@ import { launchAtLoginNoticeText } from './format';
 import { HotkeyField } from './HotkeyField';
 import { useMicrophones } from './hooks';
 import { ChevronIcon } from './icons';
+import { TranscriptionSettings } from './TranscriptionSettings';
 
 interface Props {
   state: SettingsState;
@@ -36,7 +37,7 @@ function Toggle({
   );
 }
 
-/** Настройки: запись и общие. Разделы расшифровки и ИИ появятся в своих планах. */
+/** Настройки: запись, расшифровка и общие. Раздел ИИ появится в Плане 6. */
 export function SettingsPane({ state, info, onChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const microphones = useMicrophones();
@@ -121,6 +122,8 @@ export function SettingsPane({ state, info, onChange }: Props) {
             </div>
           </div>
         </section>
+
+        <TranscriptionSettings />
 
         <section className="sec">
           <h2>Общие</h2>

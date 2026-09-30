@@ -12,6 +12,8 @@ import { MODEL_FILES, MODEL_GROUPS, modelFilePath, type ModelFile, type ModelGro
 export const VERIFIED_FILE = 'verified.json';
 /** Запас места сверх размера моделей. */
 const DISK_MARGIN_BYTES = 50 * 1024 * 1024;
+/** Удалять модели, пока они проверяются или скачиваются, нельзя: расшифровка ждёт именно их. */
+export const MODELS_ENSURING = 'модели сейчас проверяются или скачиваются';
 
 const VerifiedSchema = z.record(z.string(), z.object({ size: z.number(), mtimeMs: z.number(), sha256: z.string() }));
 type Verified = z.infer<typeof VerifiedSchema>;
@@ -33,6 +35,7 @@ export interface ModelManagerDeps {
 /** Модели на диске: проверка, скачивание недостающих, удаление по группам. */
 export class ModelManager {
   private ensuring: Promise<void> | null = null;
+  private removing: Promise<void> | null = null;
   private readonly files: readonly ModelFile[];
 
   constructor(private readonly deps: ModelManagerDeps) {
@@ -45,10 +48,14 @@ export class ModelManager {
 
   /**
    * Все модели на месте и целы; недостающие и испорченные скачиваются.
-   * Одновременные вызовы ждут одну и ту же проверку.
+   * Одновременные вызовы ждут одну и ту же проверку; идущее удаление проверка сначала дожидается.
    */
   ensure(onProgress: (progress: DownloadProgress) => void = () => undefined): Promise<void> {
-    this.ensuring ??= this.runEnsure(onProgress).finally(() => {
+    const removing = this.removing?.catch(() => undefined);
+    this.ensuring ??= (async () => {
+      await removing;
+      await this.runEnsure(onProgress);
+    })().finally(() => {
       this.ensuring = null;
     });
     return this.ensuring;
@@ -70,7 +77,21 @@ export class ModelManager {
     );
   }
 
-  async remove(group: ModelGroupId): Promise<void> {
+  /** Удаляет группу моделей. Во время проверки или скачивания (ensure) отказывает: main удаляет только без очереди. */
+  remove(group: ModelGroupId): Promise<void> {
+    if (this.ensuring) return Promise.reject(new Error(MODELS_ENSURING));
+    const previous = this.removing?.catch(() => undefined);
+    const removing = (async () => {
+      await previous;
+      await this.runRemove(group);
+    })();
+    this.removing = removing;
+    return removing.finally(() => {
+      if (this.removing === removing) this.removing = null;
+    });
+  }
+
+  private async runRemove(group: ModelGroupId): Promise<void> {
     const files = this.files.filter((f) => f.group === group);
     for (const file of files) {
       const path = modelFilePath(this.deps.root, file);
@@ -101,7 +122,8 @@ export class ModelManager {
     const partial = await Promise.all(
       missing.map((f) =>
         fsp.stat(`${modelFilePath(this.deps.root, f)}.part`).then(
-          (s) => Math.min(s.size, f.size),
+          // Кусок длиннее файла downloadFile выбросит и начнёт заново — он ничего не экономит.
+          (s) => (s.size > f.size ? 0 : s.size),
           () => 0,
         ),
       ),
@@ -157,14 +179,26 @@ export class ModelManager {
     return { size: stats.size, mtimeMs: stats.mtimeMs, sha256 };
   }
 
+  /** Список проверенных — только кэш: если он не читается, суммы просто посчитаются заново. */
   private async readVerified(): Promise<Verified> {
-    const result = await readJsonFile(join(this.deps.root, VERIFIED_FILE), VerifiedSchema).catch(() => null);
-    return result?.ok ? result.value : {};
+    try {
+      const result = await readJsonFile(join(this.deps.root, VERIFIED_FILE), VerifiedSchema);
+      if (result.ok) return result.value;
+      if (result.reason !== 'missing') this.deps.logger.warn(`${VERIFIED_FILE} повреждён — модели проверим заново`, result.message);
+    } catch (err) {
+      this.deps.logger.warn(`Не удалось прочитать ${VERIFIED_FILE} — модели проверим заново`, err);
+    }
+    return {};
   }
 
+  /** Записать не удалось — не беда: модели на месте, в следующий раз их суммы посчитаются заново. */
   private async writeVerified(verified: Verified): Promise<void> {
     const file = join(this.deps.root, VERIFIED_FILE);
-    await fsp.mkdir(dirname(file), { recursive: true });
-    await writeJsonAtomic(file, verified);
+    try {
+      await fsp.mkdir(dirname(file), { recursive: true });
+      await writeJsonAtomic(file, verified);
+    } catch (err) {
+      this.deps.logger.warn(`Не удалось записать ${VERIFIED_FILE}`, err);
+    }
   }
 }

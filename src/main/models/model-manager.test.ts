@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, promises as fsp, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
@@ -103,6 +103,35 @@ describe('ModelManager.ensure', () => {
     expect(fakeDownload).toHaveBeenCalledTimes(3);
   });
 
+  it('counts a .part longer than the file as nothing downloaded', async () => {
+    const root = makeTempDir();
+    for (const f of FILES) put(root, `${f.path}.part`, Buffer.alloc(f.size * 100));
+    const needed = FILES.reduce((sum, f) => sum + f.size, 0);
+    // Места на запас и на файлы целиком — хватает, только если лишние .part не вычтены из нужного.
+    const m = manager(root, { freeBytes: async () => 50 * 1024 * 1024 + needed - 1 });
+    await expect(m.ensure()).rejects.toMatchObject({ kind: 'space' });
+    await manager(root, { freeBytes: async () => 50 * 1024 * 1024 + needed }).ensure();
+  });
+
+  it('does not fail when the list of checked files cannot be saved', async () => {
+    const root = makeTempDir();
+    // Папка на месте verified.json: ни прочитать, ни записать.
+    mkdirSync(join(root, VERIFIED_FILE), { recursive: true });
+    vi.mocked(logger.warn).mockClear();
+    await manager(root).ensure();
+    expect(fakeDownload).toHaveBeenCalledTimes(3);
+    expect(readFileSync(join(root, 'v', 'vad.onnx'))).toEqual(content('v/vad.onnx'));
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('warns about a damaged verified.json instead of silently ignoring it', async () => {
+    const root = makeTempDir();
+    writeFileSync(join(root, VERIFIED_FILE), '{broken');
+    vi.mocked(logger.warn).mockClear();
+    await manager(root).state();
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining(VERIFIED_FILE), expect.anything());
+  });
+
   it('shares one check between callers', async () => {
     const root = makeTempDir();
     const m = manager(root);
@@ -141,5 +170,49 @@ describe('ModelManager.state and remove', () => {
     expect(existsSync(join(root, 'v', 'vad.onnx'))).toBe(true);
     expect((await m.state()).map((g) => g.installed)).toEqual([false, true]);
     expect(Object.keys(JSON.parse(readFileSync(join(root, VERIFIED_FILE), 'utf8')))).toEqual(['v/vad.onnx']);
+  });
+
+  it('refuses to remove models while they are being checked or downloaded', async () => {
+    const root = makeTempDir();
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const m = manager(root, {
+      download: async (options) => {
+        await gate;
+        await fakeDownload(options);
+      },
+    });
+    const ensuring = m.ensure();
+    await expect(m.remove('gigaam')).rejects.toThrow('скачиваются');
+    release();
+    await ensuring;
+    expect((await m.state()).every((g) => g.installed)).toBe(true);
+    await m.remove('gigaam');
+    expect((await m.state()).map((g) => g.installed)).toEqual([false, true]);
+  });
+
+  it('checks the models only after a running removal has finished', async () => {
+    const root = makeTempDir();
+    const m = manager(root);
+    await m.ensure();
+    fakeDownload.mockClear();
+    // Удаление медленное (антивирус держит файл): без ожидания проверка успела бы признать файлы целыми.
+    const rm = fsp.rm.bind(fsp);
+    const slowRm = vi.spyOn(fsp, 'rm').mockImplementation(async (...args) => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      await rm(...args);
+    });
+    try {
+      const removing = m.remove('gigaam');
+      const ensuring = m.ensure();
+      await Promise.all([removing, ensuring]);
+    } finally {
+      slowRm.mockRestore();
+    }
+    // Проверка не увидела файлы, которые удаление вот-вот сотрёт: удалённое скачано заново.
+    expect(fakeDownload).toHaveBeenCalledTimes(2);
+    expect((await m.state()).every((g) => g.installed)).toBe(true);
   });
 });

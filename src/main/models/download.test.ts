@@ -210,9 +210,43 @@ describe('downloadFile', () => {
       setTimeout(() => res.destroy(), 20);
     });
     const dest = join(makeTempDir(), 'model.onnx');
-    await downloadFile({ ...options(url, dest), retries: 2 });
+    await downloadFile({ ...options(url, dest), retries: 2, minProgressBytes: 1000 });
     expect(readFileSync(dest)).toEqual(BODY);
     expect(ranges.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('does not count a trickle as progress', async () => {
+    // Каждая попытка приносит 100 байт — меньше порога: повторы расходуются, как при полном обрыве.
+    const { url, ranges } = await serve((req, res) => {
+      const match = /^bytes=(\d+)-$/.exec(req.headers.range ?? '');
+      const from = match ? Number(match[1]) : 0;
+      res.writeHead(match ? 206 : 200, {
+        'content-length': BODY.length - from,
+        ...(match && { 'content-range': `bytes ${from}-${BODY.length - 1}/${BODY.length}` }),
+      });
+      res.write(BODY.subarray(from, from + 100));
+      setTimeout(() => res.destroy(), 20);
+    });
+    const dest = join(makeTempDir(), 'model.onnx');
+    await expect(downloadFile({ ...options(url, dest), retries: 2, minProgressBytes: 1000 })).rejects.toMatchObject({
+      kind: 'network',
+    });
+    expect(ranges).toHaveLength(3);
+  });
+
+  it('does not count a restart from zero as progress', async () => {
+    // Сервер не умеет Range: каждая попытка качает с нуля и обрывается чуть дальше прежнего (на 300 байт).
+    const { url, ranges } = await serve((_req, res, n) => {
+      res.writeHead(200, { 'content-length': BODY.length });
+      res.write(BODY.subarray(0, 3000 + 300 * n));
+      setTimeout(() => res.destroy(), 20);
+    });
+    const dest = join(makeTempDir(), 'model.onnx');
+    await expect(downloadFile({ ...options(url, dest), retries: 2, minProgressBytes: 1000 })).rejects.toMatchObject({
+      kind: 'network',
+    });
+    // Первая попытка (3000 байт с нуля) — продвижение, дальше +300 байт сверх достигнутого не считаются.
+    expect(ranges).toHaveLength(4);
   });
 
   it('starts over when a resumed answer begins at another place', async () => {

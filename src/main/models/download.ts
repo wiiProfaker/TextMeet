@@ -40,11 +40,14 @@ export interface DownloadOptions {
   /** Повторов после первой попытки при обрыве связи. */
   retries?: number;
   retryDelayMs?: number;
+  /** На столько байт попытка должна продвинуть файл дальше достигнутого, чтобы счёт повторов начался заново. */
+  minProgressBytes?: number;
 }
 
 export const IDLE_TIMEOUT_MS = 30_000;
 export const DOWNLOAD_RETRIES = 3;
 export const RETRY_DELAY_MS = 2_000;
+export const MIN_PROGRESS_BYTES = 64 * 1024;
 
 /** SHA-256 файла потоком (файлы моделей — сотни мегабайт). */
 export function sha256File(file: string): Promise<string> {
@@ -142,8 +145,10 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
   } catch (err) {
     throw new DownloadError('disk', 'не удалось создать папку моделей', { cause: err });
   }
+  const minProgress = options.minProgressBytes ?? MIN_PROGRESS_BYTES;
+  // Самый длинный .part за всё скачивание: сервер без Range качает с нуля, и рост от нуля — не продвижение.
+  let reached = await sizeOf(part);
   for (let attempt = 0; ; attempt++) {
-    const before = await sizeOf(part);
     try {
       await fetchInto(part, options);
       // Сервер закрыл ответ раньше времени без ошибки — докачиваем, как после обрыва.
@@ -156,9 +161,12 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
         await fsp.rm(part, { force: true });
         throw new DownloadError('corrupt', `файл модели повреждён: ${err.message}`, { cause: err });
       }
-      // Попытка продвинула файл — связь неустойчивая, но живая: следующая попытка снова считается первой.
-      if ((await sizeOf(part)) > before) attempt = -1;
+      // Попытка заметно продвинула файл дальше прежнего — связь неустойчивая, но живая: следующая попытка снова
+      // считается первой. Струйка в сотню байт или перезапуск с нуля повторы не восстанавливают — иначе бесконечно.
+      const now = await sizeOf(part);
+      if (now >= reached + minProgress) attempt = -1;
       else if (attempt >= retries) throw new DownloadError('network', 'нет связи с сервером', { cause: err });
+      reached = Math.max(reached, now);
       await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs ?? RETRY_DELAY_MS));
     }
   }

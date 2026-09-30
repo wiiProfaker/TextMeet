@@ -4,11 +4,11 @@ import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { formatLongDate, participantsText } from './format';
-import { useTranscript } from './hooks';
+import { useTranscript, type TranscriptLoad } from './hooks';
 import { FolderIcon, WarnIcon } from './icons';
 import { Player } from './Player';
 import { TranscribeDialog } from './TranscribeDialog';
-import { barFraction, percent, stageText } from './transcription-format';
+import { progressView, type ProgressView } from './transcription-format';
 import { TranscriptView } from './TranscriptView';
 
 interface Props {
@@ -31,35 +31,70 @@ function OpenFolder({ id, onError }: { id: string; onError(message: string): voi
   );
 }
 
-function ProgressBlock({ progress }: { progress: TranscriptionProgress }) {
-  const value = percent(barFraction(progress));
+function ProgressBar({ value, wide }: { value: number; wide?: boolean }) {
   return (
-    <div className="empty-note" role="status">
-      <b>{stageText(progress)}</b>
-      <div
-        className="prog wide"
-        role="progressbar"
-        aria-label="Ход расшифровки"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={value}
-      >
-        <i style={{ width: `${value}%` }} />
-      </div>
-      <span>{progress.stage === 'queued' ? 'Начнётся, когда закончатся встречи перед ней.' : `${value}%`}</span>
+    <div
+      className={wide ? 'prog wide' : 'prog'}
+      role="progressbar"
+      aria-label="Ход расшифровки"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={value}
+    >
+      <i style={{ width: `${value}%` }} />
     </div>
   );
 }
 
+/** Ход расшифровки вместо текста — у встречи, которая ещё не расшифровывалась. */
+function ProgressBlock({ view }: { view: ProgressView }) {
+  return (
+    <div className="empty-note">
+      <b role="status">{view.text}</b>
+      {view.value !== null && <ProgressBar value={view.value} wide />}
+      {view.note && <span>{view.note}</span>}
+    </div>
+  );
+}
+
+/** Ход расшифровки заново — полосой над прежним текстом: он виден, пока новый не готов. */
+function ProgressStrip({ view }: { view: ProgressView }) {
+  return (
+    <div className="prog-strip">
+      <b role="status">{view.text}</b>
+      {view.value !== null && <ProgressBar value={view.value} />}
+      {view.note && <span>{view.note}</span>}
+      <span className="later">Текст заменится, когда новая расшифровка закончится.</span>
+    </div>
+  );
+}
+
+type BusyStatus = 'queued' | 'transcribing';
+
 /** Средняя часть встречи: текст, ход расшифровки или приглашение расшифровать. */
-function Body({ meeting, progress, onTranscribe }: { meeting: Meeting; progress: TranscriptionProgress | null; onTranscribe(): void }) {
-  const load = useTranscript(meeting.id, meeting.status);
-  const busy = meeting.status === 'queued' || meeting.status === 'transcribing';
+function Body({
+  meeting,
+  load,
+  busy,
+  progress,
+  onTranscribe,
+}: {
+  meeting: Meeting;
+  load: TranscriptLoad;
+  busy: BusyStatus | null;
+  progress: TranscriptionProgress | null;
+  onTranscribe(): void;
+}) {
   const hasAudio = meeting.tracks.length > 0;
-  if (busy) {
-    return <ProgressBlock progress={progress ?? { meetingId: meeting.id, stage: 'queued', fraction: 0, download: null }} />;
+  if (load.kind === 'ready') {
+    return (
+      <>
+        {busy && <ProgressStrip view={progressView(busy, progress)} />}
+        <TranscriptView transcript={load.transcript} names={meeting.speakerNames} />
+      </>
+    );
   }
-  if (load.kind === 'ready') return <TranscriptView transcript={load.transcript} names={meeting.speakerNames} />;
+  if (busy) return <ProgressBlock view={progressView(busy, progress)} />;
   if (load.kind === 'error') {
     return (
       <div className="empty-note">
@@ -84,34 +119,12 @@ function Body({ meeting, progress, onTranscribe }: { meeting: Meeting; progress:
   );
 }
 
-/** Выбранная встреча: заголовок, пометки, текст или ход расшифровки, плеер. */
-export function MeetingPane({ entry, progress, onError }: Props) {
+/** Прочитанная встреча: заголовок, пометки, текст или ход расшифровки, плеер. */
+function MeetingView({ entry, progress, onError }: Props & { entry: Extract<MeetingListEntry, { kind: 'ok' }> }) {
   const [dialog, setDialog] = useState(false);
-  if (entry.kind === 'creating') {
-    return (
-      <main className="pane" aria-label="Встреча">
-        <div className="empty-note">
-          <b>Встреча создаётся…</b>
-          <span>Если это сообщение не исчезает, встреча не успела создаться — папку можно удалить.</span>
-          <OpenFolder id={entry.id} onError={onError} />
-        </div>
-      </main>
-    );
-  }
-  if (entry.kind === 'broken') {
-    return (
-      <main className="pane" aria-label="Встреча">
-        <div className="empty-note">
-          <b>Не удалось прочитать встречу</b>
-          <span>Папка: {entry.id}</span>
-          <pre className="reason">{entry.reason}</pre>
-          <OpenFolder id={entry.id} onError={onError} />
-        </div>
-      </main>
-    );
-  }
-
   const { meeting, mixReady, mixFailed } = entry;
+  const busy = meeting.status === 'queued' || meeting.status === 'transcribing' ? meeting.status : null;
+  const load = useTranscript(meeting.id, meeting.status, busy !== null || progress !== null);
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
   if (meeting.participantsHint !== null) meta.push(participantsText(meeting.participantsHint));
   const hasAudio = meeting.tracks.length > 0;
@@ -161,7 +174,7 @@ export function MeetingPane({ entry, progress, onError }: Props) {
           </div>
         </div>
       )}
-      <Body meeting={meeting} progress={progress} onTranscribe={() => setDialog(true)} />
+      <Body meeting={meeting} load={load} busy={busy} progress={progress} onTranscribe={() => setDialog(true)} />
       {mixReady ? (
         <Player meetingId={meeting.id} fallbackDuration={meeting.durationSec} />
       ) : (
@@ -183,4 +196,32 @@ export function MeetingPane({ entry, progress, onError }: Props) {
       )}
     </main>
   );
+}
+
+/** Выбранная встреча: создаётся, не прочиталась или прочитана. */
+export function MeetingPane({ entry, progress, onError }: Props) {
+  if (entry.kind === 'creating') {
+    return (
+      <main className="pane" aria-label="Встреча">
+        <div className="empty-note">
+          <b>Встреча создаётся…</b>
+          <span>Если это сообщение не исчезает, встреча не успела создаться — папку можно удалить.</span>
+          <OpenFolder id={entry.id} onError={onError} />
+        </div>
+      </main>
+    );
+  }
+  if (entry.kind === 'broken') {
+    return (
+      <main className="pane" aria-label="Встреча">
+        <div className="empty-note">
+          <b>Не удалось прочитать встречу</b>
+          <span>Папка: {entry.id}</span>
+          <pre className="reason">{entry.reason}</pre>
+          <OpenFolder id={entry.id} onError={onError} />
+        </div>
+      </main>
+    );
+  }
+  return <MeetingView entry={entry} progress={progress} onError={onError} />;
 }

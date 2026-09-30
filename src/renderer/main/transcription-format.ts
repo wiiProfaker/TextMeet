@@ -45,6 +45,32 @@ export function barFraction(progress: TranscriptionProgress): number {
   return progress.fraction;
 }
 
+export interface ProgressView {
+  /** Этап (его объявляет экранный диктор). */
+  text: string;
+  /** Проценты для полоски; null — полоски нет. */
+  value: number | null;
+  /** Строка под этапом: проценты или когда начнётся. */
+  note: string | null;
+}
+
+const QUEUED_VIEW: ProgressView = {
+  text: 'В очереди на расшифровку',
+  value: 0,
+  note: 'Начнётся, когда закончатся встречи перед ней.',
+};
+
+/**
+ * Что показать о встрече в очереди или в работе. Хода от main может не быть: встреча только что поставлена в очередь
+ * или работа уже закончилась, а статус встречи в окне ещё прежний — тогда «в очереди» было бы неправдой.
+ */
+export function progressView(status: 'queued' | 'transcribing', progress: TranscriptionProgress | null): ProgressView {
+  if (progress === null) return status === 'queued' ? QUEUED_VIEW : { text: 'Расшифровываем…', value: null, note: null };
+  if (progress.stage === 'queued') return QUEUED_VIEW;
+  const value = percent(barFraction(progress));
+  return { text: stageText(progress), value, note: `${value}%` };
+}
+
 /** Цвет спикера: «Я» — sp0, собеседники — sp1…sp4 по кругу. */
 export function speakerTone(id: string): string {
   if (id === 'me') return 'sp0';

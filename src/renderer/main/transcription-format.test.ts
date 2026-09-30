@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TranscriptionProgress } from '../../shared/transcription';
-import { barFraction, formatTimestamp, percent, speakerTone, stageText } from './transcription-format';
+import { barFraction, formatTimestamp, percent, progressView, speakerTone, stageText } from './transcription-format';
 
 const progress = (patch: Partial<TranscriptionProgress>): TranscriptionProgress => ({
   meetingId: 'a',
@@ -47,6 +47,31 @@ describe('barFraction and percent', () => {
     expect(percent(2)).toBe(100);
     expect(percent(-1)).toBe(0);
     expect(percent(Number.NaN)).toBe(0);
+  });
+});
+
+describe('progressView', () => {
+  it('shows the stage, the bar and the percentage while working', () => {
+    expect(progressView('transcribing', progress({ stage: 'others', fraction: 0.624 }))).toEqual({
+      text: 'Расшифровываем собеседников',
+      value: 62,
+      note: '62%',
+    });
+  });
+
+  it('tells a queued meeting when it starts', () => {
+    const queued = { text: 'В очереди на расшифровку', value: 0, note: 'Начнётся, когда закончатся встречи перед ней.' };
+    expect(progressView('queued', null)).toEqual(queued);
+    expect(progressView('queued', progress({ stage: 'queued', fraction: 0 }))).toEqual(queued);
+  });
+
+  it('follows the progress when the status is behind it', () => {
+    expect(progressView('queued', progress({ stage: 'prepare', fraction: 0 })).text).toBe('Готовим звук');
+  });
+
+  it('says only that the work goes on when a transcribing meeting has no progress', () => {
+    // Работа закончилась (или ещё не прислала этап), а статус встречи в окне ещё прежний — не «в очереди».
+    expect(progressView('transcribing', null)).toEqual({ text: 'Расшифровываем…', value: null, note: null });
   });
 });
 

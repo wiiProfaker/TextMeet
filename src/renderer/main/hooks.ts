@@ -151,10 +151,12 @@ export type TranscriptLoad =
   | { kind: 'error'; message: string };
 
 /**
- * Текст встречи; перечитывается, когда меняется статус (например, расшифровка закончилась).
- * Пока грузится текст другой встречи, прежний не показывается.
+ * Текст встречи; перечитывается, когда меняется статус или расшифровка начинается и заканчивается (running — есть
+ * ход от main). Одного статуса мало: быстрая расшифровка заново может пройти между перечитываниями списка встреч,
+ * и окно увидит «готово → готово». Пока текст перечитывается, показывается прежний (старый текст виден до конца
+ * расшифровки заново); пока грузится текст другой встречи, прежний не показывается.
  */
-export function useTranscript(meetingId: string, status: MeetingStatus): TranscriptLoad {
+export function useTranscript(meetingId: string, status: MeetingStatus, running: boolean): TranscriptLoad {
   const [state, setState] = useState<{ meetingId: string; load: TranscriptLoad } | null>(null);
   useEffect(() => {
     let active = true;
@@ -168,6 +170,6 @@ export function useTranscript(meetingId: string, status: MeetingStatus): Transcr
     return () => {
       active = false;
     };
-  }, [meetingId, status]);
+  }, [meetingId, status, running]);
   return state?.meetingId === meetingId ? state.load : { kind: 'loading' };
 }

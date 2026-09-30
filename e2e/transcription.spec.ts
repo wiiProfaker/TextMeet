@@ -2,7 +2,15 @@
 import { readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { launchApp, meetingJson, readMeetingJson, toneWebm, waitForRecorder, type LaunchedApp } from './helpers';
+import {
+  holdTranscription,
+  launchApp,
+  meetingJson,
+  readMeetingJson,
+  toneWebm,
+  waitForRecorder,
+  type LaunchedApp,
+} from './helpers';
 
 let launched: LaunchedApp | null = null;
 
@@ -100,17 +108,27 @@ test('«Расшифровать заново» replaces the text and keeps the 
     meetings: [recorded({ status: 'done', participantsHint: 4, model: 'gigaam-v3-e2e-rnnt' })],
     transcripts: { [ID]: old },
   });
-  const { page } = launched;
+  const { app, page } = launched;
   await page.getByRole('button', { name: /Созвон с Ириной/ }).click();
   await expect(page.getByLabel('Текст встречи')).toContainText('Старый текст.');
+  const transcription = await holdTranscription(app);
 
   await page.getByRole('button', { name: 'Расшифровать заново' }).click();
   const dialog = page.getByRole('dialog', { name: 'Расшифровать заново' });
   await expect(dialog.getByRole('button', { name: '4', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await dialog.getByRole('button', { name: '2', exact: true }).click();
   await dialog.getByRole('button', { name: 'Расшифровать' }).click();
+  await expect(dialog).toBeHidden();
 
+  // Пока новая расшифровка идёт, старый текст виден, а над ним — её ход.
+  await expect(page.getByText('Текст заменится, когда новая расшифровка закончится.')).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: /В очереди на расшифровку|Готовим звук/ })).toBeVisible();
+  await expect(page.getByLabel('Текст встречи')).toContainText('Старый текст.');
+  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText(/в очереди на расшифровку|расшифровка/);
+
+  await transcription.release();
   await expect(page.getByLabel('Текст встречи')).toContainText('Проверка расшифровки', { timeout: 20_000 });
+  await expect(page.getByText('Текст заменится, когда новая расшифровка закончится.')).toBeHidden();
   await expect(page.getByLabel('Текст встречи')).not.toContainText('Старый текст.');
   await expect(page.getByText('2 участника')).toBeVisible();
 });

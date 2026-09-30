@@ -105,6 +105,39 @@ export async function waitForRecorder(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => window.textmeet.getAppInfo().then((i) => i.recorderReady))).toBe(true);
 }
 
+/**
+ * Задержать работу расшифровки: процесс расшифровки, запущенный после этого вызова, не получает команд, пока тест
+ * не вызовет release (поддельные движки мгновенны — иначе «расшифровка идёт» не застать). Процесс ещё не должен
+ * быть запущен (он запускается при первой расшифровке и остаётся, пока не простоит 5 минут).
+ */
+export async function holdTranscription(app: ElectronApplication): Promise<{ release(): Promise<void> }> {
+  await app.evaluate(({ utilityProcess }) => {
+    const fork = utilityProcess.fork.bind(utilityProcess);
+    utilityProcess.fork = (...args) => {
+      const child = fork(...args);
+      const post = child.postMessage.bind(child);
+      const held: unknown[] = [];
+      child.postMessage = (message: unknown) => {
+        held.push(message);
+      };
+      (globalThis as { releaseTranscription?: () => void }).releaseTranscription = () => {
+        child.postMessage = post;
+        for (const message of held) post(message);
+      };
+      return child;
+    };
+  });
+  return {
+    release: async () => {
+      // Процесс запускается не сразу после постановки в очередь — ждём его.
+      await expect
+        .poll(() => app.evaluate(() => typeof (globalThis as { releaseTranscription?: unknown }).releaseTranscription))
+        .toBe('function');
+      await app.evaluate(() => (globalThis as { releaseTranscription?: () => void }).releaseTranscription?.());
+    },
+  };
+}
+
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
   const root = await mkdtemp(join(tmpdir(), 'textmeet-e2e-'));
   const userDataDir = join(root, 'userData');

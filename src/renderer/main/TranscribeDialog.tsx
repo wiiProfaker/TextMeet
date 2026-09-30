@@ -6,15 +6,17 @@ import { ParticipantsPicker } from './ParticipantsPicker';
 
 interface Props {
   meetingId: string;
-  /** Уже расшифрована: текст заменится, когда новая расшифровка закончится. */
+  /** «Расшифровать заново»: текст уже есть или встреча в очереди/в работе (её работа начнётся заново). */
   again: boolean;
+  /** Текст уже есть: он заменится, когда новая расшифровка закончится. */
+  replacesText: boolean;
   /** Число участников, указанное раньше (выбрано заранее). */
   participantsHint: number | null;
   onClose(): void;
 }
 
 /** «Расшифровать» / «Расшифровать заново»: число участников и запуск. */
-export function TranscribeDialog({ meetingId, again, participantsHint, onClose }: Props) {
+export function TranscribeDialog({ meetingId, again, replacesText, participantsHint, onClose }: Props) {
   const [participants, setParticipants] = useState(() => choiceFor(participantsHint));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -60,7 +62,7 @@ export function TranscribeDialog({ meetingId, again, participantsHint, onClose }
         }}
       >
         <h2 id={titleId}>{title}</h2>
-        {again && <div className="meta">Текст заменится, когда новая расшифровка закончится.</div>}
+        {replacesText && <div className="meta">Текст заменится, когда новая расшифровка закончится.</div>}
         <ParticipantsPicker
           value={participants}
           onChange={(next) => {

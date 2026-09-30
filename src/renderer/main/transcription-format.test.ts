@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { TranscriptionProgress } from '../../shared/transcription';
-import { barFraction, formatTimestamp, percent, progressView, speakerTone, stageText } from './transcription-format';
+import {
+  barFraction,
+  formatTimestamp,
+  percent,
+  progressView,
+  speakerTone,
+  stageText,
+  transcribeActions,
+} from './transcription-format';
 
 const progress = (patch: Partial<TranscriptionProgress>): TranscriptionProgress => ({
   meetingId: 'a',
@@ -82,5 +90,41 @@ describe('speakerTone', () => {
     expect(speakerTone('s4')).toBe('sp4');
     expect(speakerTone('s5')).toBe('sp1');
     expect(speakerTone('x')).toBe('sp1');
+  });
+});
+
+describe('transcribeActions', () => {
+  const again = { header: 'Расшифровать заново', body: false };
+
+  it('offers «Расшифровать» in the middle of a saved recording without text', () => {
+    expect(transcribeActions('recorded', true, 'none')).toEqual({ header: null, body: true });
+  });
+
+  it('offers «Расшифровать заново» for a meeting with text', () => {
+    expect(transcribeActions('done', true, 'ready')).toEqual(again);
+    expect(transcribeActions('error', true, 'ready')).toEqual(again);
+  });
+
+  it('offers «Расшифровать заново» for a queued or running meeting, with text or not', () => {
+    // Нажатие перезапускает идущую работу — это расшифровка заново, даже если текста ещё не было.
+    for (const status of ['queued', 'transcribing'] as const) {
+      expect(transcribeActions(status, true, 'none')).toEqual(again);
+      expect(transcribeActions(status, true, 'ready')).toEqual(again);
+    }
+  });
+
+  it('shows a single «Расшифровать» for a finished or failed meeting without readable text', () => {
+    for (const status of ['done', 'error'] as const) {
+      expect(transcribeActions(status, true, 'none')).toEqual({ header: 'Расшифровать', body: false });
+      expect(transcribeActions(status, true, 'error')).toEqual({ header: 'Расшифровать', body: false });
+    }
+  });
+
+  it('offers nothing without sound or while the text is being read', () => {
+    const nothing = { header: null, body: false };
+    expect(transcribeActions('done', false, 'none')).toEqual(nothing);
+    expect(transcribeActions('recorded', false, 'none')).toEqual(nothing);
+    expect(transcribeActions('done', true, 'loading')).toEqual(nothing);
+    expect(transcribeActions('recorded', true, 'loading')).toEqual(nothing);
   });
 });

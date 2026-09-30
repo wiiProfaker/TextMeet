@@ -1,5 +1,6 @@
 // Тексты и форматы расшифровки для окна (чистые функции — проверяются модульными тестами).
 import { formatBytes } from '../../shared/format';
+import type { MeetingStatus } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 
 const pad = (n: number): string => String(n).padStart(2, '0');
@@ -69,6 +70,32 @@ export function progressView(status: 'queued' | 'transcribing', progress: Transc
   if (progress.stage === 'queued') return QUEUED_VIEW;
   const value = percent(barFraction(progress));
   return { text: stageText(progress), value, note: `${value}%` };
+}
+
+export interface TranscribeActions {
+  /** Кнопка в заголовке встречи; null — её нет. */
+  header: 'Расшифровать' | 'Расшифровать заново' | null;
+  /** «Расшифровать» под «Текста пока нет» — только когда в заголовке кнопки нет: две одинаковые ни к чему. */
+  body: boolean;
+}
+
+/**
+ * Какие кнопки расшифровки показать во встрече. «Заново» — если текст уже есть или встреча в очереди/в работе:
+ * нажатие тогда перезапускает работу. Пока текст читается, кнопок нет — неизвестно, «заново» или нет.
+ * text — что с текстом встречи (как TranscriptLoad['kind'] в hooks.ts).
+ */
+export function transcribeActions(
+  status: MeetingStatus,
+  hasAudio: boolean,
+  text: 'loading' | 'none' | 'ready' | 'error',
+): TranscribeActions {
+  if (!hasAudio || text === 'loading') return { header: null, body: false };
+  if (status === 'queued' || status === 'transcribing') return { header: 'Расшифровать заново', body: false };
+  // После ошибки тоже: так можно указать другое число участников («Повторить» в плашке — с прежним).
+  if (status === 'done' || status === 'error') {
+    return { header: text === 'ready' ? 'Расшифровать заново' : 'Расшифровать', body: false };
+  }
+  return { header: null, body: text === 'none' };
 }
 
 /** Цвет спикера: «Я» — sp0, собеседники — sp1…sp4 по кругу. */

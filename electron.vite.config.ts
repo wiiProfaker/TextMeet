@@ -3,7 +3,17 @@ import { defineConfig } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
-  main: {},
+  // Второй вход main — процесс расшифровки (utilityProcess): out/main/transcription-worker.js рядом с index.js.
+  main: {
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/main/index.ts'),
+          'transcription-worker': resolve(__dirname, 'src/main/transcription/worker.ts'),
+        },
+      },
+    },
+  },
   // Один preload (src/preload/index.ts) на оба окна — см. «Факты» в плане.
   // Preload в песочнице не может подключать пакеты: если туда случайно попадёт импорт пакета,
   // пусть он встроится в сам файл, а не превратится в require(), который окно не выполнит.

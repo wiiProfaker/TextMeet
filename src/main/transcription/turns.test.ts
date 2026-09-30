@@ -1,7 +1,28 @@
 import { describe, expect, it } from 'vitest';
-import { exclusiveTurns, fillGaps, mergeTurns, renumberByFirstAppearance, type Turn } from './turns';
+import { BACKCHANNEL_MAX_SEC, exclusiveTurns, fillGaps, mergeTurns, renumberByFirstAppearance, type Turn } from './turns';
 
 const t = (start: number, end: number, speaker: number): Turn => ({ start, end, speaker });
+
+/** Сколько секунд покрывают интервалы вместе (наложения считаются один раз). */
+function covered(turns: readonly Turn[]): number {
+  let total = 0;
+  let cursor = Number.NEGATIVE_INFINITY;
+  for (const turn of [...turns].sort((a, b) => a.start - b.start)) {
+    const from = Math.max(cursor, turn.start);
+    if (turn.end > from) total += turn.end - from;
+    cursor = Math.max(cursor, turn.end);
+  }
+  return total;
+}
+
+/** Ходы, которые exclusiveTurns оставляет: без коротких вставок внутри чужой реплики. */
+const keptAfterBackchannels = (turns: readonly Turn[]): Turn[] =>
+  turns.filter(
+    (x) =>
+      x.end > x.start &&
+      (x.end - x.start >= BACKCHANNEL_MAX_SEC ||
+        !turns.some((o) => o !== x && o.end > o.start && o.speaker !== x.speaker && o.start <= x.start && x.end <= o.end)),
+  );
 
 describe('exclusiveTurns', () => {
   it('keeps turns that do not overlap', () => {
@@ -60,6 +81,8 @@ describe('exclusiveTurns', () => {
       const out = exclusiveTurns(input);
       for (let i = 1; i < out.length; i++) expect(out[i]!.start).toBeGreaterThanOrEqual(out[i - 1]!.end);
       for (const turn of out) expect(turn.end).toBeGreaterThan(turn.start);
+      // Звук не теряется: выход покрывает ровно то время, что и оставленные ходы (без коротких вставок).
+      expect(covered(out)).toBeCloseTo(covered(keptAfterBackchannels(input)), 6);
     }
   });
 });

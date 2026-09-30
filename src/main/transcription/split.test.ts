@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { quietestPoint, splitAtQuietPoints } from './split';
+import { quietestPoint, SPLIT, splitAtQuietPoints } from './split';
 
 const RATE = 100;
 /** Громкий сигнал с тишиной в заданных секундах. */
@@ -34,5 +34,25 @@ describe('splitAtQuietPoints', () => {
     expect(Math.floor(pieces[1]!.end)).toBe(33);
     expect(pieces.at(-1)!.end).toBe(50);
     for (const p of pieces) expect(p.end - p.start).toBeLessThanOrEqual(20);
+  });
+
+  it('never leaves a tiny last piece', () => {
+    // Реплика чуть длиннее 20 с, тише всего — у самого конца: резать там — оставить обрывок в доли секунды.
+    const pieces = splitAtQuietPoints(signal(30, [19]), RATE, { start: 0, end: 20.05 });
+    expect(pieces).toHaveLength(2);
+    for (const p of pieces) expect(p.end - p.start).toBeGreaterThanOrEqual(SPLIT.minLen);
+  });
+
+  it('keeps every piece between the limits for any length', () => {
+    const samples = signal(200, [3, 17, 18, 41, 77, 90, 120, 150]);
+    for (let end = 20.01; end < 190; end += 3.7) {
+      const pieces = splitAtQuietPoints(samples, RATE, { start: 0, end });
+      expect(pieces[0]!.start).toBe(0);
+      expect(pieces.at(-1)!.end).toBe(end);
+      for (const p of pieces) {
+        expect(p.end - p.start).toBeLessThanOrEqual(SPLIT.maxLen);
+        expect(p.end - p.start).toBeGreaterThanOrEqual(SPLIT.minLen - SPLIT.frameSec);
+      }
+    }
   });
 });

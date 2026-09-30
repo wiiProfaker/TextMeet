@@ -36,7 +36,7 @@ export function quietestPoint(
   return (best + Math.floor(frameLen / 2)) / sampleRate;
 }
 
-/** Режет интервал на куски не длиннее maxLen по самым тихим местам. */
+/** Режет интервал на куски не длиннее maxLen по самым тихим местам; ни один кусок не короче minLen. */
 export function splitAtQuietPoints(
   samples: Float32Array,
   sampleRate: number,
@@ -46,7 +46,10 @@ export function splitAtQuietPoints(
   const pieces: Interval[] = [];
   let rest = interval;
   while (rest.end - rest.start > opts.maxLen) {
-    const cut = quietestPoint(samples, sampleRate, rest.start + opts.minLen, rest.start + opts.maxLen, opts.frameSec);
+    const from = rest.start + opts.minLen;
+    // Не ближе minLen к концу: иначе остаток (реплика 20,05 с) вышел бы обрывком, который не распознать.
+    const to = Math.max(from, Math.min(rest.start + opts.maxLen, rest.end - opts.minLen));
+    const cut = quietestPoint(samples, sampleRate, from, to, opts.frameSec);
     pieces.push({ start: rest.start, end: cut });
     rest = { start: cut, end: rest.end };
   }

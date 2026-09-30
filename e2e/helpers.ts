@@ -83,6 +83,11 @@ export async function readMeetingJson(libraryDir: string, id: string): Promise<R
   return JSON.parse(await readFile(join(libraryDir, id, 'meeting.json'), 'utf8')) as Record<string, unknown>;
 }
 
+/** Для expect.poll: файл могут как раз перезаписывать — тогда undefined, и опрос просто повторится. */
+export function pollMeetingJson(libraryDir: string, id: string): Promise<Record<string, unknown> | undefined> {
+  return readMeetingJson(libraryDir, id).catch(() => undefined);
+}
+
 async function windowByPage(app: ElectronApplication, pagePath: string): Promise<Page> {
   const matches = (page: Page) => page.url().includes(pagePath);
   return (

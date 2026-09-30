@@ -6,6 +6,7 @@ import {
   holdTranscription,
   launchApp,
   meetingJson,
+  pollMeetingJson,
   readMeetingJson,
   toneWebm,
   waitForRecorder,
@@ -105,7 +106,7 @@ test('a failed transcription shows the reason and «Повторить» tries a
 test('a meeting left in the queue is transcribed after a restart', async () => {
   launched = await launchApp({ meetings: [recorded({ status: 'transcribing', participantsHint: 2 })] });
   const { page, libraryDir } = launched;
-  await expect.poll(async () => (await readMeetingJson(libraryDir, ID)).status, { timeout: 20_000 }).toBe('done');
+  await expect.poll(async () => (await pollMeetingJson(libraryDir, ID))?.status, { timeout: 20_000 }).toBe('done');
   await page.getByRole('button', { name: /Созвон с Ириной/ }).click();
   await expect(page.getByLabel('Текст встречи')).toContainText('Спикер 1');
 });

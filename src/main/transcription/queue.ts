@@ -119,8 +119,9 @@ export class TranscriptionQueue {
           ...(participantsHint !== undefined && { participantsHint }),
         };
       });
-      this.deps.libraryChanged();
+      // Сначала в очередь: сбой обработчика окна не должен оставить встречу «в очереди» без задачи.
       this.add({ libraryDir, meetingId });
+      this.report(() => this.deps.libraryChanged());
     } finally {
       this.pendingEnqueues -= 1;
     }
@@ -307,12 +308,17 @@ export class TranscriptionQueue {
       // Системные тексты (пути, коды, вывод sherpa-onnx) — только в журнал: во встрече — понятная причина.
       const message = err instanceof ShownError ? err.message : transcriptionTexts.unexpected(err);
       this.deps.logger.error(`Расшифровка не удалась: ${meetingId}`, err);
-      const failed = await updateMeeting(libraryDir, meetingId, (m) => ({ ...m, status: 'error', errorMessage: message })).catch(
-        (writeErr: unknown) => {
-          this.deps.logger.error(`Не удалось записать ошибку расшифровки: ${meetingId}`, writeErr);
-          return null;
-        },
-      );
+      const failed = await updateMeeting(libraryDir, meetingId, (m) =>
+        m.status === 'transcribing' ? { ...m, status: 'error', errorMessage: message } : m,
+      ).catch((writeErr: unknown) => {
+        this.deps.logger.error(`Не удалось записать ошибку расшифровки: ${meetingId}`, writeErr);
+        return null;
+      });
+      if (failed && failed.status !== 'error') {
+        // Встречу поставили заново, пока записывалась причина: её расшифруют ещё раз — сообщать о сбое незачем.
+        this.deps.logger.info(`Расшифровка ${meetingId} не удалась, но встреча уже снова в очереди`);
+        return null;
+      }
       return failed && { meeting: failed, ok: false };
     }
   }
@@ -424,6 +430,8 @@ export class TranscriptionQueue {
     const now = this.deps.now();
     if (!force && now - this.lastEmit < PROGRESS_INTERVAL_MS) return;
     this.lastEmit = now;
-    this.deps.progressChanged(this.progress());
+    // Вызывается и из таймера: сбой обработчика не должен стать необработанным исключением или прервать задачу.
+    const progress = this.progress();
+    this.report(() => this.deps.progressChanged(progress));
   }
 }

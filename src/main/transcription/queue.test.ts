@@ -81,6 +81,8 @@ function setup(
     deferExit?: boolean;
     ffmpegPath?: () => string;
     finished?: (event: { meeting: Meeting; ok: boolean }) => void;
+    /** Обработчики окна падают (окно закрыто и т. п.). */
+    callbacksThrow?: boolean;
   } = {},
 ) {
   const workers: FakeWorker[] = [];
@@ -100,8 +102,13 @@ function setup(
     threads: () => threads,
     now: () => now,
     logger,
-    libraryChanged: vi.fn(),
-    progressChanged: (p) => progress.push(p),
+    libraryChanged: () => {
+      if (overrides.callbacksThrow) throw new Error('окно недоступно');
+    },
+    progressChanged: (p) => {
+      progress.push(p);
+      if (overrides.callbacksThrow) throw new Error('окно недоступно');
+    },
     finished: (event) => {
       finished.push(event);
       overrides.finished?.(event);
@@ -625,5 +632,37 @@ describe('TranscriptionQueue', () => {
     expect(t.finished[0]?.ok).toBe(false);
     vi.advanceTimersByTime(WATCHDOG_MIN_MS + 1);
     expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('молчит'));
+  });
+
+  it('a failing window callback neither breaks the queue nor escapes from the progress ticker', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup({ callbacksThrow: true });
+    await t.queue.enqueue(lib, meeting.id);
+    const command = await transcribeSent(t.worker);
+    vi.advanceTimersByTime(2_500);
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect(t.finished[0]).toMatchObject({ ok: true, meeting: { status: 'done' } });
+    expect(t.queue.isBusy()).toBe(false);
+  });
+
+  it('asked again while the failure is being saved: stays queued and gets no «failed» notice', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    const first = await transcribeSent(t.worker);
+    t.worker().post({ type: 'failed', jobId: first.jobId, message: 'ffmpeg не прочитал дорожку' });
+    // Причина ещё не записана — в этот момент встречу ставят заново.
+    await t.queue.enqueue(lib, meeting.id, 3);
+    const second = await transcribeSent(t.worker, 2);
+    expect(second.input.participantsHint).toBe(3);
+    expect(t.finished).toHaveLength(0);
+    expect(await readMeeting(lib, meeting.id)).toMatchObject({ status: 'transcribing', errorMessage: null });
+    t.worker().post(done(second.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect(t.finished[0]).toMatchObject({ ok: true, meeting: { status: 'done' } });
   });
 });

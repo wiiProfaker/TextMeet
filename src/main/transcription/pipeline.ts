@@ -82,7 +82,11 @@ class RecognizerHolder {
 
   get(): Recognizer {
     const threads = this.threads();
-    if (this.current?.threads !== threads) this.current = { threads, recognizer: this.engines.recognizer(threads) };
+    if (this.current?.threads !== threads) {
+      // Прежний отпускаем до создания нового: две копии GigaAM не должны жить вместе дольше необходимого.
+      this.current = null;
+      this.current = { threads, recognizer: this.engines.recognizer(threads) };
+    }
     return this.current.recognizer;
   }
 }

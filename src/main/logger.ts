@@ -14,9 +14,23 @@ export interface Logger {
 
 export const MAX_LOG_BYTES = 5 * 1024 * 1024;
 
+/** Глубже причины не разворачиваются: цепочка может замыкаться сама на себя. */
+const MAX_CAUSES = 5;
+
+/**
+ * Ошибка для журнала вместе с причинами (cause): человеку показывают понятный текст, а исходная системная
+ * ошибка (код, путь) остаётся здесь.
+ */
 export function describeError(err: unknown): string {
-  if (err instanceof Error) return err.stack ?? `${err.name}: ${err.message}`;
-  return String(err);
+  const lines: string[] = [];
+  let current: unknown = err;
+  for (let depth = 0; depth <= MAX_CAUSES; depth++) {
+    const text = current instanceof Error ? (current.stack ?? `${current.name}: ${current.message}`) : String(current);
+    lines.push(depth === 0 ? text : `Причина: ${text}`);
+    if (!(current instanceof Error) || current.cause === undefined) break;
+    current = current.cause;
+  }
+  return lines.join('\n');
 }
 
 export function formatLogLine(level: LogLevel, message: string, err: unknown, now: Date): string {

@@ -1,3 +1,4 @@
+import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import {
   app,
@@ -26,6 +27,8 @@ import { registerIpc } from './ipc';
 import { listMeetings } from './library/library';
 import { createLogger, type Logger } from './logger';
 import { MEDIA_SCHEME, serveMedia } from './media-protocol';
+import { ModelManager } from './models/model-manager';
+import { modelsRoot } from './models/models-dir';
 import { createNotifier, type Notify } from './notifications';
 import { DEV_FOLDER_NAME, LIBRARY_FOLDER_NAME, resolveLibraryDir } from './paths';
 import { applyPermissionPolicy } from './permissions';
@@ -34,6 +37,8 @@ import { freeDiskBytes } from './recording/monitors';
 import { recoverInterruptedRecordings } from './recording/recovery';
 import { createSettingsStore } from './settings/settings-store';
 import { dialogTexts, notificationTexts } from './texts';
+import { TranscriptionQueue } from './transcription/queue';
+import { spawnTranscriptionWorker } from './transcription/worker-host';
 import { createTray, type AppTray } from './tray';
 import { createMainWindow, createRecorderWindow, testMediaMode } from './windows';
 
@@ -54,6 +59,14 @@ const logFile = (): string => join(app.getPath('userData'), 'logs', 'textmeet.lo
 // Разрешение на микрофон по-прежнему решает обработчик программы (permissions.ts).
 const testMedia = testMediaMode();
 if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
+// Только для автотестов: поддельные движки расшифровки (worker.ts) — без моделей и их скачивания.
+const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
+/** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
+const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
+
+/** Потоков для расшифровки: все ядра, кроме одного (не больше 8); во время записи — 2 (§5.3 решений Плана 3). */
+const FULL_THREADS = Math.max(1, Math.min(8, availableParallelism() - 1));
+const RECORDING_THREADS = Math.min(2, FULL_THREADS);
 
 // Протокол плеера регистрируется до готовности приложения — так требует Electron.
 protocol.registerSchemesAsPrivileged([
@@ -71,6 +84,7 @@ let tray: AppTray | null = null;
 // Автомату нужна подпись горячей клавиши, а горячей клавише — автомат; главному окну — снятие паузы клавиши.
 let hotkeys: HotkeyManager | null = null;
 let recorderReady = false;
+let transcription: TranscriptionQueue | null = null;
 /** Окно записи падало снова и снова, и его больше не перезапускают. */
 let recorderBroken = false;
 const recorderCrashes: number[] = [];
@@ -78,6 +92,8 @@ const recorderCrashes: number[] = [];
 // тогда просьбу показать окно только запоминаем, иначе появится второе, «чужое» главное окно.
 let windowsCreated = false;
 let showRequested = false;
+/** Встреча из уведомления для окна, которое ещё загружается (например, пересоздано): покажем, когда догрузится. */
+let pendingMeetingId: string | null = null;
 
 /** Окно записи перезапускается после сбоя, но не бесконечно: не больше 3 раз в минуту, 4-й сбой — больше не пробуем. */
 const RECORDER_RESTART_LIMIT = 3;
@@ -102,7 +118,21 @@ function startMainWindow(logger: Logger, show: boolean): BrowserWindow {
   const resumeHotkey = (): void => hotkeys?.suspend(false);
   win.webContents.on('render-process-gone', resumeHotkey);
   win.webContents.on('did-start-loading', resumeHotkey);
+  // Не did-finish-load: после него страница может ещё грузиться (isLoading() — true), и щелчок в этот момент
+  // ждал бы события, которое уже прошло. did-stop-loading наступает, когда isLoading() становится false.
+  win.webContents.on('did-stop-loading', () => {
+    const id = pendingMeetingId;
+    pendingMeetingId = null;
+    if (id) win.webContents.send(IPC.showMeeting, id);
+  });
   return win;
+}
+
+/** Показать встречу в главном окне; загружающаяся страница ещё не подписана на событие — ждём её загрузки. */
+function showMeeting(id: string): void {
+  const contents = mainWindow?.webContents;
+  if (contents && !contents.isDestroyed() && !contents.isLoading()) contents.send(IPC.showMeeting, id);
+  else pendingMeetingId = id;
 }
 
 /** Закрытие окна прячет его в трей; по-настоящему окна закрываются только при выходе. */
@@ -208,17 +238,21 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
   if (controller.getState().phase !== 'idle') return;
   logger.info('TextMeet завершает работу');
   await logger.flush();
+  // Только когда выход точно состоится: остановленная очередь молча пропускала бы новые встречи.
+  // Встречи остаются «в очереди» / «расшифровывается» и продолжатся при следующем запуске.
+  transcription?.dispose();
   quitApproved = true;
   app.quit();
 }
 
-/** При запуске: закрыть прерванные сбоем записи и досвести то, что не успело свестись. */
+/** При запуске: закрыть прерванные сбоем записи, досвести и продолжить расшифровку того, что не успело. */
 async function recoverAndMix(
   logger: Logger,
   libraryDir: string,
   notify: Notify,
   mixer: Mixer,
   controller: RecordingController,
+  queue: TranscriptionQueue,
 ): Promise<void> {
   try {
     const recovered = await recoverInterruptedRecordings(
@@ -230,7 +264,9 @@ async function recoverAndMix(
       notify(notificationTexts.recovered(recovered.length));
       sendToMain(IPC.libraryChanged);
     }
-    for (const id of meetingsNeedingMix(await listMeetings(libraryDir))) mixer.enqueue(libraryDir, id);
+    const entries = await listMeetings(libraryDir);
+    for (const id of meetingsNeedingMix(entries)) mixer.enqueue(libraryDir, id);
+    queue.resume(libraryDir, entries);
   } catch (err) {
     logger.error('Не удалось проверить прерванные записи', err);
   }
@@ -270,6 +306,35 @@ async function start(logger: Logger): Promise<void> {
     onSettled: () => sendToMain(IPC.libraryChanged),
   });
 
+  const modelManager = new ModelManager({
+    root: modelsRoot({
+      platform: process.platform,
+      homeDir: app.getPath('home'),
+      localAppData: process.env.LOCALAPPDATA,
+      override: process.env.TEXTMEET_MODELS_DIR,
+    }),
+    logger,
+    freeBytes: freeDiskBytes,
+  });
+  const queue = new TranscriptionQueue({
+    spawn: () => spawnTranscriptionWorker(logger),
+    models: fakeAsr ? { root: modelManager.root, ensure: async () => undefined } : modelManager,
+    ffmpegPath: () => resolveFfmpegPath(),
+    // Запись начинается и кончается по ходу расшифровки: число потоков спрашивается каждый раз.
+    threads: () => (controller.getState().phase === 'idle' ? FULL_THREADS : RECORDING_THREADS),
+    now: () => Date.now(),
+    logger,
+    libraryChanged: () => sendToMain(IPC.libraryChanged),
+    progressChanged: (progress) => sendToMain(IPC.transcriptionProgress, progress),
+    finished: ({ meeting, ok }) => {
+      const text = ok ? notificationTexts.transcribed(meeting.title) : notificationTexts.transcribeFailed(meeting.title);
+      if (testRun) logger.info(`Уведомление не показано (автотест): ${text.title}`);
+      else notify(text, true, () => showMeeting(meeting.id));
+    },
+  });
+  transcription = queue;
+  let lastPhase = 'idle';
+
   const controller = new RecordingController({
     platform: process.platform,
     logger,
@@ -293,12 +358,20 @@ async function start(logger: Logger): Promise<void> {
     emitState: (state) => {
       sendToMain(IPC.recordingState, state);
       tray?.update(state.phase, hotkeys?.accelerator ?? '');
+      if ((state.phase === 'idle') !== (lastPhase === 'idle')) queue.threadsChanged();
+      lastPhase = state.phase;
     },
     emitPeaks: (peaks) => {
       if (mainVisible()) sendToMain(IPC.recordingPeaks, peaks);
     },
     libraryChanged: () => sendToMain(IPC.libraryChanged),
     enqueueMix: (dir, id) => mixer.enqueue(dir, id),
+    enqueueTranscription: (dir, id) => {
+      queue.enqueue(dir, id).catch((err: unknown) => {
+        logger.error(`Не удалось поставить встречу ${id} в очередь расшифровки`, err);
+        notify(notificationTexts.transcribeNotQueued());
+      });
+    },
   });
   const hotkeyManager = new HotkeyManager(globalShortcut, process.platform, () => void controller.toggle());
   hotkeys = hotkeyManager;
@@ -344,6 +417,8 @@ async function start(logger: Logger): Promise<void> {
       logger.info('Окно записи готово');
     },
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
+    transcription: queue,
+    models: modelManager,
   });
 
   app.on('before-quit', (event) => {
@@ -355,11 +430,19 @@ async function start(logger: Logger): Promise<void> {
     systemEnding = true;
     void controller.stopForQuit();
   };
+  // macOS: выключение ещё можно отменить — остановленная очередь молча пропускала бы новые встречи до перезапуска.
+  // Состоявшийся выход и так пройдёт через before-quit → prepareQuit, а он остановит очередь.
   powerMonitor.on('shutdown', onSystemEnding);
 
   recorderWindow = startRecorderWindow(logger, controller, notify);
   mainWindow = startMainWindow(logger, showRequested || !startedAtLogin());
-  mainWindow.on('session-end', onSystemEnding);
+  mainWindow.on('session-end', () => {
+    // Windows: сеанс уже заканчивается, а before-quit может и не наступить: система закроет процесс расшифровки
+    // сама, и без dispose() очередь посчитала бы это сбоем. Остановленная очередь оставляет встречу
+    // «расшифровывается» — до следующего запуска.
+    transcription?.dispose();
+    onSystemEnding();
+  });
   windowsCreated = true;
   tray = createTray(
     { openWindow: () => openMainWindow(logger), toggleRecording: () => void controller.toggle(), quit: () => app.quit() },
@@ -367,7 +450,7 @@ async function start(logger: Logger): Promise<void> {
   );
   if (hotkeyManager.busy) notify(notificationTexts.hotkeyBusy(hotkeyManager.label));
   logger.info(`TextMeet ${app.getVersion()} запущен (${process.platform})`);
-  void recoverAndMix(logger, libraryDir(), notify, mixer, controller);
+  void recoverAndMix(logger, libraryDir(), notify, mixer, controller, queue);
 }
 
 /** Сбой запуска не должен быть молчаливым: пишем в журнал и показываем окно с путём к нему. */

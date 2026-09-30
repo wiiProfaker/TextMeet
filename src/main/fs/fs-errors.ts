@@ -11,11 +11,15 @@ const REASONS: Record<string, string> = {
   EIO: 'ошибка чтения или записи диска',
 };
 
+/** Понятная причина по коду системной ошибки; null — код незнакомый (или его нет). */
+export function knownFsReason(err: unknown): string | null {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return (code && REASONS[code]) || null;
+}
+
 /** «нет прав на эту папку» для EACCES; иначе — текст самой ошибки. */
 export function fsErrorReason(err: unknown): string {
-  const code = (err as NodeJS.ErrnoException | null)?.code;
-  if (code && REASONS[code]) return REASONS[code];
-  return err instanceof Error ? err.message : String(err);
+  return knownFsReason(err) ?? (err instanceof Error ? err.message : String(err));
 }
 
 /** Ошибка для показа человеку: «Не удалось открыть папку: нет прав на эту папку». */

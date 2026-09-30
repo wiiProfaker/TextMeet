@@ -24,6 +24,22 @@ describe('describeError', () => {
     expect(describeError(err)).toContain('boom');
   });
 
+  it('adds the causes: the raw reason behind a message for people stays in the log', () => {
+    const path = String.raw`C:\m\verified.json`;
+    const raw = Object.assign(new Error(`EPERM: operation not permitted, open '${path}'`), { code: 'EPERM' });
+    const text = describeError(new Error('Не удалось сохранить модель', { cause: new Error('обёртка', { cause: raw }) }));
+    expect(text).toContain('Не удалось сохранить модель');
+    expect(text).toContain('Причина: Error: обёртка');
+    expect(text).toContain(`Причина: Error: EPERM: operation not permitted, open '${path}'`);
+    expect(describeError(new Error('сбой процесса', { cause: 'ffmpeg: Invalid data' }))).toContain('Причина: ffmpeg: Invalid data');
+  });
+
+  it('stops at a cause that refers back to itself', () => {
+    const err = new Error('петля');
+    (err as { cause?: unknown }).cause = err;
+    expect(describeError(err).match(/Причина/g)?.length ?? 0).toBeLessThanOrEqual(5);
+  });
+
   it('falls back to name and message when there is no stack', () => {
     const err = new Error('boom');
     err.stack = undefined;

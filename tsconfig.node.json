@@ -12,6 +12,7 @@
     "src/renderer/**/*.test.ts",
     "electron.vite.config.ts",
     "vitest.config.ts",
+    "vitest.models.config.ts",
     "playwright.config.ts"
   ]
 }

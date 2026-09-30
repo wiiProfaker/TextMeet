@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { launchApp, readMeetingJson, waitForRecorder, type LaunchedApp } from './helpers';
+import { launchApp, pollMeetingJson, readMeetingJson, waitForRecorder, type LaunchedApp } from './helpers';
 
 let launched: LaunchedApp | null = null;
 
@@ -44,10 +44,11 @@ test('records both tracks, asks about participants and prepares the recording fo
   await expect(dialog).toBeHidden();
 
   const [id] = await meetingIds(libraryDir);
+  // Ответ в окне ставит встречу в очередь расшифровки — чуть позже, чем закрывается окно.
+  await expect.poll(async () => (await pollMeetingJson(libraryDir, id!))?.status).toMatch(/^(queued|transcribing|done)$/);
   expect(await readMeetingJson(libraryDir, id!)).toMatchObject({
     title: 'Созвон с Ириной',
     participantsHint: 3,
-    status: 'recorded',
     tracks: [{ kind: 'mic' }, { kind: 'system' }].map((t) => expect.objectContaining(t)),
   });
   for (const file of ['mic.webm', 'system.webm']) {
@@ -145,7 +146,9 @@ test('recovers a recording interrupted by a crash at the next start', async () =
   const { page, libraryDir } = launched;
 
   await expect(page.getByText('восстановлена после сбоя')).toBeVisible();
-  await expect.poll(async () => (await readMeetingJson(libraryDir, id)).durationSec, { timeout: 15_000 }).toBeCloseTo(3, 0);
+  await expect
+    .poll(async () => (await pollMeetingJson(libraryDir, id))?.durationSec, { timeout: 15_000 })
+    .toBeCloseTo(3, 0);
   expect(await readMeetingJson(libraryDir, id)).toMatchObject({ status: 'recorded', recovered: true });
   await page.getByRole('button', { name: /Прерванная встреча/ }).click();
   await expect(page.getByText('Запись восстановлена после сбоя')).toBeVisible();

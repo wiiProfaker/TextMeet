@@ -71,6 +71,8 @@ export interface ControllerDeps {
   libraryChanged(): void;
   /** Свести дорожки встречи из этой библиотеки (папку могли сменить, пока шла запись). */
   enqueueMix(libraryDir: string, meetingId: string): void;
+  /** Ответ в окне «Запись остановлена» сохранён — встреча уходит в очередь расшифровки (и при «Пропустить»). */
+  enqueueTranscription(libraryDir: string, meetingId: string): void;
   openTracks?: typeof openTrackFiles;
   timeouts?: { startMs: number; stopMs: number };
 }
@@ -172,9 +174,10 @@ export class RecordingController {
   async finishStopDialog(answer: StopDialogAnswer): Promise<void> {
     const title = answer.title.trim();
     const skipped = answer.participantsHint === null;
+    const libraryDir = this.deps.libraryDir();
     let saved = false;
     try {
-      await updateMeeting(this.deps.libraryDir(), answer.meetingId, (m) => ({
+      await updateMeeting(libraryDir, answer.meetingId, (m) => ({
         ...m,
         title: title === '' ? m.title : title,
         participantsHint: answer.participantsHint,
@@ -186,6 +189,7 @@ export class RecordingController {
       if ((saved || skipped) && this.state.stopDialog?.meetingId === answer.meetingId) this.update({ stopDialog: null });
     }
     this.deps.libraryChanged();
+    this.deps.enqueueTranscription(libraryDir, answer.meetingId);
   }
 
   start(): Promise<void> {

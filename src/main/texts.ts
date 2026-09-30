@@ -1,6 +1,10 @@
 // Тексты для человека, которые показывает main: уведомления, системные окна, причины ошибок записи.
 import { formatBytes, formatDurationShort } from '../shared/format';
 import type { MediaFailure, StartProblem, SystemSettingsKind } from '../shared/recording';
+import { knownFsReason } from './fs/fs-errors';
+import { DownloadError } from './models/download';
+import { TOTAL_MODELS_SIZE } from './models/registry';
+import { WORKER_REFUSALS } from './transcription/protocol';
 
 const RECORDER_BROKEN_TEXT = 'Окно записи несколько раз закрылось из-за сбоя. Перезапустите TextMeet.';
 
@@ -62,6 +66,74 @@ export const notificationTexts = {
     body: 'Микрофон отключился, а звук компьютера не записывается. Записанное сохранено.',
   }),
   recorderBroken: (): NotificationText => ({ title: 'Запись не работает', body: RECORDER_BROKEN_TEXT }),
+  transcribed: (meetingTitle: string): NotificationText => ({ title: 'Текст встречи готов', body: meetingTitle }),
+  transcribeFailed: (meetingTitle: string): NotificationText => ({
+    title: 'Не удалось расшифровать встречу',
+    body: `${sentence(meetingTitle)}Причина и кнопка «Повторить» — в окне встречи.`,
+  }),
+  // После окна «Запись остановлена» встречу не удалось поставить в очередь (например, папка недоступна).
+  transcribeNotQueued: (): NotificationText => ({
+    title: 'Расшифровка не началась',
+    body: 'Запись сохранена. Откройте встречу в TextMeet и нажмите «Расшифровать».',
+  }),
+};
+
+/** Название как начало фразы: точка после него — если оно не кончается своим знаком; пустое — пропускается. */
+function sentence(title: string): string {
+  const trimmed = title.trim();
+  if (!trimmed) return '';
+  return /[.!?…]$/.test(trimmed) ? `${trimmed} ` : `${trimmed}. `;
+}
+
+/** Системные ошибки, при которых модель не записать на диск. */
+const DISK_CODES = new Set(['ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'EBUSY']);
+const SEE_LOG = 'Попробуйте ещё раз; подробности — в журнале ошибок (он указан в настройках).';
+const MODELS_DISK_TEXT = 'Не удалось сохранить модель расшифровки на диск.';
+const INTERNAL_TEXT = `Расшифровка не удалась из-за внутренней ошибки. ${SEE_LOG}`;
+/** Сбои ffmpeg (чтения дорожек) — в тексте для человека; пути и вывод ffmpeg остаются в журнале. */
+const UNREADABLE_AUDIO = /ffmpeg|не прочиталась ни одна дорожка/;
+/** ffmpeg не запустился («spawn …ffmpeg.exe ENOENT» — например, его убрал антивирус): дорожки тут ни при чём. */
+const SPAWN_FAILED = /\bspawn\b.*\b(E[A-Z]+|UNKNOWN)\b/;
+
+/** Причины ошибок расшифровки: пишутся в meeting.json (errorMessage) и показываются во встрече рядом с «Повторить». */
+export const transcriptionTexts = {
+  stillRecording: 'Встреча ещё записывается — расшифровка начнётся после остановки.',
+  noTracks: 'В папке встречи нет записанных дорожек — расшифровывать нечего.',
+  crashed: 'Расшифровка прервалась из-за сбоя.',
+  hung: 'Расшифровка зависла и была остановлена.',
+  badMessage: 'Процесс расшифровки прислал неверные данные.',
+  unreadableAudio: 'Не удалось прочитать звук встречи: ffmpeg не прочитал дорожку. Файлы записи остались в папке встречи.',
+  /** Причина для человека; исходная ошибка (с путями и кодами) пишется в журнал отдельно. */
+  download(err: unknown): string {
+    if (!(err instanceof DownloadError)) {
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      return code && DISK_CODES.has(code) ? MODELS_DISK_TEXT : `Не удалось подготовить модели расшифровки. ${SEE_LOG}`;
+    }
+    switch (err.kind) {
+      case 'network':
+        return 'Не удалось скачать модель расшифровки: нет связи с сервером. Проверьте интернет.';
+      case 'server':
+        return 'Не удалось скачать модель расшифровки: сервер не отдал файл модели. Попробуйте позже или обновите TextMeet.';
+      case 'corrupt':
+        return 'Скачанный файл модели повреждён — при повторе он скачается заново.';
+      case 'space':
+        // В мегабайтах с округлением вверх: «0,3 ГБ» преуменьшало бы нужное место.
+        return `Не хватает места на диске для модели расшифровки: нужно ${Math.ceil((err.neededBytes ?? TOTAL_MODELS_SIZE) / 1024 ** 2)} МБ свободного места.`;
+      case 'disk':
+        return MODELS_DISK_TEXT;
+    }
+  },
+  /** Сбой процесса расшифровки (его текст — для журнала: вывод sherpa-onnx и ffmpeg, пути к файлам) → текст для человека. */
+  workerFailed(raw: string): string {
+    if ((Object.values(WORKER_REFUSALS) as string[]).includes(raw)) return raw;
+    if (SPAWN_FAILED.test(raw)) return INTERNAL_TEXT;
+    return UNREADABLE_AUDIO.test(raw) ? transcriptionTexts.unreadableAudio : INTERNAL_TEXT;
+  },
+  /** Непредвиденная ошибка очереди (например, не записался результат) → текст для человека. */
+  unexpected(err: unknown): string {
+    const reason = knownFsReason(err);
+    return reason ? `Расшифровка не удалась: ${reason}.` : INTERNAL_TEXT;
+  },
 };
 
 export interface DialogText {

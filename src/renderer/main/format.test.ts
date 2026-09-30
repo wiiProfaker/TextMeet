@@ -178,6 +178,24 @@ describe('meetingNote', () => {
     expect(meetingNote(meeting('a', at, { status: 'transcribing' }))?.text).toBe('расшифровка…');
     expect(meetingNote(meeting('a', at, { status: 'error' }))).toEqual({ text: 'ошибка', tone: 'error' });
   });
+
+  it('shows the progress of transcription and its errors', () => {
+    const tracks = [{ kind: 'mic' as const, file: 'mic.webm', startOffsetMs: 0 }];
+    const progress = { meetingId: 'a', stage: 'others' as const, fraction: 0.624, download: null };
+    expect(meetingNote(meeting('a', at, { status: 'transcribing' }), progress)?.text).toBe('расшифровка 62%');
+    expect(
+      meetingNote(meeting('a', at, { status: 'transcribing' }), { ...progress, stage: 'download', fraction: 0 })?.text,
+    ).toBe('скачиваем модель…');
+    expect(meetingNote(meeting('a', at, { status: 'error', tracks }))).toEqual({ text: 'ошибка расшифровки', tone: 'error' });
+  });
+
+  it('never shows a percentage outside 0–100', () => {
+    const progress = { meetingId: 'a', stage: 'others' as const, fraction: 1.2, download: null };
+    const transcribing = meeting('a', at, { status: 'transcribing' });
+    expect(meetingNote(transcribing, progress)?.text).toBe('расшифровка 100%');
+    expect(meetingNote(transcribing, { ...progress, fraction: -0.5 })?.text).toBe('расшифровка 0%');
+    expect(meetingNote(transcribing, { ...progress, fraction: Number.NaN })?.text).toBe('расшифровка 0%');
+  });
 });
 
 describe('cleanDeviceLabel', () => {

@@ -22,6 +22,8 @@ export interface LaunchOptions {
   media?: 'tone' | 'fail';
   /** Собранная программа вместо out/ (проверка установщика). */
   executablePath?: string;
+  /** Уже расшифрованные встречи: id → transcript.json. */
+  transcripts?: Record<string, unknown>;
 }
 
 export interface LaunchedApp {
@@ -81,6 +83,11 @@ export async function readMeetingJson(libraryDir: string, id: string): Promise<R
   return JSON.parse(await readFile(join(libraryDir, id, 'meeting.json'), 'utf8')) as Record<string, unknown>;
 }
 
+/** Для expect.poll: файл могут как раз перезаписывать — тогда undefined, и опрос просто повторится. */
+export function pollMeetingJson(libraryDir: string, id: string): Promise<Record<string, unknown> | undefined> {
+  return readMeetingJson(libraryDir, id).catch(() => undefined);
+}
+
 async function windowByPage(app: ElectronApplication, pagePath: string): Promise<Page> {
   const matches = (page: Page) => page.url().includes(pagePath);
   return (
@@ -103,11 +110,45 @@ export async function waitForRecorder(page: Page): Promise<void> {
   await expect.poll(() => page.evaluate(() => window.textmeet.getAppInfo().then((i) => i.recorderReady))).toBe(true);
 }
 
-export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
-  const root = await mkdtemp(join(tmpdir(), 'textmeet-e2e-'));
-  const userDataDir = join(root, 'userData');
-  const homeDir = join(root, 'home');
-  const libraryDir = join(root, 'library');
+/**
+ * Задержать работу расшифровки: процесс расшифровки, запущенный после этого вызова, не получает команд, пока тест
+ * не вызовет release (поддельные движки мгновенны — иначе «расшифровка идёт» не застать). Процесс ещё не должен
+ * быть запущен (он запускается при первой расшифровке и остаётся, пока не простоит 5 минут).
+ */
+export async function holdTranscription(app: ElectronApplication): Promise<{ release(): Promise<void> }> {
+  await app.evaluate(({ utilityProcess }) => {
+    const fork = utilityProcess.fork.bind(utilityProcess);
+    utilityProcess.fork = (...args) => {
+      const child = fork(...args);
+      const post = child.postMessage.bind(child);
+      const held: unknown[] = [];
+      child.postMessage = (message: unknown) => {
+        held.push(message);
+      };
+      (globalThis as { releaseTranscription?: () => void }).releaseTranscription = () => {
+        child.postMessage = post;
+        for (const message of held) post(message);
+      };
+      return child;
+    };
+  });
+  return {
+    release: async () => {
+      // Процесс запускается не сразу после постановки в очередь — ждём его.
+      await expect
+        .poll(() => app.evaluate(() => typeof (globalThis as { releaseTranscription?: unknown }).releaseTranscription))
+        .toBe('function');
+      await app.evaluate(() => (globalThis as { releaseTranscription?: () => void }).releaseTranscription?.());
+    },
+  };
+}
+
+/** Папки программы, настройки и встречи для теста. */
+async function writeFixtures(
+  dirs: { userDataDir: string; homeDir: string; libraryDir: string },
+  options: LaunchOptions,
+): Promise<void> {
+  const { userDataDir, homeDir, libraryDir } = dirs;
   await mkdir(userDataDir, { recursive: true });
   await mkdir(homeDir, { recursive: true });
   await mkdir(libraryDir, { recursive: true });
@@ -122,10 +163,21 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
       await toneWebm(join(libraryDir, meeting.id, 'audio', file), seconds);
     }
   }
+  for (const [id, transcript] of Object.entries(options.transcripts ?? {})) {
+    await writeFile(join(libraryDir, id, 'transcript.json'), serialize(transcript));
+  }
+}
+
+export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
+  const root = await mkdtemp(join(tmpdir(), 'textmeet-e2e-'));
+  const userDataDir = join(root, 'userData');
+  const homeDir = join(root, 'home');
+  const libraryDir = join(root, 'library');
 
   let app: ElectronApplication | undefined;
   let page: Page;
   try {
+    await writeFixtures({ userDataDir, homeDir, libraryDir }, options);
     app = await electron.launch({
       ...(options.executablePath ? { executablePath: options.executablePath, args: [] } : { args: ['.'] }),
       env: {
@@ -133,11 +185,14 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         TEXTMEET_USER_DATA: userDataDir,
         TEXTMEET_HOME: homeDir,
         TEXTMEET_TEST_MEDIA: options.media ?? 'tone',
+        // Расшифровка — поддельными движками, без моделей; папка моделей — своя (настройки её показывают).
+        TEXTMEET_TEST_ASR: 'fake',
+        TEXTMEET_MODELS_DIR: join(root, 'models'),
       },
     });
     page = await mainWindow(app);
   } catch (err) {
-    // Запуск не удался — не оставляем за собой ни процесс, ни временные папки.
+    // Подготовка или запуск не удались — не оставляем за собой ни процесс, ни временные папки.
     await app?.close().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
     throw err;

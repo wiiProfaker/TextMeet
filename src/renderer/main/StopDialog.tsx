@@ -1,39 +1,23 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { StopDialogData } from '../../shared/recording';
 import { errorText } from './errors';
-import { formatDurationWithSeconds, parseParticipants } from './format';
-
-const CHOICES = [2, 3, 4, 5, 6] as const;
-
-/** Tab и Shift+Tab ходят по кругу внутри окна: кнопки за ним (например, «Начать запись») недоступны. */
-function keepFocusInside(dialog: HTMLElement, event: KeyboardEvent<HTMLDivElement>): void {
-  const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')];
-  const first = focusable[0];
-  const last = focusable.at(-1);
-  if (!first || !last) return;
-  const active = document.activeElement;
-  if (event.shiftKey && (active === first || active === dialog)) {
-    event.preventDefault();
-    last.focus();
-  } else if (!event.shiftKey && active === last) {
-    event.preventDefault();
-    first.focus();
-  }
-}
+import { formatDurationWithSeconds } from './format';
+import { keepFocusInside } from './focus';
+import { EMPTY_CHOICE, readChoice } from './participants';
+import { ParticipantsPicker } from './ParticipantsPicker';
 
 /** «Запись остановлена»: название и число участников (подсказка для разделения по голосам). */
 export function StopDialog({ data, onError }: { data: StopDialogData; onError(message: string): void }) {
   const [title, setTitle] = useState(data.title);
-  const [choice, setChoice] = useState<number | null>(null);
-  const [other, setOther] = useState('');
+  const [participants, setParticipants] = useState(EMPTY_CHOICE);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     setTitle(data.title);
-    setChoice(null);
-    setOther('');
+    setParticipants(EMPTY_CHOICE);
     setError(null);
     dialog.current?.focus();
   }, [data.meetingId, data.title]);
@@ -51,20 +35,16 @@ export function StopDialog({ data, onError }: { data: StopDialogData; onError(me
   };
 
   const confirm = () => {
-    if (other.trim() !== '') {
-      const n = parseParticipants(other);
-      if (n === null) {
-        setError('Введите число от 1 до 50.');
-        return;
-      }
-      void finish(n);
+    const n = readChoice(participants);
+    if (n === 'invalid') {
+      setError('Введите число от 1 до 50.');
       return;
     }
-    if (choice === null) {
+    if (n === null) {
       setError('Выберите, сколько было человек, или нажмите «Пропустить».');
       return;
     }
-    void finish(choice);
+    void finish(n);
   };
 
   return (
@@ -74,50 +54,26 @@ export function StopDialog({ data, onError }: { data: StopDialogData; onError(me
         className="dlg"
         role="dialog"
         aria-modal="true"
-        aria-labelledby="stop-title"
+        aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !saving) void finish(null);
           if (e.key === 'Tab' && dialog.current) keepFocusInside(dialog.current, e);
         }}
       >
-        <h2 id="stop-title">Запись остановлена</h2>
+        <h2 id={titleId}>Запись остановлена</h2>
         <div className="meta">{formatDurationWithSeconds(data.durationSec)} · уже сохранена в библиотеке</div>
         <label className="lab">
           Название
           <input className="inp" value={title} maxLength={200} onChange={(e) => setTitle(e.currentTarget.value)} />
         </label>
-        <div className="q" id="participants-question">
-          Сколько человек было на встрече, включая вас?
-        </div>
-        <div className="nums" role="group" aria-labelledby="participants-question">
-          {CHOICES.map((n) => (
-            <button
-              key={n}
-              type="button"
-              className="num"
-              aria-pressed={choice === n && other === ''}
-              onClick={() => {
-                setChoice(n);
-                setOther('');
-                setError(null);
-              }}
-            >
-              {n}
-            </button>
-          ))}
-          <input
-            className="other"
-            inputMode="numeric"
-            placeholder="другое"
-            aria-label="Другое число участников"
-            value={other}
-            onChange={(e) => {
-              setOther(e.currentTarget.value);
-              setError(null);
-            }}
-          />
-        </div>
+        <ParticipantsPicker
+          value={participants}
+          onChange={(next) => {
+            setParticipants(next);
+            setError(null);
+          }}
+        />
         <p className="note">
           Так расшифровка точнее разделит голоса. Если не знаете — пропустите, программа попробует определить сама.
         </p>

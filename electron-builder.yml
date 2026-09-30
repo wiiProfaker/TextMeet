@@ -20,6 +20,8 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: TextMeet записывает ваш микрофон во время встречи.
     NSAudioCaptureUsageDescription: TextMeet записывает звук компьютера во время встречи.
-# ffmpeg — отдельная программа: запускать её можно только из распакованной копии, не из app.asar.
+# ffmpeg — отдельная программа, sherpa-onnx — нативная библиотека (.node и .dll/.dylib рядом):
+# запускать и загружать их можно только из распакованной копии, не из app.asar.
 asarUnpack:
   - node_modules/ffmpeg-static/**
+  - node_modules/sherpa-onnx-*/**

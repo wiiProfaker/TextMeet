@@ -1,5 +1,7 @@
 import type { LaunchAtLoginNotice } from '../../shared/ipc';
 import { entryId, type Meeting, type MeetingListEntry } from '../../shared/meeting';
+import type { TranscriptionProgress } from '../../shared/transcription';
+import { percent } from './transcription-format';
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 
@@ -127,8 +129,11 @@ export interface MeetingNote {
   tone: NoteTone;
 }
 
-/** Пометка встречи в списке — только если есть о чём сказать. У готовой встречи пометки нет. */
-export function meetingNote(meeting: Meeting): MeetingNote | null {
+/**
+ * Пометка встречи в списке — только если есть о чём сказать. У готовой встречи пометки нет.
+ * progress — ход расшифровки этой встречи (если она сейчас расшифровывается).
+ */
+export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress): MeetingNote | null {
   switch (meeting.status) {
     case 'recording':
       return { text: 'идёт запись', tone: 'live' };
@@ -139,9 +144,13 @@ export function meetingNote(meeting: Meeting): MeetingNote | null {
     case 'queued':
       return { text: 'в очереди на расшифровку', tone: 'accent' };
     case 'transcribing':
-      return { text: 'расшифровка…', tone: 'accent' };
+      if (progress?.stage === 'download') return { text: 'скачиваем модель…', tone: 'accent' };
+      return progress
+        ? { text: `расшифровка ${percent(progress.fraction)}%`, tone: 'accent' }
+        : { text: 'расшифровка…', tone: 'accent' };
     case 'error':
-      return { text: 'ошибка', tone: 'error' };
+      // С дорожками ошибка — у расшифровки (запись сохранилась); без них — у самой записи.
+      return { text: meeting.tracks.length > 0 ? 'ошибка расшифровки' : 'ошибка', tone: 'error' };
     case 'done':
       return null;
   }

@@ -7,7 +7,10 @@ import {
   RECORDER_BROKEN,
   systemAudioProblem,
   systemSettingsUrl,
+  transcriptionTexts,
 } from './texts';
+import { DownloadError } from './models/download';
+import { WORKER_REFUSALS } from './transcription/protocol';
 
 describe('notificationTexts', () => {
   it('builds the recording notifications', () => {
@@ -117,5 +120,97 @@ describe('systemSettingsUrl', () => {
     expect(systemSettingsUrl('system-audio', 'darwin')).toBe(
       'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
     );
+  });
+});
+
+describe('transcription texts', () => {
+  it('names the meeting in notifications', () => {
+    expect(notificationTexts.transcribed('Созвон с Ириной')).toEqual({ title: 'Текст встречи готов', body: 'Созвон с Ириной' });
+    expect(notificationTexts.transcribeFailed('Созвон').body).toContain('Повторить');
+  });
+
+  it('tells how to start transcription by hand when it could not be queued', () => {
+    expect(notificationTexts.transcribeNotQueued()).toEqual({
+      title: 'Расшифровка не началась',
+      body: 'Запись сохранена. Откройте встречу в TextMeet и нажмите «Расшифровать».',
+    });
+  });
+
+  it('explains why models could not be prepared', () => {
+    expect(transcriptionTexts.download(new DownloadError('network', 'x'))).toContain('нет связи');
+    expect(transcriptionTexts.download(new DownloadError('corrupt', 'x'))).toContain('повреждён');
+    expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toMatch(/нужно \d+ МБ/);
+    expect(transcriptionTexts.download(new DownloadError('disk', 'x'))).toContain('на диск');
+  });
+
+  it('asks for the space the download needs, not for the size of all models', () => {
+    const text = transcriptionTexts.download(new DownloadError('space', 'x', { neededBytes: 70.2 * 1024 ** 2 }));
+    expect(text).toBe('Не хватает места на диске для модели расшифровки: нужно 71 МБ свободного места.');
+  });
+
+  it('does not blame the internet when the server refuses to give the file', () => {
+    const text = transcriptionTexts.download(new DownloadError('server', 'сервер ответил 404'));
+    expect(text).not.toContain('интернет');
+    expect(text).toContain('сервер не отдал файл модели');
+  });
+
+  it('never shows a raw system error while models are prepared', () => {
+    const raw = Object.assign(new Error("EPERM: operation not permitted, open 'C:\\Users\\ира\\models\\verified.json'"), {
+      code: 'EPERM',
+    });
+    expect(transcriptionTexts.download(raw)).toBe(transcriptionTexts.download(new DownloadError('disk', 'x')));
+    for (const code of ['ENOSPC', 'EACCES', 'EROFS', 'EBUSY']) {
+      expect(transcriptionTexts.download(Object.assign(new Error(code), { code }))).toContain('на диск');
+    }
+    const other = transcriptionTexts.download(new Error('что-то C:\\путь'));
+    expect(other).not.toContain('что-то');
+    expect(other).toMatch(/^Не удалось подготовить модели расшифровки\./);
+    expect(transcriptionTexts.download('строка')).toBe(other);
+  });
+
+  it('turns a failure of the transcription process into plain words', () => {
+    const unreadable = transcriptionTexts.workerFailed(
+      "не прочиталась ни одна дорожка: микрофон — ffmpeg не прочитал дорожку (завершился с кодом 1): C:\\Users\\ира\\mic.webm: Invalid data",
+    );
+    expect(unreadable).toContain('ffmpeg не прочитал дорожку');
+    expect(unreadable).not.toContain('C:\\');
+    expect(transcriptionTexts.workerFailed('ffmpeg завис — долго ничего не сообщал и был остановлен')).toBe(unreadable);
+    const internal = transcriptionTexts.workerFailed('Protobuf parsing failed: D:\\models\\encoder.int8.onnx');
+    expect(internal).not.toContain('Protobuf');
+    expect(internal).toContain('журнал');
+    for (const refusal of Object.values(WORKER_REFUSALS)) expect(transcriptionTexts.workerFailed(refusal)).toBe(refusal);
+  });
+
+  it('does not blame the track when ffmpeg itself could not be started', () => {
+    const internal = transcriptionTexts.workerFailed('что-то внутри');
+    const exe = String.raw`C:\Program Files\TextMeet\resources\app.asar.unpacked\node_modules\ffmpeg-static\ffmpeg.exe`;
+    // Одна дорожка — ошибка запуска как есть; две — внутри общего «не прочиталась ни одна дорожка».
+    expect(transcriptionTexts.workerFailed(`spawn ${exe} ENOENT`)).toBe(internal);
+    expect(transcriptionTexts.workerFailed('spawn EPERM')).toBe(internal);
+    expect(
+      transcriptionTexts.workerFailed(
+        `не прочиталась ни одна дорожка: микрофон — spawn ${exe} ENOENT; звук компьютера — spawn ${exe} ENOENT`,
+      ),
+    ).toBe(internal);
+    expect(transcriptionTexts.workerFailed('ffmpeg не прочитал дорожку (завершился с кодом 1): Invalid data')).toBe(
+      transcriptionTexts.unreadableAudio,
+    );
+  });
+
+  it('turns an unexpected error of the queue into plain words', () => {
+    const denied = Object.assign(new Error("EACCES: permission denied, open 'C:\\lib\\transcript.json'"), { code: 'EACCES' });
+    expect(transcriptionTexts.unexpected(denied)).toBe('Расшифровка не удалась: нет прав на эту папку.');
+    expect(transcriptionTexts.unexpected(new Error('TypeError: x is undefined'))).toBe(
+      transcriptionTexts.workerFailed('что-то внутри'),
+    );
+  });
+
+  it('does not double the full stop after a meeting title', () => {
+    expect(notificationTexts.transcribeFailed('Созвон').body).toBe('Созвон. Причина и кнопка «Повторить» — в окне встречи.');
+    expect(notificationTexts.transcribeFailed('Созвон в 10.').body).toBe(
+      'Созвон в 10. Причина и кнопка «Повторить» — в окне встречи.',
+    );
+    expect(notificationTexts.transcribeFailed('Что решили?').body).toMatch(/^Что решили\? Причина/);
+    expect(notificationTexts.transcribeFailed('  ').body).toBe('Причина и кнопка «Повторить» — в окне встречи.');
   });
 });

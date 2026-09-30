@@ -19,9 +19,11 @@ import {
   type SettingsState,
 } from '../shared/ipc';
 import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
+import type { ModelGroupState, ModelsState, TranscriptionProgress } from '../shared/transcription';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import { listMeetings, meetingDir } from './library/library';
+import { readTranscript } from './library/transcript-store';
 import type { Logger } from './logger';
 import type { RecordingController } from './recording/controller';
 import type { SettingsStore } from './settings/settings-store';
@@ -44,6 +46,16 @@ export interface IpcDeps {
   onRecorderReady(): void;
   /** Горячая клавиша сменилась — обновить подсказку в меню трея. */
   hotkeyChanged(): void;
+  transcription: {
+    enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null): Promise<void>;
+    progress(): TranscriptionProgress[];
+    isBusy(): boolean;
+    stopIdleWorker(): void;
+  };
+  models: {
+    state(): Promise<ModelGroupState[]>;
+    remove(group: 'gigaam' | 'voices'): Promise<void>;
+  };
 }
 
 const StopDialogAnswerSchema = z.object({
@@ -61,6 +73,12 @@ const LIBRARY_LOCKED = 'Во время записи папку библиоте
 // Ответ в окне «Запись остановлена» сохраняется в папку текущей библиотеки — до него папку не меняем.
 const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запись остановлена».';
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
+const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
+
+const TranscribeRequestSchema = z.object({
+  meetingId: MeetingIdSchema,
+  participantsHint: z.number().int().min(1).max(50).nullable(),
+});
 
 const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
@@ -242,6 +260,34 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.openSystemSettings, async (arg) => {
     const kind = z.enum(['microphone', 'system-audio']).parse(arg);
     await shell.openExternal(systemSettingsUrl(kind, deps.platform));
+  });
+
+  handle(IPC.transcribe, async (arg) => {
+    const request = TranscribeRequestSchema.parse(arg);
+    await deps.transcription.enqueue(deps.libraryDir(), request.meetingId, request.participantsHint);
+  });
+
+  handle(IPC.getTranscript, (arg) => readTranscript(deps.libraryDir(), MeetingIdSchema.parse(arg)));
+
+  handle(IPC.getTranscriptionProgress, () => deps.transcription.progress());
+
+  const modelsState = async (): Promise<ModelsState> => ({
+    groups: await deps.models.state(),
+    busy: deps.transcription.isBusy(),
+  });
+
+  handle(IPC.getModels, () => modelsState());
+
+  handle(IPC.deleteModels, async (arg) => {
+    const group = z.enum(['gigaam', 'voices']).parse(arg);
+    if (deps.transcription.isBusy()) throw new Error(MODELS_BUSY);
+    deps.transcription.stopIdleWorker();
+    try {
+      await deps.models.remove(group);
+    } catch (err) {
+      throw humanFsError('Не удалось удалить модели', err);
+    }
+    return modelsState();
   });
 
   onRecorder(IPC.recorderReady, () => deps.onRecorderReady());

@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
+    // Тесты на настоящих моделях — отдельно: npm run test:models (vitest.models.config.ts).
+    exclude: ['**/node_modules/**', 'src/**/*.int.test.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',
@@ -19,10 +21,16 @@ export default defineConfig({
         'src/main/windows.ts',
         'src/main/tray.ts',
         'src/main/notifications.ts',
+        // Процесс расшифровки и нативные движки — сквозные тесты и npm run test:models.
+        'src/main/transcription/worker.ts',
+        'src/main/transcription/worker-host.ts',
+        'src/main/transcription/sherpa-engines.ts',
+        'src/main/transcription/sherpa-onnx-node.d.ts',
         'src/main/autostart.ts',
         'src/renderer/env.d.ts',
         'src/renderer/**/*.tsx',
         'src/renderer/main/hooks.ts',
+        'src/renderer/main/focus.ts',
         'src/renderer/recorder/recorder.ts',
         'src/renderer/recorder/capture.ts',
         'src/renderer/recorder/levels.ts',

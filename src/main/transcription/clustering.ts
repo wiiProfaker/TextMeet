@@ -16,7 +16,7 @@ export interface ClusteringOptions {
   minSeedSec: number;
   /**
    * Группа, у которой речи меньше min(этого, доли всей речи), растворяется в ближайшей крупной.
-   * Речь группы — все ходы, которым она ближайшая; вся речь — все ходы дорожки.
+   * Считаются только ходы, создавшие группы: и речь группы, и вся речь.
    */
   minGroupSec: number;
   minGroupShare: number;
@@ -123,9 +123,10 @@ export function clusterVoiceprints(prints: readonly Voiceprint[], opts: Clusteri
   const seeds = chooseSeeds(candidates, unit);
   if (seeds.length === 0) return unit.map((e) => (e ? 0 : -1));
 
-  // Группы: сумма нормированных отпечатков с весом длительности и её центр.
+  // Группы: сумма нормированных отпечатков с весом длительности, её центр и длительность речи.
   const sums = seeds.map(({ i, durationSec }) => unit[i]!.map((x) => x * durationSec));
   const centers = sums.map(normalize);
+  const durations = seeds.map((s) => s.durationSec);
   const alive = seeds.map(() => true);
   const n = seeds.length;
   // Таблица сходств центров и ближайший сосед каждой группы: после объединения пересчитываются одна строка и соседи
@@ -162,6 +163,7 @@ export function clusterVoiceprints(prints: readonly Voiceprint[], opts: Clusteri
     const pb = nearestOf[pa]!;
     sums[pa] = sums[pa]!.map((x, k) => x + (sums[pb]![k] ?? 0));
     centers[pa] = normalize(sums[pa]!);
+    durations[pa] = durations[pa]! + durations[pb]!;
     alive[pb] = false;
     for (let c = 0; c < n; c++) {
       if (!alive[c] || c === pa) continue;
@@ -180,14 +182,11 @@ export function clusterVoiceprints(prints: readonly Voiceprint[], opts: Clusteri
     }
   }
 
-  // Мелкие группы — почти всегда обрывки одного из крупных голосов. Речь группы — все её ходы, а не только
-  // создавшие её: иначе голос, от которого в группы попала лишь пара ходов, растворился бы.
-  const aliveCenters = centers.filter((_, g) => alive[g]);
-  const groups = aliveCenters.map((center) => ({ center, durationSec: 0 }));
-  unit.forEach((e, i) => {
-    if (e) groups[nearest(aliveCenters, e)]!.durationSec += prints[i]!.durationSec;
-  });
-  const totalSec = prints.reduce((sum, p) => sum + p.durationSec, 0);
+  // Мелкие группы — почти всегда обрывки одного из крупных голосов. Речь считается только по создавшим группы
+  // ходам: если считать все ближайшие, на многочасовой встрече копии зашумлённых отпечатков набирают 20 с
+  // и становятся лишними собеседниками (опыт ревью: 15–56 «собеседников» вместо двух).
+  const groups = centers.map((center, g) => ({ center, durationSec: durations[g]! })).filter((_, g) => alive[g]);
+  const totalSec = groups.reduce((sum, g) => sum + g.durationSec, 0);
   const minSec = Math.min(opts.minGroupSec, opts.minGroupShare * totalSec);
   const big = groups.filter((g) => g.durationSec >= minSec);
   const kept = big.length > 0 ? big : [groups.reduce((a, b) => (b.durationSec > a.durationSec ? b : a))];

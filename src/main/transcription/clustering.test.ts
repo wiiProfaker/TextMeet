@@ -81,12 +81,36 @@ describe('clusterVoiceprints', () => {
     expect(samePartition(labels, truth)).toBe(true);
   });
 
-  it('measures a group by all of its turns, not only by those that created it', () => {
-    // Второй голос: один ход 3 с и сотня коротких по 0,4 с (группы не создают) — всего 43 с речи, это собеседник.
-    const prints = [print(0, 600, 1), print(1, 3, 2), ...Array.from({ length: 100 }, (_, n) => print(1, 0.4, n + 3))];
+  it('does not grow false speakers on a long meeting of two voices', () => {
+    // Как опыт ревью: отпечатки 233 ходов записи на двоих, повторённые 15 раз с небольшим шумом (≈ 3–4 часа).
+    // У части ходов отпечаток сильно зашумлён: такие становятся «самыми непохожими» группами, и если считать речью
+    // группы все ближайшие к ней ходы, копии этих отпечатков набирают 20 с и превращаются в лишних собеседников.
+    let seed = 23;
+    const random = (): number => {
+      seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31;
+      return seed / 2 ** 31;
+    };
+    const gauss = (): number => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
+    const DIM = 64;
+    const voices = [0, 1].map((v) => Float32Array.from({ length: DIM }, (_, k) => (k % 2 === v ? 1 : 0) / Math.sqrt(DIM / 2)));
+    const base = Array.from({ length: 233 }, () => {
+      const voice = random() < 0.5 ? 0 : 1;
+      const noise = 0.3 + 0.8 * random() ** 3;
+      const embedding = voices[voice]!.map((x) => x + (noise * gauss()) / Math.sqrt(DIM));
+      return { voice, durationSec: 1 + 14 * random(), embedding };
+    });
+    const truth: number[] = [];
+    const prints: Voiceprint[] = [];
+    for (let copy = 0; copy < 15; copy++) {
+      for (const b of base) {
+        truth.push(b.voice);
+        prints.push({ durationSec: b.durationSec, embedding: b.embedding.map((x) => x + (0.1 * gauss()) / Math.sqrt(DIM)) });
+      }
+    }
     const labels = clusterVoiceprints(prints);
     expect(new Set(labels).size).toBe(2);
-    expect(labels[2]).toBe(labels[1]);
+    const agree = labels.filter((label, i) => label === labels[truth.indexOf(truth[i]!)]).length;
+    expect(agree / labels.length).toBeGreaterThan(0.95);
   });
 
   it('takes all turns as seeds when there are few of them', () => {

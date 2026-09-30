@@ -7,7 +7,9 @@ import {
   RECORDER_BROKEN,
   systemAudioProblem,
   systemSettingsUrl,
+  transcriptionTexts,
 } from './texts';
+import { DownloadError } from './models/download';
 
 describe('notificationTexts', () => {
   it('builds the recording notifications', () => {
@@ -117,5 +119,21 @@ describe('systemSettingsUrl', () => {
     expect(systemSettingsUrl('system-audio', 'darwin')).toBe(
       'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
     );
+  });
+});
+
+describe('transcription texts', () => {
+  it('names the meeting in notifications', () => {
+    expect(notificationTexts.transcribed('Созвон с Ириной')).toEqual({ title: 'Текст встречи готов', body: 'Созвон с Ириной' });
+    expect(notificationTexts.transcribeFailed('Созвон').body).toContain('Повторить');
+  });
+
+  it('explains why models could not be prepared', () => {
+    expect(transcriptionTexts.download(new DownloadError('network', 'x'))).toContain('нет связи');
+    expect(transcriptionTexts.download(new DownloadError('corrupt', 'x'))).toContain('повреждён');
+    expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toMatch(/нужно \d+ МБ/);
+    expect(transcriptionTexts.download(new DownloadError('disk', 'x'))).toContain('на диск');
+    expect(transcriptionTexts.download(new Error('что-то'))).toBe('Не удалось подготовить модели расшифровки: что-то');
+    expect(transcriptionTexts.download('строка')).toContain('строка');
   });
 });

@@ -1,6 +1,8 @@
 // Тексты для человека, которые показывает main: уведомления, системные окна, причины ошибок записи.
 import { formatBytes, formatDurationShort } from '../shared/format';
 import type { MediaFailure, StartProblem, SystemSettingsKind } from '../shared/recording';
+import { DownloadError } from './models/download';
+import { TOTAL_MODELS_SIZE } from './models/registry';
 
 const RECORDER_BROKEN_TEXT = 'Окно записи несколько раз закрылось из-за сбоя. Перезапустите TextMeet.';
 
@@ -62,6 +64,36 @@ export const notificationTexts = {
     body: 'Микрофон отключился, а звук компьютера не записывается. Записанное сохранено.',
   }),
   recorderBroken: (): NotificationText => ({ title: 'Запись не работает', body: RECORDER_BROKEN_TEXT }),
+  transcribed: (meetingTitle: string): NotificationText => ({ title: 'Текст встречи готов', body: meetingTitle }),
+  transcribeFailed: (meetingTitle: string): NotificationText => ({
+    title: 'Не удалось расшифровать встречу',
+    body: `${meetingTitle}. Причина и кнопка «Повторить» — в окне встречи.`,
+  }),
+};
+
+/** Причины ошибок расшифровки: пишутся в meeting.json (errorMessage) и показываются во встрече рядом с «Повторить». */
+export const transcriptionTexts = {
+  stillRecording: 'Встреча ещё записывается — расшифровка начнётся после остановки.',
+  noTracks: 'В папке встречи нет записанных дорожек — расшифровывать нечего.',
+  crashed: 'Расшифровка прервалась из-за сбоя.',
+  hung: 'Расшифровка зависла и была остановлена.',
+  badMessage: 'Процесс расшифровки прислал неверные данные.',
+  download(err: unknown): string {
+    if (!(err instanceof DownloadError)) {
+      return `Не удалось подготовить модели расшифровки: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    switch (err.kind) {
+      case 'network':
+        return 'Не удалось скачать модель расшифровки: нет связи с сервером. Проверьте интернет.';
+      case 'corrupt':
+        return 'Скачанный файл модели повреждён — при повторе он скачается заново.';
+      case 'space':
+        // В мегабайтах с округлением вверх: «0,3 ГБ» преуменьшало бы нужное место.
+        return `Не хватает места на диске для модели расшифровки (нужно ${Math.ceil(TOTAL_MODELS_SIZE / 1024 ** 2)} МБ).`;
+      case 'disk':
+        return 'Не удалось сохранить модель расшифровки на диск.';
+    }
+  },
 };
 
 export interface DialogText {

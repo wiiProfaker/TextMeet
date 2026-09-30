@@ -44,10 +44,11 @@ test('records both tracks, asks about participants and prepares the recording fo
   await expect(dialog).toBeHidden();
 
   const [id] = await meetingIds(libraryDir);
+  // Ответ в окне ставит встречу в очередь расшифровки — чуть позже, чем закрывается окно.
+  await expect.poll(async () => (await readMeetingJson(libraryDir, id!)).status).toMatch(/^(queued|transcribing|done)$/);
   expect(await readMeetingJson(libraryDir, id!)).toMatchObject({
     title: 'Созвон с Ириной',
     participantsHint: 3,
-    status: 'recorded',
     tracks: [{ kind: 'mic' }, { kind: 'system' }].map((t) => expect.objectContaining(t)),
   });
   for (const file of ['mic.webm', 'system.webm']) {

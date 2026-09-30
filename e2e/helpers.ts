@@ -22,6 +22,8 @@ export interface LaunchOptions {
   media?: 'tone' | 'fail';
   /** Собранная программа вместо out/ (проверка установщика). */
   executablePath?: string;
+  /** Уже расшифрованные встречи: id → transcript.json. */
+  transcripts?: Record<string, unknown>;
 }
 
 export interface LaunchedApp {
@@ -122,6 +124,9 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
       await toneWebm(join(libraryDir, meeting.id, 'audio', file), seconds);
     }
   }
+  for (const [id, transcript] of Object.entries(options.transcripts ?? {})) {
+    await writeFile(join(libraryDir, id, 'transcript.json'), serialize(transcript));
+  }
 
   let app: ElectronApplication | undefined;
   let page: Page;
@@ -133,6 +138,9 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         TEXTMEET_USER_DATA: userDataDir,
         TEXTMEET_HOME: homeDir,
         TEXTMEET_TEST_MEDIA: options.media ?? 'tone',
+        // Расшифровка — поддельными движками, без моделей; папка моделей — своя (настройки её показывают).
+        TEXTMEET_TEST_ASR: 'fake',
+        TEXTMEET_MODELS_DIR: join(root, 'models'),
       },
     });
     page = await mainWindow(app);

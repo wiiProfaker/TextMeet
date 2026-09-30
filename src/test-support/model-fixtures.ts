@@ -1,5 +1,7 @@
-// Настоящие модели и записи для интеграционных тестов (npm run test:models). Скачиваются один раз в папку моделей
-// (или TEXTMEET_MODELS_DIR — её кеширует GitHub Actions); повторные прогоны только проверяют суммы.
+// Настоящие модели и записи для интеграционных тестов (npm run test:models). Скачиваются один раз; повторные прогоны
+// только проверяют суммы. Модели — в папку моделей программы (или TEXTMEET_MODELS_DIR — её кеширует GitHub Actions):
+// они те же, что у программы. Записи — в свою папку (TEXTMEET_TEST_FIXTURES_DIR, иначе кеш в node_modules), со своим
+// verified.json: в папке и списке моделей программы им не место — программа о них не знает и их не удаляет.
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { downloadFile } from '../main/models/download';
@@ -17,16 +19,19 @@ export const MODELS_ROOT = modelsRoot({
   override: process.env.TEXTMEET_MODELS_DIR,
 });
 
+export const FIXTURES_ROOT =
+  process.env.TEXTMEET_TEST_FIXTURES_DIR || join(process.cwd(), 'node_modules', '.cache', 'textmeet-test-fixtures');
+
 /** Открытые записи: пример GigaAM (MIT; одна дикторша, стихи) и разговор четырёх человек из релизов sherpa-onnx. */
 const FIXTURES = {
   gigaamExample: {
-    path: 'test-fixtures/gigaam-example.wav',
+    path: 'gigaam-example.wav',
     url: 'https://huggingface.co/csukuangfj/tmp-files/resolve/main/GigaAM/example.wav',
     size: 361_324,
     sha256: 'd8aaaa18a5098d7c6de0595ae7ac1e64cacd0d4022af3595213bdaf23be77e69',
   },
   fourSpeakers: {
-    path: 'test-fixtures/0-four-speakers-zh.wav',
+    path: '0-four-speakers-zh.wav',
     url: 'https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/0-four-speakers-zh.wav',
     size: 1_819_586,
     sha256: 'bedf036caed208386c67b4ef4b11f83d74dd0d420b102163a1c33cd09cde7010',
@@ -40,17 +45,22 @@ export async function ensureModels(): Promise<void> {
   await new ModelManager({ root: MODELS_ROOT, logger: quiet, freeBytes: freeDiskBytes }).ensure();
 }
 
+/** Где лежит открытая запись (без скачивания). */
+export function fixturePath(name: FixtureName): string {
+  return join(FIXTURES_ROOT, ...FIXTURES[name].path.split('/'));
+}
+
 /** Путь к открытой записи (скачивается, если нет). */
 export async function fixture(name: FixtureName): Promise<string> {
   const { path, url, size, sha256 } = FIXTURES[name];
-  const dest = join(MODELS_ROOT, ...path.split('/'));
+  // ModelManager — ради докачки, проверки сумм и verified.json, но со своей папкой: группа здесь ничего не значит.
   const manager = new ModelManager({
-    root: MODELS_ROOT,
+    root: FIXTURES_ROOT,
     logger: quiet,
     freeBytes: freeDiskBytes,
     files: [{ group: 'voices', path, url, size, sha256 }],
     download: downloadFile,
   });
   await manager.ensure();
-  return dest;
+  return fixturePath(name);
 }

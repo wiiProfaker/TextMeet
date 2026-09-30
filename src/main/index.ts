@@ -90,6 +90,8 @@ const recorderCrashes: number[] = [];
 // тогда просьбу показать окно только запоминаем, иначе появится второе, «чужое» главное окно.
 let windowsCreated = false;
 let showRequested = false;
+/** Встреча из уведомления для окна, которое ещё загружается (например, пересоздано): покажем, когда догрузится. */
+let pendingMeetingId: string | null = null;
 
 /** Окно записи перезапускается после сбоя, но не бесконечно: не больше 3 раз в минуту, 4-й сбой — больше не пробуем. */
 const RECORDER_RESTART_LIMIT = 3;
@@ -114,7 +116,19 @@ function startMainWindow(logger: Logger, show: boolean): BrowserWindow {
   const resumeHotkey = (): void => hotkeys?.suspend(false);
   win.webContents.on('render-process-gone', resumeHotkey);
   win.webContents.on('did-start-loading', resumeHotkey);
+  win.webContents.on('did-finish-load', () => {
+    const id = pendingMeetingId;
+    pendingMeetingId = null;
+    if (id) win.webContents.send(IPC.showMeeting, id);
+  });
   return win;
+}
+
+/** Показать встречу в главном окне; загружающаяся страница ещё не подписана на событие — ждём её загрузки. */
+function showMeeting(id: string): void {
+  const contents = mainWindow?.webContents;
+  if (contents && !contents.isDestroyed() && !contents.isLoading()) contents.send(IPC.showMeeting, id);
+  else pendingMeetingId = id;
 }
 
 /** Закрытие окна прячет его в трей; по-настоящему окна закрываются только при выходе. */
@@ -312,7 +326,7 @@ async function start(logger: Logger): Promise<void> {
       notify(
         ok ? notificationTexts.transcribed(meeting.title) : notificationTexts.transcribeFailed(meeting.title),
         true,
-        () => sendToMain(IPC.showMeeting, meeting.id),
+        () => showMeeting(meeting.id),
       ),
   });
   transcription = queue;

@@ -1,6 +1,7 @@
 // Один preload на оба окна. Preload работает в песочнице: подключать можно только 'electron'
 // и собственный код без пакетов (zod сюда не тянуть). Кому что разрешено, проверяет main (ipc.ts).
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { heldEvent } from '../shared/held-event';
 import {
   IPC,
   type InvokeArg,
@@ -32,6 +33,11 @@ function subscribe<C extends MainEventChannel | RecorderCommandChannel>(
   return () => ipcRenderer.removeListener(channel, wrapped);
 }
 
+// Щелчок по уведомлению «Текст встречи готов»: main шлёт встречу, когда страница загрузилась, а React
+// подписывается позже (в useEffect) — просьба держится до подписки и не теряется.
+const showMeeting = heldEvent<string>();
+ipcRenderer.on(IPC.showMeeting, (_event: IpcRendererEvent, id: string) => showMeeting.emit(id));
+
 const send = <C extends RecorderMessageChannel>(channel: C, ...payload: ArgList<RecorderMessageContract[C]>): void =>
   ipcRenderer.send(channel, ...payload);
 
@@ -62,7 +68,7 @@ const api: TextMeetApi = {
   onPeaks: (listener) => subscribe(IPC.recordingPeaks, listener),
   onLibraryChanged: (listener) => subscribe(IPC.libraryChanged, () => listener()),
   onTranscriptionProgress: (listener) => subscribe(IPC.transcriptionProgress, listener),
-  onShowMeeting: (listener) => subscribe(IPC.showMeeting, listener),
+  onShowMeeting: (listener) => showMeeting.subscribe(listener),
 };
 
 const recorder: RecorderBridge = {

@@ -21,9 +21,11 @@ interface Setup {
   turns?: Turn[];
   prints?: (samples: Float32Array) => Float32Array | null;
   threads?: () => number;
+  /** Свой текст куска вместо «кусок N с». */
+  text?: (samples: Float32Array) => string;
 }
 
-function setup({ audio, turns = [], prints, threads = () => 4 }: Setup) {
+function setup({ audio, turns = [], prints, threads = () => 4, text }: Setup) {
   const base = fakeEngines();
   const diarize = vi.fn((_samples: Float32Array, _speakers: number) => turns);
   const recognizerThreads: number[] = [];
@@ -31,7 +33,7 @@ function setup({ audio, turns = [], prints, threads = () => 4 }: Setup) {
     detector: base.detector,
     recognizer: (n) => {
       recognizerThreads.push(n);
-      return { recognize: (s) => `кусок ${(s.length / SAMPLE_RATE).toFixed(1)}` };
+      return { recognize: text ?? ((s) => `кусок ${(s.length / SAMPLE_RATE).toFixed(1)}`) };
     },
     diarizer: () => ({ diarize }),
     voiceprints: () => ({ extract: prints ?? (() => Float32Array.from([1, 0])) }),
@@ -197,8 +199,9 @@ describe('runPipeline', () => {
   });
 
   it('returns nothing for silence and skips empty texts', async () => {
-    const { deps } = setup({ audio: { mic: signal(10, []), system: signal(10, []) } });
+    const { deps, progress } = setup({ audio: { mic: signal(10, []), system: signal(10, []) } });
     expect(await runPipeline(input({ durationSec: 10 }), deps)).toEqual({ segments: [], speakers: [], skippedTracks: [] });
+    expect(progress.at(-1)?.fraction).toBe(1);
   });
 
   it('transcribes the readable track when the other one cannot be read', async () => {
@@ -220,6 +223,63 @@ describe('runPipeline', () => {
     const { deps } = setup({ audio: {} });
     const broken: PipelineDeps = { ...deps, decode: () => Promise.reject(new Error('ffmpeg не прочитал дорожку')) };
     await expect(runPipeline(input({ durationSec: 10 }), broken)).rejects.toThrow('ffmpeg не прочитал дорожку');
+    await expect(runPipeline(input({ tracks: [mic], durationSec: 10 }), broken)).rejects.toThrow('ffmpeg не прочитал дорожку');
+  });
+
+  it('names the problem of every track when none can be read', async () => {
+    const { deps } = setup({ audio: {} });
+    const broken: PipelineDeps = { ...deps, decode: (track) => Promise.reject(new Error(`ошибка ${track.kind}`)) };
+    await expect(runPipeline(input({ durationSec: 10 }), broken)).rejects.toThrow(/ошибка mic.*ошибка system/);
+  });
+
+  it('numbers the others by who appears in the transcript first', async () => {
+    // Первый по времени голос (громче) ничего не сказал — в расшифровке он не появится.
+    const audio = signal(20, [{ start: 6, end: 10 }]);
+    audio.fill(0.3, 0, 4 * SAMPLE_RATE);
+    const { deps } = setup({
+      audio: { system: audio },
+      turns: [
+        { start: 0, end: 4, speaker: 0 },
+        { start: 6, end: 10, speaker: 1 },
+      ],
+      text: (s) => (s.some((x) => x > 0.2) ? '' : 'слова'),
+    });
+    const result = await runPipeline(input({ tracks: [system], participantsHint: 3, durationSec: 20 }), deps);
+    expect(result.segments.map((s) => s.speakerId)).toEqual(['s1']);
+    expect(result.speakers).toEqual([{ id: 's1', kind: 'other' }]);
+  });
+
+  it('keeps «me» and renumbers the others after the sort by time', async () => {
+    const { deps } = setup({
+      audio: { mic: signal(20, [{ start: 0, end: 2 }]), system: signal(20, [{ start: 3, end: 5 }, { start: 8, end: 10 }]) },
+      turns: [
+        { start: 3, end: 5, speaker: 0 },
+        { start: 8, end: 10, speaker: 1 },
+      ],
+    });
+    const result = await runPipeline(input({ participantsHint: 3, durationSec: 20 }), deps);
+    expect(result.segments.map((s) => s.speakerId)).toEqual(['me', 's1', 's2']);
+    expect(result.speakers.map((s) => s.id)).toEqual(['me', 's1', 's2']);
+  });
+
+  it('does not split a silent track by voices and still finishes the progress', async () => {
+    const { deps, diarize, progress } = setup({ audio: { mic: signal(10, [{ start: 1, end: 3 }]), system: signal(10, []) } });
+    const result = await runPipeline(input({ participantsHint: null, durationSec: 10 }), deps);
+    expect(diarize).not.toHaveBeenCalled();
+    expect(result.segments.map((s) => s.speakerId)).toEqual(['me']);
+    const fractions = progress.map((p) => p.fraction);
+    expect(fractions).toEqual([...fractions].sort((a, b) => a - b));
+    expect(fractions.at(-1)).toBe(1);
+    expect(progress.some((p) => p.diarize)).toBe(false);
+  });
+
+  it('asks the speech detector only once per track of the others', async () => {
+    const base = fakeEngines();
+    const detect = vi.fn(base.detector().detect);
+    const { deps } = setup({ audio: { system: signal(10, [{ start: 1, end: 3 }]) }, turns: [{ start: 1, end: 3, speaker: 0 }] });
+    const counted: PipelineDeps = { ...deps, engines: { ...deps.engines, detector: () => ({ detect }) } };
+    await runPipeline(input({ tracks: [system], participantsHint: 3, durationSec: 10 }), counted);
+    expect(detect).toHaveBeenCalledTimes(1);
   });
 });
 

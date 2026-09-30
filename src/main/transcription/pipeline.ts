@@ -113,6 +113,12 @@ class Run {
     this.report(0);
   }
 
+  /** Всё готово: полоска доходит до конца, даже если последняя дорожка оказалась тишиной или не прочиталась. */
+  finish(): void {
+    const last = this.steps.at(-1);
+    if (last) this.deps.onProgress({ stage: last.stage, fraction: 1 });
+  }
+
   /** Дорожка не прочиталась: её шаги пропускаются. */
   skipTrack(track: number): void {
     while (this.steps[this.stepIndex]?.track === track) this.stepIndex += 1;
@@ -121,9 +127,12 @@ class Run {
 
   /** Ходы спикеров на дорожке собеседников (§4.2 п. 3–5, §4.4–4.6). */
   async others(samples: Float32Array, plan: TrackPlan): Promise<Turn[]> {
-    const detector = this.deps.engines.detector();
-    if (plan.diarize.mode === 'none') {
-      return mergeTurns(detector.detect(samples).map((i) => ({ ...i, speaker: 0 })));
+    // Детектор речи — первым: на тишине долгое разделение по голосам не нужно, а найденная речь нужна fillGaps.
+    const speech = this.deps.engines.detector().detect(samples);
+    if (plan.diarize.mode === 'none') return mergeTurns(speech.map((i) => ({ ...i, speaker: 0 })));
+    if (speech.length === 0) {
+      this.next();
+      return [];
     }
     this.report(0, { expectedMs: (samples.length / SAMPLE_RATE) * DIARIZE_ESTIMATE_PER_SEC * 1000 });
     await breathe();
@@ -140,7 +149,7 @@ class Run {
       turns = assignByTime(turns.map((t, i) => ({ ...t, speaker: labels[i] ?? -1 })));
     }
     this.next();
-    const filled = fillGaps(exclusiveTurns(turns), detector.detect(samples));
+    const filled = fillGaps(exclusiveTurns(turns), speech);
     return renumberByFirstAppearance(mergeTurns(filled));
   }
 
@@ -169,6 +178,18 @@ class Run {
   }
 }
 
+const TRACK_NAMES: Record<TrackKind, string> = { mic: 'микрофон', system: 'звук компьютера' };
+
+/**
+ * Собеседники по порядку первого появления в готовой расшифровке: «Спикер 1» — тот, кто первым что-то сказал.
+ * Номера на дорожке считались по ходам, а ходы без текста выпали — иначе вышло бы «Спикер 2» без «Спикера 1».
+ */
+function renumberOthers(segments: readonly DraftSegment[]): DraftSegment[] {
+  const order: SpeakerId[] = [];
+  for (const s of segments) if (s.speakerId !== ME && !order.includes(s.speakerId)) order.push(s.speakerId);
+  return segments.map((s) => (s.speakerId === ME ? s : { ...s, speakerId: otherSpeakerId(order.indexOf(s.speakerId)) }));
+}
+
 /** Расшифровывает встречу: дорожки по плану §4.1, реплики обеих дорожек по времени. */
 export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Promise<PipelineResult> {
   const plans = planTracks(input.tracks, input.recordedSystem, input.participantsHint);
@@ -184,9 +205,13 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     try {
       samples = await deps.decode(plan.track, input.durationSec);
     } catch (err) {
-      // Не прочиталась ни одна дорожка — встреча не расшифровывается; иначе — по остальным дорожкам.
-      if (index === plans.length - 1 && skippedTracks.length === index) throw err;
       skippedTracks.push({ kind: plan.track.kind, message: err instanceof Error ? err.message : String(err) });
+      // Не прочиталась ни одна дорожка — встреча не расшифровывается (с причиной каждой); иначе — по остальным.
+      if (index === plans.length - 1 && skippedTracks.length === plans.length) {
+        if (plans.length === 1) throw err;
+        const reasons = skippedTracks.map((t) => `${TRACK_NAMES[t.kind]} — ${t.message}`).join('; ');
+        throw new Error(`не прочиталась ни одна дорожка: ${reasons}`, { cause: err });
+      }
       run.skipTrack(index);
       continue;
     }
@@ -198,8 +223,9 @@ export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Pro
     segments.push(...(await run.recognize(samples, turns, plan)));
     run.next();
   }
+  run.finish();
 
-  const sorted = [...segments].sort((a, b) => a.start - b.start || a.end - b.end);
+  const sorted = renumberOthers([...segments].sort((a, b) => a.start - b.start || a.end - b.end));
   const ids = [...new Set(sorted.map((s) => s.speakerId))].sort((a, b) =>
     a === ME ? -1 : b === ME ? 1 : Number(a.slice(1)) - Number(b.slice(1)),
   );

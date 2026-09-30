@@ -87,6 +87,8 @@ const MODELS_DISK_TEXT = 'Не удалось сохранить модель р
 const INTERNAL_TEXT = `Расшифровка не удалась из-за внутренней ошибки. ${SEE_LOG}`;
 /** Сбои ffmpeg (чтения дорожек) — в тексте для человека; пути и вывод ffmpeg остаются в журнале. */
 const UNREADABLE_AUDIO = /ffmpeg|не прочиталась ни одна дорожка/;
+/** ffmpeg не запустился («spawn …ffmpeg.exe ENOENT» — например, его убрал антивирус): дорожки тут ни при чём. */
+const SPAWN_FAILED = /\bspawn\b.*\b(E[A-Z]+|UNKNOWN)\b/;
 
 /** Причины ошибок расшифровки: пишутся в meeting.json (errorMessage) и показываются во встрече рядом с «Повторить». */
 export const transcriptionTexts = {
@@ -119,6 +121,7 @@ export const transcriptionTexts = {
   /** Сбой процесса расшифровки (его текст — для журнала: вывод sherpa-onnx и ffmpeg, пути к файлам) → текст для человека. */
   workerFailed(raw: string): string {
     if ((Object.values(WORKER_REFUSALS) as string[]).includes(raw)) return raw;
+    if (SPAWN_FAILED.test(raw)) return INTERNAL_TEXT;
     return UNREADABLE_AUDIO.test(raw) ? transcriptionTexts.unreadableAudio : INTERNAL_TEXT;
   },
   /** Непредвиденная ошибка очереди (например, не записался результат) → текст для человека. */

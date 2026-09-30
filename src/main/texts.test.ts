@@ -174,6 +174,22 @@ describe('transcription texts', () => {
     for (const refusal of Object.values(WORKER_REFUSALS)) expect(transcriptionTexts.workerFailed(refusal)).toBe(refusal);
   });
 
+  it('does not blame the track when ffmpeg itself could not be started', () => {
+    const internal = transcriptionTexts.workerFailed('что-то внутри');
+    const exe = String.raw`C:\Program Files\TextMeet\resources\app.asar.unpacked\node_modules\ffmpeg-static\ffmpeg.exe`;
+    // Одна дорожка — ошибка запуска как есть; две — внутри общего «не прочиталась ни одна дорожка».
+    expect(transcriptionTexts.workerFailed(`spawn ${exe} ENOENT`)).toBe(internal);
+    expect(transcriptionTexts.workerFailed('spawn EPERM')).toBe(internal);
+    expect(
+      transcriptionTexts.workerFailed(
+        `не прочиталась ни одна дорожка: микрофон — spawn ${exe} ENOENT; звук компьютера — spawn ${exe} ENOENT`,
+      ),
+    ).toBe(internal);
+    expect(transcriptionTexts.workerFailed('ffmpeg не прочитал дорожку (завершился с кодом 1): Invalid data')).toBe(
+      transcriptionTexts.unreadableAudio,
+    );
+  });
+
   it('turns an unexpected error of the queue into plain words', () => {
     const denied = Object.assign(new Error("EACCES: permission denied, open 'C:\\lib\\transcript.json'"), { code: 'EACCES' });
     expect(transcriptionTexts.unexpected(denied)).toBe('Расшифровка не удалась: нет прав на эту папку.');

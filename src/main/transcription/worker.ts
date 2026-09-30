@@ -5,7 +5,7 @@ import { decodeToMono16k } from './decode';
 import type { Engines } from './engines';
 import { fakeEngines } from './fake-engines';
 import { runPipeline } from './pipeline';
-import { MainToWorkerSchema, type TranscribeCommand, type WorkerToMain } from './protocol';
+import { MainToWorkerSchema, WORKER_REFUSALS, type TranscribeCommand, type WorkerToMain } from './protocol';
 import { sherpaEngines, sherpaVersion } from './sherpa-engines';
 
 const port = process.parentPort;
@@ -32,7 +32,7 @@ port.on('message', (event: { data: unknown }) => {
   const parsed = MainToWorkerSchema.safeParse(event.data);
   if (!parsed.success) {
     const jobId = (event.data as { jobId?: unknown } | null)?.jobId;
-    if (typeof jobId === 'string') post({ type: 'failed', jobId, message: 'неверная команда расшифровки' });
+    if (typeof jobId === 'string') post({ type: 'failed', jobId, message: WORKER_REFUSALS.badCommand });
     return;
   }
   const command = parsed.data;
@@ -41,7 +41,7 @@ port.on('message', (event: { data: unknown }) => {
     return;
   }
   if (busy) {
-    post({ type: 'failed', jobId: command.jobId, message: 'процесс расшифровки уже занят' });
+    post({ type: 'failed', jobId: command.jobId, message: WORKER_REFUSALS.busy });
     return;
   }
   busy = true;

@@ -57,6 +57,12 @@ export const WorkerToMainSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('failed'), jobId: z.string(), message: z.string() }),
 ]);
 
+/** Отказы процесса расшифровки: написаны для человека, main показывает их как есть (прочие ошибки — общим текстом). */
+export const WORKER_REFUSALS = {
+  busy: 'Процесс расшифровки уже занят.',
+  badCommand: 'Неверная команда расшифровки.',
+} as const;
+
 export type MainToWorker = z.infer<typeof MainToWorkerSchema>;
 export type WorkerToMain = z.infer<typeof WorkerToMainSchema>;
 export type TranscribeCommand = Extract<MainToWorker, { type: 'transcribe' }>;

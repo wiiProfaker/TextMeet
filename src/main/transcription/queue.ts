@@ -56,7 +56,14 @@ interface Job {
   meetingId: string;
 }
 
-type Outcome = { kind: 'done'; result: PipelineResult } | { kind: 'failed'; message: string } | { kind: 'cancelled' };
+/** failed: message — для человека, detail — исходный текст процесса расшифровки (только в журнал). */
+type Outcome =
+  | { kind: 'done'; result: PipelineResult }
+  | { kind: 'failed'; message: string; detail?: string }
+  | { kind: 'cancelled' };
+
+/** Ошибка, текст которой написан для человека: во встречу он попадает как есть, остальные — общим текстом. */
+class ShownError extends Error {}
 
 interface Current {
   job: Job;
@@ -265,16 +272,16 @@ export class TranscriptionQueue {
       await this.deps.models
         .ensure((download) => this.setProgress(current, { stage: 'download', fraction: 0, download }))
         .catch((err: unknown) => {
-          throw new Error(transcriptionTexts.download(err), { cause: err });
+          throw new ShownError(transcriptionTexts.download(err), { cause: err });
         });
       if (current.cancelled) return null;
       const input = await buildPipelineInput(libraryDir, meeting);
       if (current.cancelled) return null;
-      if (input.tracks.length === 0) throw new Error(transcriptionTexts.noTracks);
+      if (input.tracks.length === 0) throw new ShownError(transcriptionTexts.noTracks);
       const outcome = await this.runInWorker(current, input);
       // Встречу поставили заново (или программа закрывается), пока шла работа: этот результат не нужен.
       if (current.cancelled || outcome.kind === 'cancelled') return null;
-      if (outcome.kind === 'failed') throw new Error(outcome.message);
+      if (outcome.kind === 'failed') throw new ShownError(outcome.message, { cause: outcome.detail });
       for (const skipped of outcome.result.skippedTracks) {
         this.deps.logger.warn(`Расшифровка ${meetingId}: дорожка ${skipped.kind} не прочитана — ${skipped.message}`);
       }
@@ -297,7 +304,8 @@ export class TranscriptionQueue {
       return { meeting: done, ok: true };
     } catch (err) {
       if (current.cancelled) return null;
-      const message = err instanceof Error ? err.message : String(err);
+      // Системные тексты (пути, коды, вывод sherpa-onnx) — только в журнал: во встрече — понятная причина.
+      const message = err instanceof ShownError ? err.message : transcriptionTexts.unexpected(err);
       this.deps.logger.error(`Расшифровка не удалась: ${meetingId}`, err);
       const failed = await updateMeeting(libraryDir, meetingId, (m) => ({ ...m, status: 'error', errorMessage: message })).catch(
         (writeErr: unknown) => {
@@ -399,7 +407,11 @@ export class TranscriptionQueue {
       this.setProgress(current, { stage, fraction, download: null });
       return;
     }
-    current.settle?.(message.type === 'done' ? { kind: 'done', result: message.result } : { kind: 'failed', message: message.message });
+    current.settle?.(
+      message.type === 'done'
+        ? { kind: 'done', result: message.result }
+        : { kind: 'failed', message: transcriptionTexts.workerFailed(message.message), detail: message.message },
+    );
   }
 
   private setProgress(current: Current, next: Omit<TranscriptionProgress, 'meetingId'>): void {

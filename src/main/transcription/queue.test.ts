@@ -1,4 +1,4 @@
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Meeting } from '../../shared/meeting';
@@ -6,7 +6,7 @@ import type { TranscriptionProgress } from '../../shared/transcription';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { audioDir, createMeeting, readMeeting, updateMeeting } from '../library/library';
 import { readTranscript } from '../library/transcript-store';
-import type { Logger } from '../logger';
+import { describeError, type Logger } from '../logger';
 import { DownloadError } from '../models/download';
 import { transcriptionTexts } from '../texts';
 import type { MainToWorker, TranscribeCommand, WorkerToMain } from './protocol';
@@ -51,6 +51,12 @@ class FakeWorker implements WorkerHandle {
 }
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), flush: async () => undefined };
+/** Что ушло в журнал ошибок — так, как это запишет настоящий журнал (с причинами). */
+const loggedErrors = (): string =>
+  vi
+    .mocked(logger.error)
+    .mock.calls.map(([message, err]) => `${message} ${err === undefined ? '' : describeError(err)}`)
+    .join('\n');
 
 async function recordedMeeting(lib: string, patch: Partial<Meeting> = {}, now?: Date): Promise<Meeting> {
   const meeting = await createMeeting(lib, { source: 'recording', status: 'recording', ...(now && { now }) });
@@ -204,16 +210,33 @@ describe('TranscriptionQueue', () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('дорожка mic не прочитана — битый файл'));
   });
 
-  it('marks the meeting with the reason when the process fails', async () => {
+  it('marks the meeting with the reason in plain words when the process fails, the raw text goes to the log', async () => {
     const lib = makeTempDir();
     const meeting = await recordedMeeting(lib);
     const t = setup();
     await t.queue.enqueue(lib, meeting.id);
     const command = await transcribeSent(t.worker);
-    t.worker().post({ type: 'failed', jobId: command.jobId, message: 'ffmpeg не прочитал дорожку' });
+    const raw = 'ffmpeg не прочитал дорожку (завершился с кодом 1): C:\Users\ира\mic.webm: Invalid data';
+    t.worker().post({ type: 'failed', jobId: command.jobId, message: raw });
     await vi.waitFor(() => expect(t.finished).toHaveLength(1));
-    expect(await readMeeting(lib, meeting.id)).toMatchObject({ status: 'error', errorMessage: 'ffmpeg не прочитал дорожку' });
+    expect(await readMeeting(lib, meeting.id)).toMatchObject({ status: 'error', errorMessage: transcriptionTexts.workerFailed(raw) });
     expect(t.finished[0]?.ok).toBe(false);
+    expect(loggedErrors()).toContain(raw);
+  });
+
+  it('shows no raw system error when the result cannot be saved', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    const command = await transcribeSent(t.worker);
+    // На месте transcript.json — папка: записать результат нельзя.
+    mkdirSync(join(lib, meeting.id, 'transcript.json'));
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    const { errorMessage } = await readMeeting(lib, meeting.id);
+    expect(errorMessage).toMatch(/^Расшифровка не удалась/);
+    expect(errorMessage).not.toContain(lib);
   });
 
   it('survives a crash of the process and starts a new one for the next meeting', async () => {
@@ -294,6 +317,7 @@ describe('TranscriptionQueue', () => {
     });
     expect((await readMeeting(lib, meeting.id)).errorMessage).toContain('нет связи');
     expect(t.workers).toHaveLength(0);
+    expect(loggedErrors()).toContain('DownloadError: нет связи с сервером');
   });
 
   it('fails clearly when there are no recorded tracks', async () => {

@@ -2,17 +2,28 @@ import { createHash } from 'node:crypto';
 import { createReadStream, promises as fsp } from 'node:fs';
 import { dirname } from 'node:path';
 
-/** Почему не скачалось: нет связи (повторяли), файл пришёл испорченным, не хватает места, не записать на диск. */
-export type DownloadFailure = 'network' | 'corrupt' | 'space' | 'disk';
+/**
+ * Почему не скачалось: нет связи (повторяли), сервер отказал в файле (403, 404 — повтор не поможет), файл пришёл
+ * испорченным, не хватает места, не записать на диск.
+ */
+export type DownloadFailure = 'network' | 'server' | 'corrupt' | 'space' | 'disk';
+
+export interface DownloadErrorOptions extends ErrorOptions {
+  /** Для 'space': сколько свободного места нужно (недостающие файлы и запас), байт. */
+  neededBytes?: number;
+}
 
 export class DownloadError extends Error {
+  readonly neededBytes: number | undefined;
+
   constructor(
     readonly kind: DownloadFailure,
     message: string,
-    options?: ErrorOptions,
+    options?: DownloadErrorOptions,
   ) {
     super(message, options);
     this.name = 'DownloadError';
+    this.neededBytes = options?.neededBytes;
   }
 }
 
@@ -140,7 +151,7 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
       break;
     } catch (err) {
       if (isDiskError(err)) throw new DownloadError('disk', 'не удалось записать файл модели', { cause: err });
-      if (err instanceof FinalHttpError) throw new DownloadError('network', err.message, { cause: err });
+      if (err instanceof FinalHttpError) throw new DownloadError('server', err.message, { cause: err });
       if (err instanceof OversizeError) {
         await fsp.rm(part, { force: true });
         throw new DownloadError('corrupt', `файл модели повреждён: ${err.message}`, { cause: err });

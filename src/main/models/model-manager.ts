@@ -131,7 +131,9 @@ export class ModelManager {
     const needed = total - partial.reduce((sum, n) => sum + n, 0);
     const free = await this.deps.freeBytes(this.deps.root);
     if (free < needed + DISK_MARGIN_BYTES) {
-      throw new DownloadError('space', `мало места: нужно ${needed} байт, свободно ${free}`);
+      throw new DownloadError('space', `мало места: нужно ${needed} байт и запас, свободно ${free}`, {
+        neededBytes: needed + DISK_MARGIN_BYTES,
+      });
     }
     let finished = 0;
     onProgress({ done: 0, total });

@@ -109,7 +109,8 @@ describe('ModelManager.ensure', () => {
     const needed = FILES.reduce((sum, f) => sum + f.size, 0);
     // Места на запас и на файлы целиком — хватает, только если лишние .part не вычтены из нужного.
     const m = manager(root, { freeBytes: async () => 50 * 1024 * 1024 + needed - 1 });
-    await expect(m.ensure()).rejects.toMatchObject({ kind: 'space' });
+    // Нужное место — недостающие файлы и запас: столько и назовёт сообщение.
+    await expect(m.ensure()).rejects.toMatchObject({ kind: 'space', neededBytes: 50 * 1024 * 1024 + needed });
     await manager(root, { freeBytes: async () => 50 * 1024 * 1024 + needed }).ensure();
   });
 

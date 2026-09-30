@@ -116,13 +116,13 @@ describe('downloadFile', () => {
     expect(ranges).toHaveLength(3);
   });
 
-  it('does not retry a missing file', async () => {
+  it('does not retry a missing file and does not call it a lost connection', async () => {
     const { url, ranges } = await serve((_req, res) => {
       res.writeHead(404);
       res.end();
     });
     const dest = join(makeTempDir(), 'model.onnx');
-    await expect(downloadFile(options(url, dest))).rejects.toMatchObject({ kind: 'network', message: 'сервер ответил 404' });
+    await expect(downloadFile(options(url, dest))).rejects.toMatchObject({ kind: 'server', message: 'сервер ответил 404' });
     expect(ranges).toHaveLength(1);
   });
 
@@ -191,7 +191,7 @@ describe('downloadFile', () => {
     }) as typeof fetch;
     const dest = join(makeTempDir(), 'model.onnx');
     await expect(downloadFile({ ...options('https://example.test/m', dest), fetch: fakeFetch })).rejects.toMatchObject({
-      kind: 'network',
+      kind: 'server',
     });
     expect(signals).toHaveLength(1);
     expect(signals[0]!.aborted).toBe(true);

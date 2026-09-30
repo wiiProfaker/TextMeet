@@ -33,4 +33,17 @@ describe('progress', () => {
     expect(interpolateDiarize(clock, 10_000)).toBeCloseTo(0.59, 10);
     expect(interpolateDiarize({ ...clock, expectedMs: 0 }, 0)).toBeCloseTo(0.59, 10);
   });
+
+  it('keeps the diarization bar inside its step whatever the clock says', () => {
+    const clock = { from: 0.4, to: 0.6, expectedMs: 1000 };
+    // Системные часы перевели назад — полоска не уходит ниже начала шага.
+    expect(interpolateDiarize(clock, -5000)).toBe(0.4);
+    expect(interpolateDiarize(clock, Number.NaN)).toBeCloseTo(0.59, 10);
+    expect(interpolateDiarize({ ...clock, expectedMs: Number.NaN }, 100)).toBeCloseTo(0.59, 10);
+  });
+
+  it('treats a broken fraction as the start of the step', () => {
+    expect(overallFraction(steps, 3, Number.NaN)).toBe(overallFraction(steps, 3, 0));
+    expect(overallFraction(steps, 3, Number.POSITIVE_INFINITY)).toBe(overallFraction(steps, 3, 0));
+  });
 });

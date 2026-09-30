@@ -34,7 +34,9 @@ export function overallFraction(steps: readonly Step[], index: number, fraction:
   const total = steps.reduce((sum, s) => sum + s.cost, 0);
   if (total <= 0) return 0;
   const before = steps.slice(0, index).reduce((sum, s) => sum + s.cost, 0);
-  const current = (steps[index]?.cost ?? 0) * Math.min(1, Math.max(0, fraction));
+  // Не число (деление на ноль где-то выше) — считаем, что шаг только начался.
+  const share = Number.isFinite(fraction) ? Math.min(1, Math.max(0, fraction)) : 0;
+  const current = (steps[index]?.cost ?? 0) * share;
   return Math.min(1, (before + current) / total);
 }
 
@@ -47,6 +49,8 @@ export interface DiarizeClock {
 }
 
 export function interpolateDiarize(clock: DiarizeClock, elapsedMs: number): number {
-  const share = clock.expectedMs <= 0 ? DIARIZE_CEILING : Math.min(DIARIZE_CEILING, elapsedMs / clock.expectedMs);
+  const raw = clock.expectedMs > 0 ? elapsedMs / clock.expectedMs : Number.NaN;
+  // Часы перевели назад — доля не меньше нуля; оценки нет или она не число — сразу потолок.
+  const share = Number.isFinite(raw) ? Math.min(DIARIZE_CEILING, Math.max(0, raw)) : DIARIZE_CEILING;
   return clock.from + (clock.to - clock.from) * share;
 }

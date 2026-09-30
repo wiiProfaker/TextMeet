@@ -212,7 +212,6 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
     controller.lockForQuit();
     hotkeys.dispose();
     await controller.stopForQuit();
-    transcription?.dispose();
   } catch (err) {
     logger.error('Ошибка при остановке записи перед выходом', err);
   } finally {
@@ -221,6 +220,9 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
   if (controller.getState().phase !== 'idle') return;
   logger.info('TextMeet завершает работу');
   await logger.flush();
+  // Только когда выход точно состоится: остановленная очередь молча пропускала бы новые встречи.
+  // Встречи остаются «в очереди» / «расшифровывается» и продолжатся при следующем запуске.
+  transcription?.dispose();
   quitApproved = true;
   app.quit();
 }

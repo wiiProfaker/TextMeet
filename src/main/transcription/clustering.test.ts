@@ -43,11 +43,14 @@ describe('clusterVoiceprints', () => {
   });
 
   it('dissolves a group with too little speech into the nearest big one', () => {
-    // Третий «голос» сказал 5 с за 20-минутную встречу — скорее обрывок одного из двух.
-    const prints = [print(0, 600, 1), print(1, 600, 2), { durationSec: 5, embedding: Float32Array.from([0.8, 0.2, 0.6, 0]) }];
+    // Третий «голос» сказал 5 с за 20-минутную встречу — скорее обрывок одного из двух. С обоими голосами
+    // сходство ниже порога (0,5 и 0,3), так что он остаётся отдельной группой до растворения.
+    const prints = [print(0, 600, 1), print(1, 600, 2), { durationSec: 5, embedding: Float32Array.from([0.5, 0.3, 0.8, 0]) }];
     const labels = clusterVoiceprints(prints);
     expect(new Set(labels).size).toBe(2);
     expect(labels[2]).toBe(labels[0]);
+    // Без растворения (порог размера нулевой) это третий собеседник.
+    expect(new Set(clusterVoiceprints(prints, { ...AUTO_CLUSTERING, minGroupSec: 0 })).size).toBe(3);
   });
 
   it('does not seed groups from very short turns but still labels them', () => {
@@ -58,6 +61,42 @@ describe('clusterVoiceprints', () => {
 
   it('marks turns without a voiceprint', () => {
     expect(clusterVoiceprints([print(0, 30, 1), { durationSec: 0.1, embedding: null }])).toEqual([0, -1]);
+  });
+
+  it('treats a zero or broken voiceprint as missing', () => {
+    const zero = { durationSec: 30, embedding: new Float32Array(4) };
+    const broken = { durationSec: 30, embedding: Float32Array.from([Number.NaN, 1, 0, 0]) };
+    const labels = clusterVoiceprints([print(0, 30, 1), print(1, 30, 2), zero, broken, print(0, 30, 3)]);
+    expect(labels.slice(2, 4)).toEqual([-1, -1]);
+    expect(labels[0]).toBe(labels[4]);
+    expect(labels[1]).not.toBe(labels[0]);
+    expect(clusterVoiceprints([zero, broken])).toEqual([-1, -1]);
+  });
+
+  it('keeps a voice whose turns are all short on a long interview', () => {
+    // 600 вопросов по 5 с (голос 1) и 600 ответов по 12 с (голос 0): вопросов нет среди 400 самых длинных ходов.
+    const truth = Array.from({ length: 1200 }, (_, n) => (n % 2 === 0 ? 1 : 0));
+    const prints = truth.map((voice, n) => print(voice, voice === 1 ? 5 : 12, n));
+    const labels = clusterVoiceprints(prints);
+    expect(samePartition(labels, truth)).toBe(true);
+  });
+
+  it('measures a group by all of its turns, not only by those that created it', () => {
+    // Второй голос: один ход 3 с и сотня коротких по 0,4 с (группы не создают) — всего 43 с речи, это собеседник.
+    const prints = [print(0, 600, 1), print(1, 3, 2), ...Array.from({ length: 100 }, (_, n) => print(1, 0.4, n + 3))];
+    const labels = clusterVoiceprints(prints);
+    expect(new Set(labels).size).toBe(2);
+    expect(labels[2]).toBe(labels[1]);
+  });
+
+  it('takes all turns as seeds when there are few of them', () => {
+    // Порядок ходов не меняет итог, пока кандидатов не больше 400.
+    const truth = [0, 1, 0, 2, 1, 0, 2, 2, 1, 0];
+    const prints = truth.map((v, n) => print(v, 3 + (n % 4), n));
+    const labels = clusterVoiceprints(prints);
+    expect(samePartition(labels, truth)).toBe(true);
+    const reversed = clusterVoiceprints([...prints].reverse()).reverse();
+    expect(samePartition(reversed, truth)).toBe(true);
   });
 
   it('copes with no usable voiceprints at all', () => {

@@ -5,7 +5,7 @@
 export interface Voiceprint {
   /** Длительность хода, с — вес его отпечатка. */
   durationSec: number;
-  /** Отпечаток голоса; null — ход слишком короткий, отпечатка нет. */
+  /** Отпечаток голоса; null — ход слишком короткий, отпечатка нет. Нулевой или с NaN считается отсутствующим. */
   embedding: Float32Array | null;
 }
 
@@ -14,7 +14,10 @@ export interface ClusteringOptions {
   similarity: number;
   /** Ходы короче не создают групп (их отпечатки ненадёжны), но получают ближайшую. */
   minSeedSec: number;
-  /** Группа, у которой речи меньше min(этого, доли всей речи), растворяется в ближайшей крупной. */
+  /**
+   * Группа, у которой речи меньше min(этого, доли всей речи), растворяется в ближайшей крупной.
+   * Речь группы — все ходы, которым она ближайшая; вся речь — все ходы дорожки.
+   */
   minGroupSec: number;
   minGroupShare: number;
 }
@@ -27,15 +30,30 @@ export const AUTO_CLUSTERING: ClusteringOptions = {
 };
 
 /**
- * Больше стольких ходов группы не создают: самые длинные создают, остальные получают ближайшую группу в конце.
+ * Больше стольких ходов группы не создают, остальные получают ближайшую группу в конце.
  * Иначе на многочасовой встрече (тысячи ходов) объединение шло бы минутами (сложность — куб числа групп).
  */
 export const MAX_SEED_TURNS = 400;
+/**
+ * Из них столько выбираются как самые непохожие на уже выбранные: самые длинные ходы на интервью — почти все
+ * ответы, и голос, который только коротко спрашивает, иначе не создал бы группы и исчез.
+ */
+const DIVERSE_SEED_TURNS = MAX_SEED_TURNS / 4;
 
 function normalize(v: Float32Array): Float32Array {
   let norm = 0;
   for (const x of v) norm += x * x;
   norm = Math.sqrt(norm) || 1;
+  return v.map((x) => x / norm);
+}
+
+/** Нормированный отпечаток; null — отпечатка нет или он испорчен (нулевой, NaN, бесконечность). */
+function unitOrNull(v: Float32Array | null): Float32Array | null {
+  if (!v) return null;
+  let norm = 0;
+  for (const x of v) norm += x * x;
+  norm = Math.sqrt(norm);
+  if (!(norm > 0 && Number.isFinite(norm))) return null;
   return v.map((x) => x / norm);
 }
 
@@ -53,23 +71,61 @@ function nearest(centroids: readonly Float32Array[], v: Float32Array): number {
   return best;
 }
 
+interface Candidate {
+  i: number;
+  durationSec: number;
+}
+
+/**
+ * Ходы, создающие группы (кандидаты — по времени). Если их не больше MAX_SEED_TURNS — все. Иначе встреча делится
+ * на равные по числу ходов окна и из каждого берётся самый длинный ход (голоса со всей встречи, а не с одного
+ * её края), а остальные места занимают ходы, самые непохожие на уже выбранные: так группу получит и голос,
+ * чьи ходы все короткие. Порядок — как раньше: от длинных к коротким.
+ */
+function chooseSeeds(candidates: readonly Candidate[], unit: readonly (Float32Array | null)[]): Candidate[] {
+  const byLength = (list: Candidate[]): Candidate[] => list.sort((a, b) => b.durationSec - a.durationSec);
+  const n = candidates.length;
+  if (n <= MAX_SEED_TURNS) return byLength([...candidates]);
+  const chosen = new Set<number>();
+  const windows = MAX_SEED_TURNS - DIVERSE_SEED_TURNS;
+  for (let w = 0; w < windows; w++) {
+    const from = Math.floor((w * n) / windows);
+    const to = Math.floor(((w + 1) * n) / windows);
+    let longest = from;
+    for (let k = from + 1; k < to; k++) if (candidates[k]!.durationSec > candidates[longest]!.durationSec) longest = k;
+    chosen.add(longest);
+  }
+  // Сходство каждого кандидата с самым похожим из выбранных; следующим берётся наименее похожий.
+  const closest = new Float64Array(n).fill(-Infinity);
+  const take = (k: number): void => {
+    const v = unit[candidates[k]!.i]!;
+    for (let c = 0; c < n; c++) closest[c] = Math.max(closest[c]!, dot(v, unit[candidates[c]!.i]!));
+  };
+  for (const k of chosen) take(k);
+  while (chosen.size < MAX_SEED_TURNS) {
+    let pick = -1;
+    for (let c = 0; c < n; c++) if (!chosen.has(c) && (pick < 0 || closest[c]! < closest[pick]!)) pick = c;
+    chosen.add(pick);
+    take(pick);
+  }
+  return byLength([...chosen].map((k) => candidates[k]!));
+}
+
 /**
  * Номер собеседника для каждого хода (по порядку входа). Ходы без отпечатка получают −1 —
  * их спикера решает время (соседний ход), см. pipeline.
  */
 export function clusterVoiceprints(prints: readonly Voiceprint[], opts: ClusteringOptions = AUTO_CLUSTERING): number[] {
-  const unit = prints.map((p) => (p.embedding ? normalize(p.embedding) : null));
-  const seeds = prints
+  const unit = prints.map((p) => unitOrNull(p.embedding));
+  const candidates = prints
     .map((p, i) => ({ i, durationSec: p.durationSec }))
-    .filter(({ i, durationSec }) => unit[i] && durationSec >= opts.minSeedSec)
-    .sort((a, b) => b.durationSec - a.durationSec)
-    .slice(0, MAX_SEED_TURNS);
-  if (seeds.length === 0) return prints.map((p) => (p.embedding ? 0 : -1));
+    .filter(({ i, durationSec }) => unit[i] && durationSec >= opts.minSeedSec);
+  const seeds = chooseSeeds(candidates, unit);
+  if (seeds.length === 0) return unit.map((e) => (e ? 0 : -1));
 
-  // Группы: сумма нормированных отпечатков с весом длительности, её центр и длительность речи.
+  // Группы: сумма нормированных отпечатков с весом длительности и её центр.
   const sums = seeds.map(({ i, durationSec }) => unit[i]!.map((x) => x * durationSec));
   const centers = sums.map(normalize);
-  const durations = seeds.map((s) => s.durationSec);
   const alive = seeds.map(() => true);
   const n = seeds.length;
   // Таблица сходств центров и ближайший сосед каждой группы: после объединения пересчитываются одна строка и соседи
@@ -106,7 +162,6 @@ export function clusterVoiceprints(prints: readonly Voiceprint[], opts: Clusteri
     const pb = nearestOf[pa]!;
     sums[pa] = sums[pa]!.map((x, k) => x + (sums[pb]![k] ?? 0));
     centers[pa] = normalize(sums[pa]!);
-    durations[pa] = durations[pa]! + durations[pb]!;
     alive[pb] = false;
     for (let c = 0; c < n; c++) {
       if (!alive[c] || c === pa) continue;
@@ -125,9 +180,14 @@ export function clusterVoiceprints(prints: readonly Voiceprint[], opts: Clusteri
     }
   }
 
-  // Мелкие группы — почти всегда обрывки одного из крупных голосов.
-  const groups = centers.map((center, g) => ({ center, durationSec: durations[g]! })).filter((_, g) => alive[g]);
-  const totalSec = groups.reduce((sum, g) => sum + g.durationSec, 0);
+  // Мелкие группы — почти всегда обрывки одного из крупных голосов. Речь группы — все её ходы, а не только
+  // создавшие её: иначе голос, от которого в группы попала лишь пара ходов, растворился бы.
+  const aliveCenters = centers.filter((_, g) => alive[g]);
+  const groups = aliveCenters.map((center) => ({ center, durationSec: 0 }));
+  unit.forEach((e, i) => {
+    if (e) groups[nearest(aliveCenters, e)]!.durationSec += prints[i]!.durationSec;
+  });
+  const totalSec = prints.reduce((sum, p) => sum + p.durationSec, 0);
   const minSec = Math.min(opts.minGroupSec, opts.minGroupShare * totalSec);
   const big = groups.filter((g) => g.durationSec >= minSec);
   const kept = big.length > 0 ? big : [groups.reduce((a, b) => (b.durationSec > a.durationSec ? b : a))];

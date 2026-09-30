@@ -143,11 +143,12 @@ export async function holdTranscription(app: ElectronApplication): Promise<{ rel
   };
 }
 
-export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
-  const root = await mkdtemp(join(tmpdir(), 'textmeet-e2e-'));
-  const userDataDir = join(root, 'userData');
-  const homeDir = join(root, 'home');
-  const libraryDir = join(root, 'library');
+/** Папки программы, настройки и встречи для теста. */
+async function writeFixtures(
+  dirs: { userDataDir: string; homeDir: string; libraryDir: string },
+  options: LaunchOptions,
+): Promise<void> {
+  const { userDataDir, homeDir, libraryDir } = dirs;
   await mkdir(userDataDir, { recursive: true });
   await mkdir(homeDir, { recursive: true });
   await mkdir(libraryDir, { recursive: true });
@@ -165,10 +166,18 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   for (const [id, transcript] of Object.entries(options.transcripts ?? {})) {
     await writeFile(join(libraryDir, id, 'transcript.json'), serialize(transcript));
   }
+}
+
+export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
+  const root = await mkdtemp(join(tmpdir(), 'textmeet-e2e-'));
+  const userDataDir = join(root, 'userData');
+  const homeDir = join(root, 'home');
+  const libraryDir = join(root, 'library');
 
   let app: ElectronApplication | undefined;
   let page: Page;
   try {
+    await writeFixtures({ userDataDir, homeDir, libraryDir }, options);
     app = await electron.launch({
       ...(options.executablePath ? { executablePath: options.executablePath, args: [] } : { args: ['.'] }),
       env: {
@@ -183,7 +192,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     });
     page = await mainWindow(app);
   } catch (err) {
-    // Запуск не удался — не оставляем за собой ни процесс, ни временные папки.
+    // Подготовка или запуск не удались — не оставляем за собой ни процесс, ни временные папки.
     await app?.close().catch(() => undefined);
     await rm(root, { recursive: true, force: true });
     throw err;

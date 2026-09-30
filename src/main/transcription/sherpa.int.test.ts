@@ -33,12 +33,16 @@ const run = (input: PipelineInput, useAsr = true) =>
   });
 
 describe('sherpa-onnx engines', () => {
-  it('keeps one loaded engine per number of threads', () => {
-    const e = sherpaEngines(modelPaths(MODELS_ROOT));
-    expect(e.recognizer(2)).toBe(e.recognizer(2));
-    expect(e.recognizer(1)).not.toBe(e.recognizer(2));
-    expect(e.diarizer(2)).toBe(e.diarizer(2));
-    expect(e.voiceprints(2)).toBe(e.voiceprints(2));
+  it('reuses a loaded engine while the number of threads is the same and replaces it when it changes', () => {
+    const e = engines();
+    // GigaAM загружается здесь один раз — дальше его берут остальные проверки.
+    expect(e.recognizer(THREADS)).toBe(e.recognizer(THREADS));
+    expect(e.diarizer(THREADS)).toBe(e.diarizer(THREADS));
+    // Смена числа потоков — на лёгкой модели отпечатков: новый движок вместо прежнего, а не рядом с ним.
+    const before = e.voiceprints(THREADS);
+    expect(e.voiceprints(THREADS)).toBe(before);
+    expect(e.voiceprints(1)).not.toBe(before);
+    expect(e.voiceprints(THREADS)).not.toBe(before);
   });
 
   it('GigaAM recognizes the reference recording', async () => {

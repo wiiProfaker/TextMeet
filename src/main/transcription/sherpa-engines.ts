@@ -2,7 +2,7 @@
 import * as sherpa from 'sherpa-onnx-node';
 import type { ModelPaths } from '../models/registry';
 import { SAMPLE_RATE } from './decode';
-import type { Diarizer, Engines, Recognizer, SpeechDetector, VoiceprintExtractor } from './engines';
+import { latestByThreads, type Diarizer, type Engines, type Recognizer, type SpeechDetector, type VoiceprintExtractor } from './engines';
 import type { Interval } from './turns';
 
 /** Порог кластеризации библиотеки в авто-режиме: намеренно дробит — группирует clustering.ts (§4.4). */
@@ -108,29 +108,15 @@ function voiceprints(paths: ModelPaths, threads: number): VoiceprintExtractor {
   };
 }
 
-/** Один движок на число потоков: создаётся при первом вызове и дальше переиспользуется. */
-function perThreads<T>(create: (threads: number) => T): (threads: number) => T {
-  const cache = new Map<number, T>();
-  return (threads) => {
-    let engine = cache.get(threads);
-    if (engine === undefined) {
-      engine = create(threads);
-      cache.set(threads, engine);
-    }
-    return engine;
-  };
-}
-
 /**
- * Движки sherpa-onnx. Распознаватель, разделение по голосам и отпечатки создаются по одному на число потоков и
- * живут, пока жив этот объект: нативная память освобождается только сборщиком мусора, а загрузка GigaAM — секунды.
- * Чисел потоков два (запись идёт или нет), так что копий не больше двух.
+ * Движки sherpa-onnx. Распознаватель, разделение по голосам и отпечатки живут, пока жив этот объект, и переиспользуются
+ * встречами (загрузка GigaAM — секунды); каждого вида — одна копия, для последнего числа потоков (latestByThreads).
  */
 export function sherpaEngines(paths: ModelPaths): Engines {
   return {
     detector: () => detector(paths),
-    recognizer: perThreads((threads) => recognizer(paths, threads)),
-    diarizer: perThreads((threads) => diarizer(paths, threads)),
-    voiceprints: perThreads((threads) => voiceprints(paths, threads)),
+    recognizer: latestByThreads((threads) => recognizer(paths, threads)),
+    diarizer: latestByThreads((threads) => diarizer(paths, threads)),
+    voiceprints: latestByThreads((threads) => voiceprints(paths, threads)),
   };
 }

@@ -60,6 +60,15 @@ class FinalHttpError extends Error {}
 const retryableStatus = (status: number): boolean => status >= 500 || status === 408 || status === 429;
 const isDiskError = (err: unknown): boolean => DISK_CODES.has((err as NodeJS.ErrnoException | null)?.code ?? '');
 
+/** Сервер прислал больше байт, чем в файле: дальше не пишем — диск не должен заполниться мусором. */
+class OversizeError extends Error {}
+
+/** Начало куска из заголовка Content-Range («bytes 4000-9999/10000»); null — заголовка нет или он непонятен. */
+function rangeStart(header: string | null): number | null {
+  const match = /^bytes (\d+)-/.exec(header ?? '');
+  return match ? Number(match[1]) : null;
+}
+
 /** Одна попытка: докачивает `.part` с места обрыва (Range), сервер без Range — качает заново. */
 async function fetchInto(part: string, options: DownloadOptions): Promise<void> {
   const have = await sizeOf(part);
@@ -84,12 +93,18 @@ async function fetchInto(part: string, options: DownloadOptions): Promise<void> 
       throw retryableStatus(response.status) ? new Error(message) : new FinalHttpError(message);
     }
     if (!response.body) throw new Error('сервер не прислал данных');
+    if (response.status === 206 && rangeStart(response.headers.get('content-range')) !== from) {
+      // Кусок не с того места: дописать его — испортить файл. Начинаем с нуля (повтором).
+      await fsp.rm(part, { force: true });
+      throw new Error('сервер прислал не тот кусок файла');
+    }
     const resumed = response.status === 206 && from > 0;
     const handle = await fsp.open(part, resumed ? 'a' : 'w');
     let done = resumed ? from : 0;
     try {
       for await (const chunk of response.body) {
         touch();
+        if (done + chunk.byteLength > options.size) throw new OversizeError(`сервер прислал больше ${options.size} байт`);
         await handle.write(chunk);
         done += chunk.byteLength;
         options.onProgress?.(done);
@@ -99,6 +114,8 @@ async function fetchInto(part: string, options: DownloadOptions): Promise<void> 
     }
   } finally {
     clearTimeout(timer);
+    // Запрос освобождается при любом исходе (ошибка сервера, нет данных, файл не открылся); после полного чтения — no-op.
+    controller.abort();
   }
 }
 
@@ -115,6 +132,7 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
     throw new DownloadError('disk', 'не удалось создать папку моделей', { cause: err });
   }
   for (let attempt = 0; ; attempt++) {
+    const before = await sizeOf(part);
     try {
       await fetchInto(part, options);
       // Сервер закрыл ответ раньше времени без ошибки — докачиваем, как после обрыва.
@@ -123,7 +141,13 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
     } catch (err) {
       if (isDiskError(err)) throw new DownloadError('disk', 'не удалось записать файл модели', { cause: err });
       if (err instanceof FinalHttpError) throw new DownloadError('network', err.message, { cause: err });
-      if (attempt >= retries) throw new DownloadError('network', 'нет связи с сервером', { cause: err });
+      if (err instanceof OversizeError) {
+        await fsp.rm(part, { force: true });
+        throw new DownloadError('corrupt', `файл модели повреждён: ${err.message}`, { cause: err });
+      }
+      // Попытка продвинула файл — связь неустойчивая, но живая: следующая попытка снова считается первой.
+      if ((await sizeOf(part)) > before) attempt = -1;
+      else if (attempt >= retries) throw new DownloadError('network', 'нет связи с сервером', { cause: err });
       await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs ?? RETRY_DELAY_MS));
     }
   }

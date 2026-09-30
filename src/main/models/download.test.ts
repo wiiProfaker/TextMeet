@@ -33,7 +33,10 @@ async function serve(behaviour: Behaviour): Promise<{ url: string; ranges: (stri
 const sendBody = (req: IncomingMessage, res: ServerResponse): void => {
   const match = /^bytes=(\d+)-$/.exec(req.headers.range ?? '');
   const from = match ? Number(match[1]) : 0;
-  res.writeHead(match ? 206 : 200, { 'content-length': BODY.length - from });
+  res.writeHead(match ? 206 : 200, {
+    'content-length': BODY.length - from,
+    ...(match && { 'content-range': `bytes ${from}-${BODY.length - 1}/${BODY.length}` }),
+  });
   res.end(BODY.subarray(from));
 };
 
@@ -162,6 +165,76 @@ describe('downloadFile', () => {
     await expect(downloadFile(options(url, dest))).rejects.toMatchObject({ kind: 'corrupt' });
     expect(existsSync(`${dest}.part`)).toBe(false);
     expect(existsSync(dest)).toBe(false);
+  });
+
+  it('stops as soon as the server sends more than the file size', async () => {
+    const { url, ranges } = await serve((_req, res) => {
+      res.writeHead(200);
+      res.write(BODY);
+      res.end(Buffer.alloc(5000, 1));
+    });
+    const dest = join(makeTempDir(), 'model.onnx');
+    const progress: number[] = [];
+    await expect(downloadFile({ ...options(url, dest), onProgress: (n) => progress.push(n) })).rejects.toMatchObject({
+      kind: 'corrupt',
+    });
+    expect(Math.max(0, ...progress)).toBeLessThanOrEqual(BODY.length);
+    expect(ranges).toHaveLength(1);
+    expect(existsSync(`${dest}.part`)).toBe(false);
+  });
+
+  it('releases the request when the answer is unusable', async () => {
+    const signals: AbortSignal[] = [];
+    const fakeFetch = (async (_url: string, init?: RequestInit) => {
+      signals.push(init!.signal!);
+      return new Response('нет такого файла', { status: 404 });
+    }) as typeof fetch;
+    const dest = join(makeTempDir(), 'model.onnx');
+    await expect(downloadFile({ ...options('https://example.test/m', dest), fetch: fakeFetch })).rejects.toMatchObject({
+      kind: 'network',
+    });
+    expect(signals).toHaveLength(1);
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it('keeps retrying while every attempt makes progress', async () => {
+    // Связь рвётся после каждой 1000 байт: 10 попыток при 2 повторах — каждая продвигает файл.
+    const { url, ranges } = await serve((req, res) => {
+      const match = /^bytes=(\d+)-$/.exec(req.headers.range ?? '');
+      const from = match ? Number(match[1]) : 0;
+      res.writeHead(match ? 206 : 200, {
+        'content-length': BODY.length - from,
+        ...(match && { 'content-range': `bytes ${from}-${BODY.length - 1}/${BODY.length}` }),
+      });
+      res.write(BODY.subarray(from, from + 1000));
+      setTimeout(() => res.destroy(), 20);
+    });
+    const dest = join(makeTempDir(), 'model.onnx');
+    await downloadFile({ ...options(url, dest), retries: 2 });
+    expect(readFileSync(dest)).toEqual(BODY);
+    expect(ranges.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('starts over when a resumed answer begins at another place', async () => {
+    const { url, ranges } = await serve((req, res, n) => {
+      if (n === 0) {
+        res.writeHead(200, { 'content-length': BODY.length });
+        res.write(BODY.subarray(0, 4000));
+        setTimeout(() => res.destroy(), 20);
+        return;
+      }
+      if (req.headers.range) {
+        // Сервер отдал кусок не с того места, что просили.
+        res.writeHead(206, { 'content-range': `bytes 2000-${BODY.length - 1}/${BODY.length}` });
+        res.end(BODY.subarray(2000));
+        return;
+      }
+      sendBody(req, res);
+    });
+    const dest = join(makeTempDir(), 'model.onnx');
+    await downloadFile(options(url, dest));
+    expect(readFileSync(dest)).toEqual(BODY);
+    expect(ranges).toEqual([undefined, 'bytes=4000-', undefined]);
   });
 
   it('reports a disk problem without retrying', async () => {

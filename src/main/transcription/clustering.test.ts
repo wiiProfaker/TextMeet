@@ -134,17 +134,32 @@ describe('clusterVoiceprints', () => {
     expect(new Set(labels).size).toBe(1);
   });
 
-  it('groups a multi-hour meeting quickly', () => {
-    // 2000 ходов трёх голосов, отпечатки по 192 числа (как у eres2net).
-    const prints = Array.from({ length: 2000 }, (_, n) => {
-      const voice = n % 3;
-      const embedding = Float32Array.from({ length: 192 }, (_, k) => (k % 3 === voice ? 1 : 0) + 0.05 * Math.sin(n * 7 + k));
-      return { durationSec: 2 + (n % 5), embedding };
-    });
-    const started = performance.now();
-    const labels = clusterVoiceprints(prints);
-    expect(performance.now() - started).toBeLessThan(3000);
-    expect(new Set(labels).size).toBe(3);
-    expect(labels[3]).toBe(labels[0]);
-  });
+  it('groups a multi-hour meeting in time that grows no faster than the number of turns', () => {
+    // Отпечатки по 192 числа (как у eres2net), три голоса. Мерим не секунды (под покрытием и в CI машина медленнее),
+    // а рост: вчетверо больше ходов — не больше чем в 8 раз дольше (обычно в 2–4). Без предела на число групп
+    // объединение росло бы как квадрат-куб числа ходов (в 16–64 раза), и многочасовая встреча группировалась бы минутами.
+    const meeting = (turns: number): Voiceprint[] =>
+      Array.from({ length: turns }, (_, n) => {
+        const voice = n % 3;
+        const embedding = Float32Array.from({ length: 192 }, (_, k) => (k % 3 === voice ? 1 : 0) + 0.05 * Math.sin(n * 7 + k));
+        return { durationSec: 2 + (n % 5), embedding };
+      });
+    // Лучшее из двух прогонов: сборка мусора и соседние процессы делают отдельный замер шумным.
+    const timed = (prints: Voiceprint[]): { ms: number; labels: number[] } => {
+      let best = { ms: Number.POSITIVE_INFINITY, labels: [] as number[] };
+      for (let run = 0; run < 2; run++) {
+        const started = performance.now();
+        const labels = clusterVoiceprints(prints);
+        best = { ms: Math.min(best.ms, performance.now() - started), labels };
+      }
+      return best;
+    };
+    clusterVoiceprints(meeting(300)); // разогрев JIT
+    const small = timed(meeting(500));
+    const large = timed(meeting(2000));
+    expect(large.ms).toBeLessThan(8 * small.ms + 100);
+    expect(large.ms).toBeLessThan(30_000);
+    expect(new Set(large.labels).size).toBe(3);
+    expect(large.labels[3]).toBe(large.labels[0]);
+  }, 120_000);
 });

@@ -17,7 +17,8 @@ export interface ModelsDirEnv {
 export function modelsRoot(env: ModelsDirEnv): string {
   if (env.override) return env.override;
   if (env.platform === 'win32') {
-    return join(env.localAppData ?? join(env.homeDir, 'AppData', 'Local'), 'TextMeet', 'models');
+    // Пустая переменная — всё равно что её нет: иначе путь вышел бы относительным (от текущей папки).
+    return join(env.localAppData || join(env.homeDir, 'AppData', 'Local'), 'TextMeet', 'models');
   }
   if (env.platform === 'darwin') return join(env.homeDir, 'Library', 'Application Support', 'TextMeet', 'models');
   return join(env.homeDir, '.local', 'share', 'TextMeet', 'models');

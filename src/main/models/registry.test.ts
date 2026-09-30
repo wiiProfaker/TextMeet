@@ -51,6 +51,10 @@ describe('modelsRoot', () => {
     expect(modelsRoot({ platform: 'linux', homeDir: 'H' })).toBe(join('H', '.local', 'share', 'TextMeet', 'models'));
   });
 
+  it('treats an empty %LOCALAPPDATA% as missing', () => {
+    expect(modelsRoot({ platform: 'win32', homeDir: 'H', localAppData: '' })).toBe(join('H', 'AppData', 'Local', 'TextMeet', 'models'));
+  });
+
   it('takes the folder from tests when given', () => {
     expect(modelsRoot({ platform: 'win32', homeDir: 'H', override: 'T' })).toBe('T');
   });

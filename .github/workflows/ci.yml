@@ -11,7 +11,10 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
+    env:
+      # Модели расшифровки (~360 МБ) и открытые записи для тестов на настоящих моделях — в кеше между запусками.
+      TEXTMEET_MODELS_DIR: ${{ github.workspace }}/../textmeet-models
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -21,3 +24,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run test:coverage
+      - uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/../textmeet-models
+          key: textmeet-models-${{ hashFiles('src/main/models/registry.ts', 'src/test-support/model-fixtures.ts') }}
+      - run: npm run test:models

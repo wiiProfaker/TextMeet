@@ -11,7 +11,7 @@ import { transcriptionTexts } from '../texts';
 import { buildPipelineInput } from './job-input';
 import type { PipelineInput, PipelineResult } from './pipeline';
 import { interpolateDiarize, type DiarizeClock } from './progress';
-import { WorkerToMainSchema, type MainToWorker } from './protocol';
+import { WorkerToMainSchema, type MainToWorker, type TranscribeCommand } from './protocol';
 
 /** Процесс расшифровки глазами очереди (в программе — utilityProcess, в тестах — подделка). */
 export interface WorkerHandle {
@@ -81,6 +81,8 @@ export class TranscriptionQueue {
   private current: Current | null = null;
   /** Задача взята из очереди, но ещё готовится (запись статуса) — для isBusy. */
   private active: Job | null = null;
+  /** Задача взята из очереди, а meeting.json ещё не прочитан: она прочитает и то, что запишут до этого. */
+  private starting: Job | null = null;
   private pendingEnqueues = 0;
   private worker: WorkerHandle | null = null;
   private running = false;
@@ -117,13 +119,18 @@ export class TranscriptionQueue {
     }
   }
 
-  /** При запуске программы: встречи, ждавшие очереди, и прерванные выходом на середине расшифровки. */
+  /**
+   * При запуске программы: встречи, ждавшие очереди, и прерванные выходом на середине расшифровки. Порядок — как
+   * в очереди до выхода: сначала прерванная, затем ждавшие, старые первыми (entries от listMeetings — новые сверху).
+   */
   resume(libraryDir: string, entries: readonly MeetingListEntry[]): void {
-    for (const entry of entries) {
-      if (entry.kind === 'ok' && (entry.meeting.status === 'queued' || entry.meeting.status === 'transcribing')) {
-        this.add({ libraryDir, meetingId: entry.meeting.id });
-      }
-    }
+    const rank = (meeting: Meeting): number => (meeting.status === 'transcribing' ? 0 : 1);
+    const meetings = entries
+      .flatMap((entry) => (entry.kind === 'ok' ? [entry.meeting] : []))
+      .filter((meeting) => meeting.status === 'queued' || meeting.status === 'transcribing')
+      // По времени создания: createdAt точнее id (в id — минуты местного времени), id — на случай совпадения.
+      .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    for (const meeting of meetings) this.add({ libraryDir, meetingId: meeting.id });
   }
 
   /** Началась или закончилась запись: процессу — новое число потоков. */
@@ -173,10 +180,13 @@ export class TranscriptionQueue {
 
   private add(job: Job): void {
     if (this.disposed) return;
+    // Задача этой встречи уже взята, но встречу ещё не прочитала: прочитает и новое — второй раз не ставим.
+    if (this.starting && sameJob(this.starting, job)) return;
     const current = this.current;
     if (current && sameJob(current.job, job)) {
       current.cancelled = true;
-      this.killWorker(current.worker);
+      // Процесс останавливается, только пока он занят этой встречей: готовый результат он уже прислал.
+      if (current.settle) this.killWorker(current.worker);
     }
     if (!this.queue.some((queued) => sameJob(queued, job))) this.queue.push(job);
     this.emitProgress(true);
@@ -189,12 +199,14 @@ export class TranscriptionQueue {
     clearTimeout(this.idleTimer);
     for (let job = this.queue.shift(); job !== undefined && !this.disposed; job = this.queue.shift()) {
       this.active = job;
+      this.starting = job;
       try {
         await this.runJob(job);
       } catch (err) {
         this.deps.logger.error(`Очередь расшифровки: сбой задачи ${job.meetingId}`, err);
       } finally {
         this.active = null;
+        this.starting = null;
       }
     }
     this.running = false;
@@ -211,6 +223,8 @@ export class TranscriptionQueue {
     } catch (err) {
       this.deps.logger.warn(`Расшифровка: встреча ${meetingId} не найдена — задача снята (${(err as Error).message})`);
       return;
+    } finally {
+      this.starting = null;
     }
     const current: Current = {
       job,
@@ -224,23 +238,42 @@ export class TranscriptionQueue {
       baseLimitMs: WATCHDOG_MIN_MS,
     };
     this.current = current;
-    this.deps.libraryChanged();
+    this.report(() => this.deps.libraryChanged());
     this.emitProgress(true);
     this.ticker = setInterval(() => this.emitProgress(true), 1000);
     this.deps.logger.info(`Расшифровка началась: ${meetingId}`);
+    let ended: { meeting: Meeting; ok: boolean } | null = null;
+    try {
+      ended = await this.transcribe(current, meeting);
+    } finally {
+      clearInterval(this.ticker);
+      this.current = null;
+      if (!this.disposed) {
+        this.report(() => this.deps.libraryChanged());
+        this.emitProgress(true);
+      }
+    }
+    // Уведомление — после всех записей на диск: его сбой не превращает готовую встречу в ошибку.
+    const event = ended && { libraryDir, ...ended };
+    if (event) this.report(() => this.deps.finished(event));
+  }
+
+  /** Модели, процесс расшифровки, запись результата. null — уведомлять не о чем (встречу поставили заново). */
+  private async transcribe(current: Current, meeting: Meeting): Promise<{ meeting: Meeting; ok: boolean } | null> {
+    const { libraryDir, meetingId } = current.job;
     try {
       await this.deps.models
         .ensure((download) => this.setProgress(current, { stage: 'download', fraction: 0, download }))
         .catch((err: unknown) => {
           throw new Error(transcriptionTexts.download(err), { cause: err });
         });
-      if (current.cancelled) return;
+      if (current.cancelled) return null;
       const input = await buildPipelineInput(libraryDir, meeting);
-      if (current.cancelled) return;
+      if (current.cancelled) return null;
       if (input.tracks.length === 0) throw new Error(transcriptionTexts.noTracks);
       const outcome = await this.runInWorker(current, input);
       // Встречу поставили заново (или программа закрывается), пока шла работа: этот результат не нужен.
-      if (current.cancelled || outcome.kind === 'cancelled') return;
+      if (current.cancelled || outcome.kind === 'cancelled') return null;
       if (outcome.kind === 'failed') throw new Error(outcome.message);
       for (const skipped of outcome.result.skippedTracks) {
         this.deps.logger.warn(`Расшифровка ${meetingId}: дорожка ${skipped.kind} не прочитана — ${skipped.message}`);
@@ -255,10 +288,15 @@ export class TranscriptionQueue {
       const done = await updateMeeting(libraryDir, meetingId, (m) =>
         m.status === 'transcribing' ? { ...m, status: 'done', model: ASR_MODEL_ID, errorMessage: null } : m,
       );
+      if (done.status !== 'done') {
+        // Встречу поставили заново, пока результат сохранялся: её расшифруют ещё раз — сообщать о готовности рано.
+        this.deps.logger.info(`Расшифровка ${meetingId} сохранена, но встреча уже снова в очереди`);
+        return null;
+      }
       this.deps.logger.info(`Расшифровка готова: ${meetingId}, реплик ${outcome.result.segments.length}`);
-      this.deps.finished({ libraryDir, meeting: done, ok: true });
+      return { meeting: done, ok: true };
     } catch (err) {
-      if (current.cancelled) return;
+      if (current.cancelled) return null;
       const message = err instanceof Error ? err.message : String(err);
       this.deps.logger.error(`Расшифровка не удалась: ${meetingId}`, err);
       const failed = await updateMeeting(libraryDir, meetingId, (m) => ({ ...m, status: 'error', errorMessage: message })).catch(
@@ -267,22 +305,33 @@ export class TranscriptionQueue {
           return null;
         },
       );
-      if (failed) this.deps.finished({ libraryDir, meeting: failed, ok: false });
-    } finally {
-      clearInterval(this.ticker);
-      this.current = null;
-      if (!this.disposed) {
-        this.deps.libraryChanged();
-        this.emitProgress(true);
-      }
+      return failed && { meeting: failed, ok: false };
+    }
+  }
+
+  /** Обработчики main (окно, уведомления) не должны ломать очередь: их сбой только пишется в журнал. */
+  private report(callback: () => void): void {
+    try {
+      callback();
+    } catch (err) {
+      this.deps.logger.error('Очередь расшифровки: сбой обработчика', err);
     }
   }
 
   private runInWorker(current: Current, input: PipelineInput): Promise<Outcome> {
+    // Команда собирается до запуска процесса и сторожа: сбой здесь не оставит взведённого сторожа.
+    const command: TranscribeCommand = {
+      type: 'transcribe',
+      jobId: `job-${++this.jobCounter}`,
+      input,
+      modelsDir: this.deps.models.root,
+      ffmpegPath: this.deps.ffmpegPath(),
+      threads: this.deps.threads(),
+    };
+    const worker = this.ensureWorker();
     return new Promise((resolve) => {
-      const worker = this.ensureWorker();
       current.worker = worker;
-      current.jobId = `job-${++this.jobCounter}`;
+      current.jobId = command.jobId;
       current.baseLimitMs = Math.max(WATCHDOG_MIN_MS, input.durationSec * 1000 * WATCHDOG_SHARE);
       const arm = (limitMs: number): void => {
         clearTimeout(this.watchdog);
@@ -300,14 +349,7 @@ export class TranscriptionQueue {
       };
       current.rearm = arm;
       arm(current.baseLimitMs);
-      worker.send({
-        type: 'transcribe',
-        jobId: current.jobId,
-        input,
-        modelsDir: this.deps.models.root,
-        ffmpegPath: this.deps.ffmpegPath(),
-        threads: this.deps.threads(),
-      });
+      worker.send(command);
     });
   }
 

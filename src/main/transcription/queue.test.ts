@@ -52,8 +52,8 @@ class FakeWorker implements WorkerHandle {
 
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), flush: async () => undefined };
 
-async function recordedMeeting(lib: string, patch: Partial<Meeting> = {}): Promise<Meeting> {
-  const meeting = await createMeeting(lib, { source: 'recording', status: 'recording' });
+async function recordedMeeting(lib: string, patch: Partial<Meeting> = {}, now?: Date): Promise<Meeting> {
+  const meeting = await createMeeting(lib, { source: 'recording', status: 'recording', ...(now && { now }) });
   writeFileSync(join(audioDir(lib, meeting.id), 'mic.webm'), 'x');
   writeFileSync(join(audioDir(lib, meeting.id), 'system.webm'), 'x');
   return updateMeeting(lib, meeting.id, (m) => ({
@@ -70,7 +70,12 @@ async function recordedMeeting(lib: string, patch: Partial<Meeting> = {}): Promi
 }
 
 function setup(
-  overrides: { ensure?: (onProgress: (p: { done: number; total: number }) => void) => Promise<void>; deferExit?: boolean } = {},
+  overrides: {
+    ensure?: (onProgress: (p: { done: number; total: number }) => void) => Promise<void>;
+    deferExit?: boolean;
+    ffmpegPath?: () => string;
+    finished?: (event: { meeting: Meeting; ok: boolean }) => void;
+  } = {},
 ) {
   const workers: FakeWorker[] = [];
   const finished: { meeting: Meeting; ok: boolean }[] = [];
@@ -85,13 +90,16 @@ function setup(
       return worker;
     },
     models: { root: 'M', ensure: overrides.ensure ?? (async () => undefined) },
-    ffmpegPath: () => 'ffmpeg',
+    ffmpegPath: overrides.ffmpegPath ?? (() => 'ffmpeg'),
     threads: () => threads,
     now: () => now,
     logger,
     libraryChanged: vi.fn(),
     progressChanged: (p) => progress.push(p),
-    finished: (event) => finished.push(event),
+    finished: (event) => {
+      finished.push(event);
+      overrides.finished?.(event);
+    },
   });
   return {
     queue,
@@ -132,6 +140,8 @@ async function transcribeSent(get: () => FakeWorker | undefined, n = 1): Promise
 
 afterEach(() => {
   vi.useRealTimers();
+  // Общий logger: вызовы прошлого теста не должны засчитываться следующему.
+  vi.clearAllMocks();
 });
 
 describe('TranscriptionQueue', () => {
@@ -307,23 +317,27 @@ describe('TranscriptionQueue', () => {
     expect(existsSync(join(lib, meeting.id))).toBe(false);
   });
 
-  it('resumes queued and interrupted meetings after a restart, in order', async () => {
+  it('resumes after a restart the interrupted meeting first, then the queued ones oldest first', async () => {
     const lib = makeTempDir();
-    const a = await recordedMeeting(lib, { status: 'queued' });
-    const b = await recordedMeeting(lib, { status: 'transcribing' });
-    const c = await recordedMeeting(lib, { status: 'done' });
+    const at = (hour: number): Date => new Date(2026, 8, 25, hour, 0);
+    const older = await recordedMeeting(lib, { status: 'queued' }, at(9));
+    const interrupted = await recordedMeeting(lib, { status: 'transcribing' }, at(10));
+    const newer = await recordedMeeting(lib, { status: 'queued' }, at(11));
+    const finished = await recordedMeeting(lib, { status: 'done' }, at(12));
     const t = setup();
+    // Как listMeetings при запуске: новые сверху.
     t.queue.resume(
       lib,
-      [a, b, c].map((meeting) => ({ kind: 'ok' as const, meeting, mixReady: true, mixFailed: false })),
+      [finished, newer, interrupted, older].map((meeting) => ({ kind: 'ok' as const, meeting, mixReady: true, mixFailed: false })),
     );
-    const first = await transcribeSent(t.worker);
-    expect(first.input.tracks[0]?.file).toContain(a.id);
-    t.worker().post(done(first.jobId));
-    const second = await transcribeSent(t.worker, 2);
-    expect(second.input.tracks[0]?.file).toContain(b.id);
-    t.worker().post(done(second.jobId));
-    await vi.waitFor(() => expect(t.finished).toHaveLength(2));
+    const order: string[] = [];
+    for (let n = 1; n <= 3; n++) {
+      const command = await transcribeSent(t.worker, n);
+      order.push(command.input.tracks[0]!.file);
+      t.worker().post(done(command.jobId));
+    }
+    expect(order.map((file) => [interrupted, older, newer].findIndex((m) => file.includes(m.id)))).toEqual([0, 1, 2]);
+    await vi.waitFor(() => expect(t.finished).toHaveLength(3));
   });
 
   it('tells the process about fewer threads during a recording', async () => {
@@ -515,5 +529,75 @@ describe('TranscriptionQueue', () => {
     await vi.waitFor(() => expect(t.queue.isBusy()).toBe(false));
     t.queue.stopIdleWorker();
     expect(t.worker().killed).toBe(true);
+  });
+
+  it('does not transcribe twice a meeting asked again while its job is being picked up', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    // Второй запрос записан раньше, чем задача первого прочитает встречу: она уже увидит 3 участника.
+    await Promise.all([t.queue.enqueue(lib, meeting.id), t.queue.enqueue(lib, meeting.id, 3)]);
+    const command = await transcribeSent(t.worker);
+    expect(command.input.participantsHint).toBe(3);
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    await vi.waitFor(() => expect(t.queue.isBusy()).toBe(false));
+    expect(t.worker().transcribes()).toHaveLength(1);
+  });
+
+  it('asked again while the result is being saved: no «ready» notice and the idle process is kept', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    const first = await transcribeSent(t.worker);
+    t.worker().post(done(first.jobId));
+    // Результат уже у очереди и сохраняется — в этот момент встречу ставят заново.
+    await t.queue.enqueue(lib, meeting.id, 3);
+    const second = await transcribeSent(t.worker, 2);
+    expect(second.input.participantsHint).toBe(3);
+    expect(t.workers).toHaveLength(1);
+    expect(t.workers[0]?.killed).toBe(false);
+    expect(t.finished).toHaveLength(0);
+    t.worker().post(done(second.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect(t.finished[0]).toMatchObject({ ok: true, meeting: { status: 'done' } });
+  });
+
+  it('keeps a finished meeting done when the notification fails, and goes on', async () => {
+    const lib = makeTempDir();
+    const first = await recordedMeeting(lib);
+    const second = await recordedMeeting(lib);
+    const t = setup({
+      finished: () => {
+        throw new Error('уведомление упало');
+      },
+    });
+    await t.queue.enqueue(lib, first.id);
+    await t.queue.enqueue(lib, second.id);
+    for (let n = 1; n <= 2; n++) {
+      const command = await transcribeSent(t.worker, n);
+      t.worker().post(done(command.jobId));
+    }
+    await vi.waitFor(() => expect(t.finished).toHaveLength(2));
+    expect(t.finished.map((f) => f.ok)).toEqual([true, true]);
+    expect((await readMeeting(lib, first.id)).status).toBe('done');
+    expect((await readMeeting(lib, second.id)).status).toBe('done');
+  });
+
+  it('leaves no watchdog behind when the command for the process cannot be built', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup({
+      ffmpegPath: () => {
+        throw new Error('ffmpeg не найден');
+      },
+    });
+    await t.queue.enqueue(lib, meeting.id);
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect(t.finished[0]?.ok).toBe(false);
+    vi.advanceTimersByTime(WATCHDOG_MIN_MS + 1);
+    expect(logger.error).not.toHaveBeenCalledWith(expect.stringContaining('молчит'));
   });
 });

@@ -61,6 +61,8 @@ const testMedia = testMediaMode();
 if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 // Только для автотестов: поддельные движки расшифровки (worker.ts) — без моделей и их скачивания.
 const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
+/** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
+const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
 
 /** Потоков для расшифровки: все ядра, кроме одного (не больше 8); во время записи — 2 (§5.3 решений Плана 3). */
 const FULL_THREADS = Math.max(1, Math.min(8, availableParallelism() - 1));
@@ -322,12 +324,11 @@ async function start(logger: Logger): Promise<void> {
     logger,
     libraryChanged: () => sendToMain(IPC.libraryChanged),
     progressChanged: (progress) => sendToMain(IPC.transcriptionProgress, progress),
-    finished: ({ meeting, ok }) =>
-      notify(
-        ok ? notificationTexts.transcribed(meeting.title) : notificationTexts.transcribeFailed(meeting.title),
-        true,
-        () => showMeeting(meeting.id),
-      ),
+    finished: ({ meeting, ok }) => {
+      const text = ok ? notificationTexts.transcribed(meeting.title) : notificationTexts.transcribeFailed(meeting.title);
+      if (testRun) logger.info(`Уведомление не показано (автотест): ${text.title}`);
+      else notify(text, true, () => showMeeting(meeting.id));
+    },
   });
   transcription = queue;
   let lastPhase = 'idle';

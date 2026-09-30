@@ -10,12 +10,13 @@ export interface NotifierDeps {
   isWindowActive(): boolean;
 }
 
-export type Notify = (text: NotificationText, onlyWhenAway?: boolean) => void;
+/** onClick — что сделать после открытия окна (например, показать встречу). */
+export type Notify = (text: NotificationText, onlyWhenAway?: boolean, onClick?: () => void) => void;
 
 export function createNotifier(deps: NotifierDeps): Notify {
   // Держим ссылки, пока уведомление на экране: иначе сборщик мусора уберёт его вместе с обработчиком щелчка.
   const shown = new Set<Notification>();
-  return (text, onlyWhenAway = false) => {
+  return (text, onlyWhenAway = false, onClick) => {
     if (onlyWhenAway && deps.isWindowActive()) return;
     if (!Notification.isSupported()) {
       deps.logger.warn(`Уведомления не поддерживаются: ${text.title}`);
@@ -23,7 +24,10 @@ export function createNotifier(deps: NotifierDeps): Notify {
     }
     const notification = new Notification({ title: text.title, body: text.body, silent: text.silent ?? false });
     shown.add(notification);
-    notification.on('click', () => deps.openWindow());
+    notification.on('click', () => {
+      deps.openWindow();
+      onClick?.();
+    });
     notification.on('close', () => shown.delete(notification));
     notification.on('failed', (_event, error) => {
       shown.delete(notification);

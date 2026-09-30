@@ -53,9 +53,16 @@ const api: TextMeetApi = {
   dismissStartProblem: () => invoke(IPC.dismissStartProblem),
   finishStopDialog: (answer) => invoke(IPC.finishStopDialog, answer),
   openSystemSettings: (kind) => invoke(IPC.openSystemSettings, kind),
+  transcribe: (request) => invoke(IPC.transcribe, request),
+  getTranscript: (meetingId) => invoke(IPC.getTranscript, meetingId),
+  getTranscriptionProgress: () => invoke(IPC.getTranscriptionProgress),
+  getModels: () => invoke(IPC.getModels),
+  deleteModels: (group) => invoke(IPC.deleteModels, group),
   onRecordingState: (listener) => subscribe(IPC.recordingState, listener),
   onPeaks: (listener) => subscribe(IPC.recordingPeaks, listener),
   onLibraryChanged: (listener) => subscribe(IPC.libraryChanged, () => listener()),
+  onTranscriptionProgress: (listener) => subscribe(IPC.transcriptionProgress, listener),
+  onShowMeeting: (listener) => subscribe(IPC.showMeeting, listener),
 };
 
 const recorder: RecorderBridge = {

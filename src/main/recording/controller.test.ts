@@ -50,6 +50,7 @@ function harness(overrides: Partial<ControllerDeps> = {}) {
     emitPeaks: vi.fn(),
     libraryChanged: vi.fn(),
     enqueueMix: vi.fn(),
+    enqueueTranscription: vi.fn(),
     timeouts: { startMs: 300, stopMs: 300 },
     ...overrides,
   };
@@ -802,6 +803,7 @@ describe('RecordingController — stop dialog', () => {
     expect(await readMeeting(h.lib, command.meetingId)).toMatchObject({ title: 'Созвон с Ириной', participantsHint: 3 });
     expect(h.state().stopDialog).toBeNull();
     expect(h.deps.libraryChanged).toHaveBeenCalled();
+    expect(h.deps.enqueueTranscription).toHaveBeenCalledWith(h.lib, command.meetingId);
   });
 
   it('keeps the default title when the field was emptied and allows skipping the question', async () => {
@@ -813,6 +815,8 @@ describe('RecordingController — stop dialog', () => {
     await h.controller.finishStopDialog({ meetingId: command.meetingId, title: '   ', participantsHint: null });
 
     expect(await readMeeting(h.lib, command.meetingId)).toMatchObject({ title, participantsHint: null });
+    // «Пропустить» тоже запускает расшифровку — число участников программа определит сама.
+    expect(h.deps.enqueueTranscription).toHaveBeenCalledWith(h.lib, command.meetingId);
   });
 
   it('keeps the dialog of the current recording when an older one is answered', async () => {
@@ -852,6 +856,7 @@ describe('RecordingController — stop dialog', () => {
     ).rejects.toThrow(/^Не удалось сохранить ответ/);
 
     expect(h.state().stopDialog).toBeNull();
+    expect(h.deps.enqueueTranscription).not.toHaveBeenCalled();
   });
 
   it('keeps the dialog open when the number of participants cannot be saved', async () => {

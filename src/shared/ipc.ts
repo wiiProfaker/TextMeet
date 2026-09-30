@@ -18,6 +18,8 @@ import type {
   SystemSettingsKind,
 } from './recording';
 import type { Settings } from './settings';
+import type { Transcript } from './transcript';
+import type { ModelGroupId, ModelsState, TranscribeRequest, TranscriptionProgress } from './transcription';
 
 export const IPC = {
   // Главное окно → main (запрос — ответ).
@@ -38,10 +40,18 @@ export const IPC = {
   dismissStartProblem: 'recording:dismiss-problem',
   finishStopDialog: 'recording:finish-stop-dialog',
   openSystemSettings: 'system:open-settings',
+  transcribe: 'transcription:start',
+  getTranscript: 'transcription:get-transcript',
+  getTranscriptionProgress: 'transcription:get-progress',
+  getModels: 'models:get',
+  deleteModels: 'models:delete',
   // main → главное окно (события).
   recordingState: 'recording:state',
   recordingPeaks: 'recording:peaks',
   libraryChanged: 'library:changed',
+  transcriptionProgress: 'transcription:progress',
+  /** Щелчок по уведомлению о расшифровке: показать эту встречу. */
+  showMeeting: 'app:show-meeting',
   // main → окно записи (команды).
   recorderStart: 'recorder:start',
   recorderStop: 'recorder:stop',
@@ -105,6 +115,11 @@ export interface MainInvokeContract {
   [IPC.dismissStartProblem]: { arg: void; result: void };
   [IPC.finishStopDialog]: { arg: StopDialogAnswer; result: void };
   [IPC.openSystemSettings]: { arg: SystemSettingsKind; result: void };
+  [IPC.transcribe]: { arg: TranscribeRequest; result: void };
+  [IPC.getTranscript]: { arg: string; result: Transcript | null };
+  [IPC.getTranscriptionProgress]: { arg: void; result: TranscriptionProgress[] };
+  [IPC.getModels]: { arg: void; result: ModelsState };
+  [IPC.deleteModels]: { arg: ModelGroupId; result: ModelsState };
 }
 export type MainInvokeChannel = keyof MainInvokeContract;
 export type InvokeArg<C extends MainInvokeChannel> = MainInvokeContract[C]['arg'];
@@ -115,6 +130,8 @@ export interface MainEventContract {
   [IPC.recordingState]: RecordingState;
   [IPC.recordingPeaks]: Peaks;
   [IPC.libraryChanged]: void;
+  [IPC.transcriptionProgress]: TranscriptionProgress[];
+  [IPC.showMeeting]: string;
 }
 export type MainEventChannel = keyof MainEventContract;
 
@@ -162,9 +179,18 @@ export interface TextMeetApi {
   dismissStartProblem(): Promise<void>;
   finishStopDialog(answer: StopDialogAnswer): Promise<void>;
   openSystemSettings(kind: SystemSettingsKind): Promise<void>;
+  /** «Расшифровать», «Расшифровать заново», «Повторить». */
+  transcribe(request: TranscribeRequest): Promise<void>;
+  /** Текст встречи; null — ещё не расшифрована. */
+  getTranscript(meetingId: string): Promise<Transcript | null>;
+  getTranscriptionProgress(): Promise<TranscriptionProgress[]>;
+  getModels(): Promise<ModelsState>;
+  deleteModels(group: ModelGroupId): Promise<ModelsState>;
   onRecordingState(listener: Listener<RecordingState>): Unsubscribe;
   onPeaks(listener: Listener<Peaks>): Unsubscribe;
   onLibraryChanged(listener: () => void): Unsubscribe;
+  onTranscriptionProgress(listener: Listener<TranscriptionProgress[]>): Unsubscribe;
+  onShowMeeting(listener: Listener<string>): Unsubscribe;
 }
 
 /** API скрытого окна записи: window.recorder */

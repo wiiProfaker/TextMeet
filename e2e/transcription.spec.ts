@@ -103,11 +103,33 @@ test('a failed transcription shows the reason and «Повторить» tries a
   expect(await readMeetingJson(libraryDir, ID)).toMatchObject({ status: 'done', errorMessage: null });
 });
 
-test('a meeting left in the queue is transcribed after a restart', async () => {
-  launched = await launchApp({ meetings: [recorded({ status: 'transcribing', participantsHint: 2 })] });
+test('meetings left transcribing or queued by the previous run are transcribed on start', async () => {
+  // Прошлый запуск закрылся посреди расшифровки одной встречи, другая ждала очереди.
+  const queuedId = '2026-09-25_1500_d4e5f6';
+  launched = await launchApp({
+    meetings: [
+      recorded({ status: 'transcribing', participantsHint: 2 }),
+      {
+        id: queuedId,
+        json: meetingJson(queuedId, {
+          title: 'Планёрка',
+          createdAt: '2026-09-25T12:00:00.000Z',
+          durationSec: 3,
+          tracks: TRACKS,
+          status: 'queued',
+          participantsHint: 2,
+        }),
+        audio: { 'mic.webm': 2, 'system.webm': 2 },
+      },
+    ],
+  });
   const { page, libraryDir } = launched;
-  await expect.poll(async () => (await pollMeetingJson(libraryDir, ID))?.status, { timeout: 20_000 }).toBe('done');
+  for (const id of [ID, queuedId]) {
+    await expect.poll(async () => (await pollMeetingJson(libraryDir, id))?.status, { timeout: 20_000 }).toBe('done');
+  }
   await page.getByRole('button', { name: /Созвон с Ириной/ }).click();
+  await expect(page.getByLabel('Текст встречи')).toContainText('Спикер 1');
+  await page.getByRole('button', { name: /Планёрка/ }).click();
   await expect(page.getByLabel('Текст встречи')).toContainText('Спикер 1');
 });
 

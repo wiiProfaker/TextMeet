@@ -297,7 +297,7 @@ async function start(logger: Logger): Promise<void> {
     freeBytes: freeDiskBytes,
   });
   const queue = new TranscriptionQueue({
-    spawn: spawnTranscriptionWorker,
+    spawn: () => spawnTranscriptionWorker(logger),
     models: fakeAsr ? { root: modelManager.root, ensure: async () => undefined } : modelManager,
     ffmpegPath: () => resolveFfmpegPath(),
     // Запись начинается и кончается по ходу расшифровки: число потоков спрашивается каждый раз.

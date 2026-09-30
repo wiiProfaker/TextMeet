@@ -1089,6 +1089,9 @@ kbd.k {
   padding: 9px 12px;
   margin: 0 -12px;
   border-radius: var(--r);
+  /* Длинная встреча — тысячи реплик: невидимые не раскладываются. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60px;
 }
 
 .t {

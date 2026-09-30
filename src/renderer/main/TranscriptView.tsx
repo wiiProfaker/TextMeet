@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { speakerLabel, type Transcript } from '../../shared/transcript';
 import { formatTimestamp, speakerTone } from './transcription-format';
 
@@ -7,8 +8,11 @@ interface Props {
   names: Readonly<Record<string, string>>;
 }
 
-/** Текст встречи, как на листе 1 макета: спикеры сверху, реплики «время · кто · что». Только чтение (План 3). */
-export function TranscriptView({ transcript, names }: Props) {
+/**
+ * Текст встречи, как на листе 1 макета: спикеры сверху, реплики «время · кто · что». Только чтение (План 3).
+ * memo: ход расшифровки заново обновляет встречу каждую секунду, а текст при этом прежний (те же объекты).
+ */
+export const TranscriptView = memo(function TranscriptView({ transcript, names }: Props) {
   if (transcript.segments.length === 0) {
     return (
       <div className="empty-note">
@@ -41,4 +45,4 @@ export function TranscriptView({ transcript, names }: Props) {
       </div>
     </>
   );
-}
+});

@@ -273,13 +273,27 @@ describe('runPipeline', () => {
     expect(progress.some((p) => p.diarize)).toBe(false);
   });
 
-  it('asks the speech detector only once per track of the others', async () => {
+  it('looks for speech once, before splitting by voices', async () => {
+    const calls: string[] = [];
     const base = fakeEngines();
-    const detect = vi.fn(base.detector().detect);
     const { deps } = setup({ audio: { system: signal(10, [{ start: 1, end: 3 }]) }, turns: [{ start: 1, end: 3, speaker: 0 }] });
-    const counted: PipelineDeps = { ...deps, engines: { ...deps.engines, detector: () => ({ detect }) } };
-    await runPipeline(input({ tracks: [system], participantsHint: 3, durationSec: 10 }), counted);
-    expect(detect).toHaveBeenCalledTimes(1);
+    const engines: Engines = {
+      ...deps.engines,
+      detector: () => ({
+        detect: (samples) => {
+          calls.push('detect');
+          return base.detector().detect(samples);
+        },
+      }),
+      diarizer: (threads) => ({
+        diarize: (samples, speakers) => {
+          calls.push('diarize');
+          return deps.engines.diarizer(threads).diarize(samples, speakers);
+        },
+      }),
+    };
+    await runPipeline(input({ tracks: [system], participantsHint: 3, durationSec: 10 }), { ...deps, engines });
+    expect(calls).toEqual(['detect', 'diarize']);
   });
 });
 

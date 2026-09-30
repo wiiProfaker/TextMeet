@@ -216,10 +216,12 @@ describe('TranscriptionQueue', () => {
     const t = setup();
     await t.queue.enqueue(lib, meeting.id);
     const command = await transcribeSent(t.worker);
-    const raw = 'ffmpeg не прочитал дорожку (завершился с кодом 1): C:\Users\ира\mic.webm: Invalid data';
+    const raw = String.raw`ffmpeg не прочитал дорожку (завершился с кодом 1): C:\Users\ира\mic.webm: Invalid data`;
     t.worker().post({ type: 'failed', jobId: command.jobId, message: raw });
     await vi.waitFor(() => expect(t.finished).toHaveLength(1));
-    expect(await readMeeting(lib, meeting.id)).toMatchObject({ status: 'error', errorMessage: transcriptionTexts.workerFailed(raw) });
+    const failed = await readMeeting(lib, meeting.id);
+    expect(failed).toMatchObject({ status: 'error', errorMessage: transcriptionTexts.workerFailed(raw) });
+    expect(failed.errorMessage).not.toContain(String.raw`C:\Users`);
     expect(t.finished[0]?.ok).toBe(false);
     expect(loggedErrors()).toContain(raw);
   });

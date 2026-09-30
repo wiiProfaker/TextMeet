@@ -25,11 +25,12 @@ describe('describeError', () => {
   });
 
   it('adds the causes: the raw reason behind a message for people stays in the log', () => {
-    const raw = Object.assign(new Error("EPERM: operation not permitted, open 'C:\m\verified.json'"), { code: 'EPERM' });
+    const path = String.raw`C:\m\verified.json`;
+    const raw = Object.assign(new Error(`EPERM: operation not permitted, open '${path}'`), { code: 'EPERM' });
     const text = describeError(new Error('Не удалось сохранить модель', { cause: new Error('обёртка', { cause: raw }) }));
     expect(text).toContain('Не удалось сохранить модель');
     expect(text).toContain('Причина: Error: обёртка');
-    expect(text).toContain("Причина: Error: EPERM: operation not permitted, open 'C:\m\verified.json'");
+    expect(text).toContain(`Причина: Error: EPERM: operation not permitted, open '${path}'`);
     expect(describeError(new Error('сбой процесса', { cause: 'ffmpeg: Invalid data' }))).toContain('Причина: ffmpeg: Invalid data');
   });
 

@@ -188,6 +188,14 @@ describe('meetingNote', () => {
     ).toBe('скачиваем модель…');
     expect(meetingNote(meeting('a', at, { status: 'error', tracks }))).toEqual({ text: 'ошибка расшифровки', tone: 'error' });
   });
+
+  it('never shows a percentage outside 0–100', () => {
+    const progress = { meetingId: 'a', stage: 'others' as const, fraction: 1.2, download: null };
+    const transcribing = meeting('a', at, { status: 'transcribing' });
+    expect(meetingNote(transcribing, progress)?.text).toBe('расшифровка 100%');
+    expect(meetingNote(transcribing, { ...progress, fraction: -0.5 })?.text).toBe('расшифровка 0%');
+    expect(meetingNote(transcribing, { ...progress, fraction: Number.NaN })?.text).toBe('расшифровка 0%');
+  });
 });
 
 describe('cleanDeviceLabel', () => {

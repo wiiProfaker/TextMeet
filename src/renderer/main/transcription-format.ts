@@ -13,7 +13,9 @@ export function formatTimestamp(seconds: number): string {
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 }
 
-export const percent = (fraction: number): number => Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+/** Доля → целые проценты 0–100 (и для NaN — 0). */
+export const percent = (fraction: number): number =>
+  Number.isNaN(fraction) ? 0 : Math.round(Math.min(1, Math.max(0, fraction)) * 100);
 
 /** Этап расшифровки для блока во встрече. */
 export function stageText(progress: TranscriptionProgress): string {

@@ -46,6 +46,7 @@ describe('barFraction and percent', () => {
     expect(percent(0.624)).toBe(62);
     expect(percent(2)).toBe(100);
     expect(percent(-1)).toBe(0);
+    expect(percent(Number.NaN)).toBe(0);
   });
 });
 

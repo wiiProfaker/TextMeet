@@ -1,6 +1,7 @@
 import type { LaunchAtLoginNotice } from '../../shared/ipc';
 import { entryId, type Meeting, type MeetingListEntry } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
+import { percent } from './transcription-format';
 
 const pad = (n: number): string => String(n).padStart(2, '0');
 
@@ -145,7 +146,7 @@ export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress):
     case 'transcribing':
       if (progress?.stage === 'download') return { text: 'скачиваем модель…', tone: 'accent' };
       return progress
-        ? { text: `расшифровка ${Math.round(progress.fraction * 100)}%`, tone: 'accent' }
+        ? { text: `расшифровка ${percent(progress.fraction)}%`, tone: 'accent' }
         : { text: 'расшифровка…', tone: 'accent' };
     case 'error':
       // С дорожками ошибка — у расшифровки (запись сохранилась); без них — у самой записи.

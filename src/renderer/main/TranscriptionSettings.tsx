@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { formatBytes } from '../../shared/format';
 import type { ModelGroupId, ModelsState } from '../../shared/transcription';
 import { errorText } from './errors';
@@ -7,18 +7,21 @@ import { errorText } from './errors';
 export function TranscriptionSettings() {
   const [models, setModels] = useState<ModelsState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Запросы могут наложиться и ответить не по порядку — показываем только ответ на последний.
+  const latestRequest = useRef(0);
 
   useEffect(() => {
-    let active = true;
-    const load = () =>
-      window.textmeet
+    const load = () => {
+      const request = ++latestRequest.current;
+      return window.textmeet
         .getModels()
         .then((state) => {
-          if (active) setModels(state);
+          if (request === latestRequest.current) setModels(state);
         })
         .catch((err: unknown) => {
-          if (active) setError(errorText(err));
+          if (request === latestRequest.current) setError(errorText(err));
         });
+    };
     void load();
     // Расшифровка началась или закончилась (и модели могли скачаться) — перечитать.
     let busy: boolean | null = null;
@@ -28,16 +31,21 @@ export function TranscriptionSettings() {
       busy = nowBusy;
     });
     return () => {
-      active = false;
+      // Ответы после закрытия настроек не нужны.
+      latestRequest.current += 1;
       unsubscribe();
     };
   }, []);
 
   const remove = async (group: ModelGroupId) => {
+    const request = ++latestRequest.current;
     try {
-      setModels(await window.textmeet.deleteModels(group));
+      const state = await window.textmeet.deleteModels(group);
+      if (request !== latestRequest.current) return;
+      setModels(state);
       setError(null);
     } catch (err) {
+      // Ошибку удаления показываем всегда: это ответ на нажатие, перечитанный список её не отменяет.
       setError(errorText(err));
     }
   };

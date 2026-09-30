@@ -129,6 +129,13 @@ describe('transcription texts', () => {
     expect(notificationTexts.transcribeFailed('Созвон').body).toContain('Повторить');
   });
 
+  it('tells how to start transcription by hand when it could not be queued', () => {
+    expect(notificationTexts.transcribeNotQueued()).toEqual({
+      title: 'Расшифровка не началась',
+      body: 'Запись сохранена. Откройте встречу в TextMeet и нажмите «Расшифровать».',
+    });
+  });
+
   it('explains why models could not be prepared', () => {
     expect(transcriptionTexts.download(new DownloadError('network', 'x'))).toContain('нет связи');
     expect(transcriptionTexts.download(new DownloadError('corrupt', 'x'))).toContain('повреждён');

@@ -350,7 +350,10 @@ async function start(logger: Logger): Promise<void> {
     libraryChanged: () => sendToMain(IPC.libraryChanged),
     enqueueMix: (dir, id) => mixer.enqueue(dir, id),
     enqueueTranscription: (dir, id) => {
-      queue.enqueue(dir, id).catch((err: unknown) => logger.error(`Не удалось поставить встречу ${id} в очередь расшифровки`, err));
+      queue.enqueue(dir, id).catch((err: unknown) => {
+        logger.error(`Не удалось поставить встречу ${id} в очередь расшифровки`, err);
+        notify(notificationTexts.transcribeNotQueued());
+      });
     },
   });
   const hotkeyManager = new HotkeyManager(globalShortcut, process.platform, () => void controller.toggle());

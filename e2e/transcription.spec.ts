@@ -30,6 +30,14 @@ const recorded = (overrides: Record<string, unknown> = {}) => ({
   audio: { 'mic.webm': 2, 'system.webm': 2 },
 });
 
+const OLD_TRANSCRIPT = {
+  schemaVersion: 1,
+  model: 'gigaam-v3-e2e-rnnt',
+  createdAt: '2026-09-25T12:00:00.000Z',
+  speakers: [{ id: 's1', kind: 'other' }],
+  segments: [{ id: 'seg-1', start: 0, end: 1, speakerId: 's1', text: 'Старый текст.', edited: false }],
+};
+
 test('a new recording is transcribed after the stop dialog', async () => {
   launched = await launchApp();
   const { page, libraryDir } = launched;
@@ -81,6 +89,9 @@ test('a failed transcription shows the reason and «Повторить» tries a
   const banner = page.getByRole('alert').filter({ hasText: 'Ошибка расшифровки' });
   await expect(banner).toContainText('ffmpeg не прочитал дорожку', { timeout: 20_000 });
   await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText('ошибка расшифровки');
+  // Текста ещё не было — «заново» не к чему.
+  await expect(page.getByRole('button', { name: 'Расшифровать', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Расшифровать заново' })).toHaveCount(0);
 
   for (const file of ['mic.webm', 'system.webm']) await toneWebm(join(libraryDir, ID, 'audio', file), 2);
   await banner.getByRole('button', { name: 'Повторить' }).click();
@@ -97,16 +108,9 @@ test('a meeting left in the queue is transcribed after a restart', async () => {
 });
 
 test('«Расшифровать заново» replaces the text and keeps the earlier answer preselected', async () => {
-  const old = {
-    schemaVersion: 1,
-    model: 'gigaam-v3-e2e-rnnt',
-    createdAt: '2026-09-25T12:00:00.000Z',
-    speakers: [{ id: 's1', kind: 'other' }],
-    segments: [{ id: 'seg-1', start: 0, end: 1, speakerId: 's1', text: 'Старый текст.', edited: false }],
-  };
   launched = await launchApp({
     meetings: [recorded({ status: 'done', participantsHint: 4, model: 'gigaam-v3-e2e-rnnt' })],
-    transcripts: { [ID]: old },
+    transcripts: { [ID]: OLD_TRANSCRIPT },
   });
   const { app, page } = launched;
   await page.getByRole('button', { name: /Созвон с Ириной/ }).click();
@@ -131,6 +135,29 @@ test('«Расшифровать заново» replaces the text and keeps the 
   await expect(page.getByText('Текст заменится, когда новая расшифровка закончится.')).toBeHidden();
   await expect(page.getByLabel('Текст встречи')).not.toContainText('Старый текст.');
   await expect(page.getByText('2 участника')).toBeVisible();
+});
+
+test('after a failed re-run the old text stays and another number of participants can be chosen', async () => {
+  launched = await launchApp({
+    meetings: [{ ...recorded({ status: 'done', participantsHint: 4, model: 'gigaam-v3-e2e-rnnt' }), audio: {} }],
+    transcripts: { [ID]: OLD_TRANSCRIPT },
+  });
+  const { page, libraryDir } = launched;
+  for (const file of ['mic.webm', 'system.webm']) await writeFile(join(libraryDir, ID, 'audio', file), 'это не звук');
+  await page.getByRole('button', { name: /Созвон с Ириной/ }).click();
+  await page.getByRole('button', { name: 'Расшифровать заново' }).click();
+  await page.getByRole('dialog', { name: 'Расшифровать заново' }).getByRole('button', { name: 'Расшифровать' }).click();
+
+  await expect(page.getByRole('alert').filter({ hasText: 'Ошибка расшифровки' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByLabel('Текст встречи')).toContainText('Старый текст.');
+
+  for (const file of ['mic.webm', 'system.webm']) await toneWebm(join(libraryDir, ID, 'audio', file), 2);
+  await page.getByRole('button', { name: 'Расшифровать заново' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Расшифровать заново' });
+  await dialog.getByRole('button', { name: '3', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Расшифровать' }).click();
+  await expect(page.getByLabel('Текст встречи')).toContainText('Проверка расшифровки', { timeout: 20_000 });
+  expect(await readMeetingJson(libraryDir, ID)).toMatchObject({ status: 'done', participantsHint: 3 });
 });
 
 test('settings show the transcription model and that nothing is downloaded yet', async () => {

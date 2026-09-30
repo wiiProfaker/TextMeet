@@ -128,8 +128,12 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
   if (meeting.participantsHint !== null) meta.push(participantsText(meeting.participantsHint));
   const hasAudio = meeting.tracks.length > 0;
+  // Текст уже есть (он виден, пока новый не готов) — расшифровка «заново».
+  const hasText = load.kind === 'ready';
   const transcribeError = meeting.status === 'error' && hasAudio;
-  const canTranscribeAgain = hasAudio && ['done', 'queued', 'transcribing'].includes(meeting.status);
+  // После ошибки тоже: так можно указать другое число участников («Повторить» в плашке — с прежним).
+  const canTranscribeAgain =
+    hasAudio && load.kind !== 'loading' && ['done', 'queued', 'transcribing', 'error'].includes(meeting.status);
   const retry = () =>
     window.textmeet
       .transcribe({ meetingId: meeting.id, participantsHint: meeting.participantsHint })
@@ -143,7 +147,7 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
         <div className="acts">
           {canTranscribeAgain && (
             <button type="button" className="btn" onClick={() => setDialog(true)}>
-              Расшифровать заново
+              {hasText ? 'Расшифровать заново' : 'Расшифровать'}
             </button>
           )}
           <OpenFolder id={meeting.id} onError={onError} />
@@ -189,7 +193,7 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
       {dialog && (
         <TranscribeDialog
           meetingId={meeting.id}
-          again={meeting.status !== 'recorded'}
+          again={hasText}
           participantsHint={meeting.participantsHint}
           onClose={() => setDialog(false)}
         />

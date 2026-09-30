@@ -8,8 +8,8 @@ coverage/
 .env.*
 
 # Модели и записи никогда не попадают в репозиторий
-models/
-samples/
+/models/
+/samples/
 *.wav
 *.mp3
 *.m4a

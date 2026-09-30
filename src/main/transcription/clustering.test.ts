@@ -85,10 +85,13 @@ describe('clusterVoiceprints', () => {
     // Как опыт ревью: отпечатки 233 ходов записи на двоих, повторённые 15 раз с небольшим шумом (≈ 3–4 часа).
     // У части ходов отпечаток сильно зашумлён: такие становятся «самыми непохожими» группами, и если считать речью
     // группы все ближайшие к ней ходы, копии этих отпечатков набирают 20 с и превращаются в лишних собеседников.
-    let seed = 23;
+    // mulberry32: простой, но честный генератор — тест одинаков от запуска к запуску (со старым правилом — 8 «собеседников»).
+    let seed = 19;
     const random = (): number => {
-      seed = (seed * 1_103_515_245 + 12_345) % 2 ** 31;
-      return seed / 2 ** 31;
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 2 ** 32;
     };
     const gauss = (): number => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
     const DIM = 64;
@@ -109,7 +112,14 @@ describe('clusterVoiceprints', () => {
     }
     const labels = clusterVoiceprints(prints);
     expect(new Set(labels).size).toBe(2);
-    const agree = labels.filter((label, i) => label === labels[truth.indexOf(truth[i]!)]).length;
+    // Метка голоса — та, что у большинства его ходов; у двух голосов метки разные.
+    const labelOf = (voice: number): number => {
+      const own = labels.filter((_, i) => truth[i] === voice);
+      return own.filter((l) => l === 0).length * 2 > own.length ? 0 : 1;
+    };
+    const voiceLabels = [labelOf(0), labelOf(1)];
+    expect(voiceLabels[0]).not.toBe(voiceLabels[1]);
+    const agree = labels.filter((label, i) => label === voiceLabels[truth[i]!]).length;
     expect(agree / labels.length).toBeGreaterThan(0.95);
   });
 

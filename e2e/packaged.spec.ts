@@ -17,6 +17,9 @@ test.afterEach(async () => {
 
 test('the packaged app records, mixes with its bundled ffmpeg and runs the transcription process', async () => {
   test.skip(!executablePath, 'проверяется только собранная программа (TEXTMEET_PACKAGED_APP)');
+  // Холодный запуск собранной программы, загрузка sherpa-onnx и ffmpeg на машинах CI — дольше обычных 30 с на тест
+  // (иначе тайм-аут теста обрывает опросы ниже раньше их собственных 30 с).
+  test.setTimeout(90_000);
   launched = await launchApp({ executablePath });
   const { page, libraryDir, userDataDir } = launched;
   await waitForRecorder(page);

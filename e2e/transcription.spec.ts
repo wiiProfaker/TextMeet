@@ -12,6 +12,9 @@ import {
   type LaunchedApp,
 } from './helpers';
 
+// Настоящая запись, запуск процесса расшифровки и ожидания до 20 с — больше обычных 30 с на тест.
+test.describe.configure({ timeout: 60_000 });
+
 let launched: LaunchedApp | null = null;
 
 test.afterEach(async () => {

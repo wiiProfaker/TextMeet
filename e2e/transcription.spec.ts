@@ -77,8 +77,10 @@ test('«Расшифровать» on a saved recording asks for participants an
   await expect(page.getByLabel('Спикеры')).toContainText('Спикер 1');
   await expect(page.getByLabel('Текст встречи').locator('.row')).toHaveCount(2);
   expect(await readMeetingJson(libraryDir, ID)).toMatchObject({ status: 'done', participantsHint: 3 });
-  // В списке у готовой встречи пометки нет.
-  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).not.toContainText('расшифров');
+  // В списке у готовой встречи пометки нет: только время и длительность.
+  await expect(page.getByRole('button', { name: /Созвон с Ириной/ }).locator('.meta-line')).toHaveText(
+    /^\d{2}:\d{2} · меньше минуты$/,
+  );
 });
 
 test('a failed transcription shows the reason and «Повторить» tries again', async () => {

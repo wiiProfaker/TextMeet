@@ -585,6 +585,19 @@ describe('TranscriptionQueue', () => {
     expect(t.workers).toHaveLength(1);
   });
 
+  it('on quit while a job is being picked up does not start preparing its models', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    // Задача уже взята и записывает статус «расшифровывается» — программа закрывается.
+    t.queue.dispose();
+    await vi.waitFor(() => expect(t.queue.isBusy()).toBe(false));
+    expect(t.ensured).toEqual([]);
+    expect(t.workers).toHaveLength(0);
+    expect(t.finished).toHaveLength(0);
+  });
+
   it('drops a result that arrives after the meeting was asked again', async () => {
     const lib = makeTempDir();
     const meeting = await recordedMeeting(lib);

@@ -262,6 +262,7 @@ export class TranscriptionQueue {
       rearm: null,
       baseLimitMs: WATCHDOG_MIN_MS,
     };
+    if (current.cancelled) current.abort.abort();
     this.current = current;
     this.report(() => this.deps.libraryChanged());
     this.emitProgress(true);
@@ -319,6 +320,8 @@ export class TranscriptionQueue {
     const { libraryDir, meetingId } = current.job;
     const model = this.modelOf(meeting);
     const { title } = asrModel(model);
+    // Программа закрылась, пока задача записывала статус: скачивание моделей при выходе не начинаем.
+    if (current.cancelled) return null;
     try {
       await this.ensureModels(current, model, title);
       if (current.cancelled) return null;

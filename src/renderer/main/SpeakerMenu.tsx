@@ -26,7 +26,10 @@ export function SpeakerMenu({ options, current, onPick, onClose }: Props) {
   close.current = onClose;
 
   useEffect(() => {
-    menu.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    // Меню у нижнего края текста может выйти за видимое — показать его целиком.
+    menu.current?.scrollIntoView({ block: 'nearest' });
+    const items = menu.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]');
+    (menu.current?.querySelector<HTMLElement>('[aria-checked="true"]') ?? items?.[0])?.focus();
     // Щелчок мимо меню закрывает его; по имени спикера — нет: имя само закрывает меню.
     const onDown = (event: PointerEvent) => {
       if (!menu.current?.parentElement?.contains(event.target as Node)) close.current(false);

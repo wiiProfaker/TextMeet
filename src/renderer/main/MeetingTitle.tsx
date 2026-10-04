@@ -70,7 +70,10 @@ export function MeetingTitle({ meetingId, title, onError }: Props) {
         value={draft}
         maxLength={200}
         onChange={(e) => setDraft(e.currentTarget.value)}
-        onBlur={() => void save()}
+        onBlur={() => {
+          // Ушли в другую программу (Alt+Tab) — поле остаётся открытым, а не сохраняется на полуслове.
+          if (document.hasFocus()) void save();
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
             e.preventDefault();

@@ -253,6 +253,11 @@ describe('deleteAudioText', () => {
     expect(deleteAudioText(null, null)).toBe(`Запись ${tail}`);
     expect(deleteAudioText(120, null)).toBe(`Запись (2 мин) ${tail}`);
   });
+
+  it('does not name the size when there is nothing in the folder', () => {
+    expect(deleteAudioText(120, 0)).toBe(`Запись (2 мин) ${tail}`);
+    expect(deleteAudioText(null, 0)).toBe(`Запись ${tail}`);
+  });
 });
 
 describe('search texts', () => {

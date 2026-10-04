@@ -180,7 +180,8 @@ export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress):
 export function deleteAudioText(durationSec: number | null, bytes: number | null): string {
   const parts: string[] = [];
   if (durationSec !== null && durationSec >= 0) parts.push(formatDurationShort(durationSec));
-  if (bytes !== null) parts.push(bytes < 1024 * 1024 ? 'меньше 1 МБ' : formatBytes(bytes));
+  // 0 — папки с записью нет или она пуста: размер не называем.
+  if (bytes !== null && bytes > 0) parts.push(bytes < 1024 * 1024 ? 'меньше 1 МБ' : formatBytes(bytes));
   const what = parts.length > 0 ? `Запись (${parts.join(', ')})` : 'Запись';
   return `${what} переместится в Корзину. Текст встречи останется, но слушать запись и расшифровывать её заново будет нельзя.`;
 }

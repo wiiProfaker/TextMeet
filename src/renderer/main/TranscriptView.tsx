@@ -166,6 +166,9 @@ export function TranscriptView({
 }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const lastManualScroll = useRef(0);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  /** Реплику только что удалили правкой: фокус, упавший вместе с ней, переходит на «Вернуть». */
+  const focusUndo = useRef(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   /** Удалённые реплики, которые ещё можно вернуть; последняя удалённая — в конце. */
   const [removed, setRemoved] = useState<readonly TranscriptSegment[]>([]);
@@ -209,6 +212,14 @@ export function TranscriptView({
     return () => clearTimeout(timer);
   }, [removed, undoError]);
 
+  useEffect(() => {
+    if (!focusUndo.current) return;
+    focusUndo.current = false;
+    // Фокус ушёл в другое место (человек щёлкнул в другую реплику) — его не отбираем.
+    const active = document.activeElement;
+    if (!active || active === document.body) undoButton.current?.focus();
+  }, [removed]);
+
   // Правка стала невозможна (началась расшифровка заново) — поле правки и меню закрываются.
   useEffect(() => {
     if (onEdit) return;
@@ -235,6 +246,7 @@ export function TranscriptView({
       await onEdit({ kind: 'text', segmentId: segment.id, text });
       if (text.trim() === '') {
         setUndoError(null);
+        focusUndo.current = true;
         setRemoved((list) => [...list, segment]);
       }
     },
@@ -286,7 +298,12 @@ export function TranscriptView({
         onWheel={manualScroll}
         onTouchMove={manualScroll}
         onKeyDown={(e) => {
-          if (SCROLL_KEYS.has(e.key)) manualScroll();
+          if (!SCROLL_KEYS.has(e.key)) return;
+          const target = e.target as HTMLElement;
+          // В поле клавиши двигают курсор, а Пробел на кнопке нажимает её — это не листание текста.
+          if (target.closest('input, textarea')) return;
+          if (e.key === ' ' && target.closest('button, [role="button"]')) return;
+          manualScroll();
         }}
         onPointerDown={(e) => {
           // Полоса прокрутки — щелчок по самой области текста.
@@ -312,15 +329,18 @@ export function TranscriptView({
             onError={onError}
           />
         ))}
-        {lastRemoved && (
-          <div className="undo" role="status">
-            Реплика {formatTimestamp(lastRemoved.start)} удалена
-            <button type="button" className="lnk" onClick={() => void restore()}>
-              Вернуть
-            </button>
-            {undoError && <span className="undo-err">{undoError}</span>}
-          </div>
-        )}
+        {/* Всегда на месте и пустая, пока нечего возвращать: читалка объявляет текст, когда он появился. */}
+        <div className="undo-live" role="status">
+          {lastRemoved && (
+            <div className="undo">
+              Реплика {formatTimestamp(lastRemoved.start)} удалена
+              <button ref={undoButton} type="button" className="lnk" onClick={() => void restore()}>
+                Вернуть
+              </button>
+              {undoError && <span className="undo-err">{undoError}</span>}
+            </div>
+          )}
+        </div>
       </div>
     </>
   );

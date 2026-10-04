@@ -932,6 +932,10 @@ kbd.k {
   gap: 14px;
 }
 
+.dlg:focus {
+  outline: none;
+}
+
 .dlg h2 {
   margin: 0;
   font-family: var(--f-text);
@@ -1365,11 +1369,14 @@ button.chip:hover {
   margin-top: 6px;
 }
 
-/* «Реплика удалена · Вернуть» — внизу текста, пока её можно вернуть. */
-.undo {
+/* «Реплика удалена · Вернуть» — внизу текста, пока её можно вернуть. Обёртка есть всегда: читалка объявляет появившийся текст. */
+.undo-live {
   position: sticky;
   bottom: 0;
   align-self: flex-start;
+}
+
+.undo {
   display: flex;
   align-items: center;
   gap: 14px;

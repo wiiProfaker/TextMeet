@@ -152,6 +152,8 @@ test('two deleted segments are brought back one by one, the latest first', async
   await field.fill('');
   await field.press('Enter');
   await expect(undo).toContainText('Реплика 0:04 удалена');
+  // После удаления фокус — на «Вернуть»: в конце длинного текста его иначе не найти.
+  await expect(page.getByRole('button', { name: 'Вернуть' })).toBeFocused();
 
   await text.getByRole('button', { name: 'С подрядчиками или без?' }).click();
   await field.fill('');
@@ -205,6 +207,8 @@ test('a speaker is renamed in the whole meeting, and the same name merges two sp
   await speakers.getByRole('textbox', { name: 'Имя спикера' }).fill('Ирина');
   await speakers.getByRole('textbox', { name: 'Имя спикера' }).press('Enter');
   await expect(speakers.getByRole('button', { name: 'Ирина' })).toBeVisible();
+  // Поле имени заменилось чипом — фокус на нём, а не на <body>.
+  await expect(speakers.getByRole('button', { name: 'Ирина' })).toBeFocused();
   await expect(text.locator('.row').first()).toContainText('Ирина');
   await expect.poll(async () => (await pollMeetingJson(libraryDir, ID))?.speakerNames).toEqual({ s1: 'Ирина' });
 
@@ -214,6 +218,8 @@ test('a speaker is renamed in the whole meeting, and the same name merges two sp
   const dialog = page.getByRole('dialog', { name: 'Объединить «Спикер 2» и «Ирина»?' });
   await dialog.getByRole('button', { name: 'Объединить' }).click();
   await expect(dialog).toBeHidden();
+  // «Спикер 2» объединили с «Ириной» — фокус на её чипе.
+  await expect(speakers.getByRole('button', { name: 'Ирина' })).toBeFocused();
   await expect(speakers.getByRole('listitem')).toHaveText(['Я', 'Ирина']);
   await expect(text.locator('.row').nth(2)).toContainText('Ирина');
   await expect
@@ -397,4 +403,14 @@ test('search results follow a text edit and a deleted segment', async () => {
   await text.getByRole('textbox', { name: 'Текст реплики' }).press('Enter');
   await expect(text.locator('.row')).toHaveCount(2);
   await expect(found.getByRole('status')).toHaveText('Ничего не найдено');
+});
+
+test('the clear button empties the search and keeps the focus in the field', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page } = launched;
+  const box = page.getByRole('searchbox', { name: 'Поиск по всем встречам' });
+  await box.fill('бюджет');
+  await page.getByRole('button', { name: 'Очистить поиск' }).click();
+  await expect(box).toHaveValue('');
+  await expect(box).toBeFocused();
 });

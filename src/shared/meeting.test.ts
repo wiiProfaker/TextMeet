@@ -15,6 +15,7 @@ const valid: Meeting = {
   speakerNames: {},
   tracks: [],
   recovered: false,
+  audioDeleted: false,
 };
 
 describe('MEETING_ID_PATTERN', () => {
@@ -35,8 +36,8 @@ describe('MeetingSchema', () => {
     expect(MeetingSchema.parse(valid)).toEqual(valid);
   });
 
-  it('reads a meeting written by the previous version (no tracks, no recovered flag)', () => {
-    const { tracks: _tracks, recovered: _recovered, ...old } = valid;
+  it('reads a meeting written by the previous version (no tracks, no recovered and audioDeleted flags)', () => {
+    const { tracks: _tracks, recovered: _recovered, audioDeleted: _audioDeleted, ...old } = valid;
     expect(MeetingSchema.parse(old)).toEqual(valid);
   });
 
@@ -71,6 +72,7 @@ describe('MeetingSchema', () => {
     ['track file with a path', { tracks: [{ kind: 'mic', file: '../mic.webm', startOffsetMs: 0 }] }],
     ['negative track offset', { tracks: [{ kind: 'mic', file: 'mic.webm', startOffsetMs: -5 }] }],
     ['recovered not a boolean', { recovered: 'yes' }],
+    ['audioDeleted not a boolean', { audioDeleted: 1 }],
   ])('rejects %s', (_name, patch) => {
     expect(MeetingSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
   });

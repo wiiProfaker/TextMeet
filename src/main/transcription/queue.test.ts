@@ -167,6 +167,19 @@ afterEach(() => {
 });
 
 describe('TranscriptionQueue', () => {
+  it('forgets the names of other speakers after a new transcription and keeps the owner name', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib, { status: 'done', speakerNames: { me: 'Кирилл', s1: 'Ирина' } });
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    // Пока новая расшифровка идёт, имена прежнего текста ещё видны.
+    expect((await readMeeting(lib, meeting.id)).speakerNames).toEqual({ me: 'Кирилл', s1: 'Ирина' });
+    const command = await transcribeSent(t.worker);
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect((await readMeeting(lib, meeting.id)).speakerNames).toEqual({ me: 'Кирилл' });
+  });
+
   it('transcribes a meeting: queued → transcribing → transcript.json and «done»', async () => {
     const lib = makeTempDir();
     const meeting = await recordedMeeting(lib);

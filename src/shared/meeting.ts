@@ -36,6 +36,8 @@ export const MeetingSchema = z.looseObject({
   tracks: z.array(TrackSchema).default([]),
   /** Запись прервалась (сбой программы или окна записи) и была восстановлена. */
   recovered: z.boolean().default(false),
+  /** Аудио удалили (в Корзину), текст остался. Дорожек у такой встречи нет. */
+  audioDeleted: z.boolean().default(false),
 });
 
 export type Meeting = z.infer<typeof MeetingSchema>;

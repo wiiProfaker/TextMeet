@@ -2,6 +2,7 @@
 // прогресс, сторож зависания, отмена, продолжение после запуска. Electron сюда не подключается — процесс внедряется.
 import { asrModel, DEFAULT_ASR_MODEL, isAsrModelId, type AsrModelId } from '../../shared/asr-models';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
+import { ME } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { updateMeeting } from '../library/library';
 import { writeTranscript } from '../library/transcript-store';
@@ -13,6 +14,10 @@ import { buildPipelineInput } from './job-input';
 import type { PipelineInput, PipelineResult } from './pipeline';
 import { interpolateDiarize, type DiarizeClock } from './progress';
 import { WorkerToMainSchema, type MainToWorker, type TranscribeCommand } from './protocol';
+
+/** Из имён спикеров остаётся только имя владельца. */
+const ownNameOnly = (names: Readonly<Record<string, string>>): Record<string, string> =>
+  names[ME] === undefined ? {} : { [ME]: names[ME] };
 
 /** Процесс расшифровки глазами очереди (в программе — utilityProcess, в тестах — подделка). */
 export interface WorkerHandle {
@@ -349,7 +354,11 @@ export class TranscriptionQueue {
         segments: outcome.result.segments.map((s) => ({ ...s, edited: false })),
       });
       const done = await updateMeeting(libraryDir, meetingId, (m) =>
-        m.status === 'transcribing' ? { ...m, status: 'done', model, errorMessage: null } : m,
+        // «Спикер 1» новой расшифровки — не обязательно тот же человек: имена собеседников сбрасываются, имя «Я» —
+        // это всегда владелец — остаётся.
+        m.status === 'transcribing'
+          ? { ...m, status: 'done', model, errorMessage: null, speakerNames: ownNameOnly(m.speakerNames) }
+          : m,
       );
       if (done.status !== 'done') {
         // Встречу поставили заново, пока результат сохранялся: её расшифруют ещё раз — сообщать о готовности рано.

@@ -31,6 +31,7 @@ const meeting = (id: string, createdAt: Date, patch: Partial<Meeting> = {}): Mee
   speakerNames: {},
   tracks: [],
   recovered: false,
+  audioDeleted: false,
   ...patch,
 });
 

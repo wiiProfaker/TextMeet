@@ -176,6 +176,33 @@ test('an edit made to a text that was replaced on disk is refused and the new te
     .toMatchObject({ text: 'Уже к новому', edited: true });
 });
 
+test('a click on the title of a found meeting that is already open shows it from the top', async () => {
+  const many = {
+    ...TRANSCRIPT,
+    speakers: [{ id: 'me', kind: 'me' }],
+    segments: Array.from({ length: 80 }, (_, i) => ({
+      id: `seg-${i + 1}`,
+      start: i * 2,
+      end: i * 2 + 1.5,
+      speakerId: 'me',
+      text: i === 79 ? 'Последнее слово — финал.' : `Реплика номер ${i + 1}.`,
+      edited: false,
+    })),
+  };
+  launched = await launchApp({ meetings: [doneMeeting({ durationSec: 160 })], transcripts: { [ID]: many } });
+  const { page } = launched;
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  await page.getByRole('searchbox', { name: 'Поиск по всем встречам' }).fill('финал');
+  const found = page.getByRole('navigation', { name: 'Найдено' });
+  await found.getByRole('button', { name: /Последнее слово/ }).click();
+  const scrollTop = () => text.evaluate((el) => el.scrollTop);
+  await expect.poll(scrollTop).toBeGreaterThan(100);
+
+  await found.getByRole('button', { name: /Созвон с Ириной/ }).click();
+  await expect.poll(scrollTop).toBe(0);
+});
+
 test('two deleted segments are brought back one by one, the latest first', async () => {
   launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
   const { page, libraryDir } = launched;

@@ -148,7 +148,7 @@ export function App() {
               selected={focus ? { meetingId: focus.meetingId, segmentId: focus.segmentId } : null}
               onOpen={(id, segmentId) => {
                 setSelection({ kind: 'meeting', id });
-                setFocus((prev) => (segmentId ? { meetingId: id, segmentId, nonce: (prev?.nonce ?? 0) + 1 } : null));
+                setFocus((prev) => ({ meetingId: id, segmentId, nonce: (prev?.nonce ?? 0) + 1 }));
               }}
             />
           ) : (

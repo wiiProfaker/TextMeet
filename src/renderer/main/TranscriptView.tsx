@@ -23,8 +23,8 @@ interface Props {
   onEdit: ((edit: TranscriptEdit) => Promise<void>) | null;
   /** Слова поиска — подсвечены в репликах. */
   searchWords: readonly string[];
-  /** Реплика, к которой перешли из найденного: прокрутить к ней и обвести. */
-  focus: { segmentId: string; nonce: number } | null;
+  /** Куда перешли из найденного: к реплике (прокрутить и обвести) или по названию встречи (в начало текста). */
+  focus: { segmentId: string | null; nonce: number } | null;
   /** Переименовать спикера во всей встрече; null — сейчас нельзя. */
   onRenameSpeaker: ((speakerId: SpeakerId, name: string | null) => Promise<void>) | null;
   onError(message: string): void;
@@ -184,11 +184,17 @@ export function TranscriptView({
   const foundId = focus?.segmentId ?? null;
 
   // Перешли из найденного — показать реплику посередине. Реплики выше раскладываются только при прокрутке
-  // (content-visibility) и сдвигают её — поэтому ещё раз в следующем кадре.
+  // (content-visibility) и сдвигают её — поэтому ещё раз в следующем кадре. По названию — в начало текста.
   useEffect(() => {
     if (!focus) return;
+    const segmentId = focus.segmentId;
+    if (segmentId === null) {
+      box.current?.scrollTo({ top: 0 });
+      lastManualScroll.current = Date.now();
+      return;
+    }
     const show = () => {
-      const row = box.current?.querySelector(`[data-segment="${CSS.escape(focus.segmentId)}"]`);
+      const row = box.current?.querySelector(`[data-segment="${CSS.escape(segmentId)}"]`);
       row?.scrollIntoView({ block: 'center' });
     };
     show();

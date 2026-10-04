@@ -395,8 +395,11 @@ export function useSearch(query: string, refreshKey: number): SearchState {
 export interface SearchView {
   /** Слова запроса; пусто — поиска нет. */
   words: readonly string[];
-  /** nonce — каждый переход новый: повторный щелчок по той же реплике снова к ней прокручивает. */
-  focus: { meetingId: string; segmentId: string; nonce: number } | null;
+  /**
+   * nonce — каждый переход новый: повторный щелчок по той же реплике снова к ней прокручивает. segmentId null — перешли
+   * по названию встречи: она открывается сверху (в том числе уже открытая).
+   */
+  focus: { meetingId: string; segmentId: string | null; nonce: number } | null;
   /** Текст встречи правили — повторить поиск. */
   refresh(): void;
 }

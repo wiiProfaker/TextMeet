@@ -3,7 +3,6 @@ import { formatBytes, formatDurationShort } from '../shared/format';
 import type { MediaFailure, StartProblem, SystemSettingsKind } from '../shared/recording';
 import { knownFsReason } from './fs/fs-errors';
 import { DownloadError } from './models/download';
-import { TOTAL_MODELS_SIZE } from './models/registry';
 import { WORKER_REFUSALS } from './transcription/protocol';
 
 const RECORDER_BROKEN_TEXT = 'Окно записи несколько раз закрылось из-за сбоя. Перезапустите TextMeet.';
@@ -117,14 +116,17 @@ export const transcriptionTexts = {
       case 'corrupt':
         return 'Скачанный файл модели повреждён — при повторе он скачается заново.';
       case 'space':
+        if (err.neededBytes === undefined) return 'Не хватает места на диске для модели расшифровки.';
         // В мегабайтах с округлением вверх: «0,3 ГБ» преуменьшало бы нужное место.
-        return `Не хватает места на диске для модели расшифровки: нужно ${Math.ceil((err.neededBytes ?? TOTAL_MODELS_SIZE) / 1024 ** 2)} МБ свободного места.`;
+        return `Не хватает места на диске для модели расшифровки: нужно ${Math.ceil(err.neededBytes / 1024 ** 2)} МБ свободного места.`;
       case 'disk':
         return MODELS_DISK_TEXT;
       case 'cancelled':
         return 'Скачивание модели отменено.';
     }
   },
+  /** Файлы модели целы (суммы сошлись), но движок их не принял — подробности в журнале. */
+  modelLoad: (title: string): string => `Не удалось загрузить модель «${title}». ${SEE_LOG}`,
   /** Сбой процесса расшифровки (его текст — для журнала: вывод sherpa-onnx и ffmpeg, пути к файлам) → текст для человека. */
   workerFailed(raw: string): string {
     if ((Object.values(WORKER_REFUSALS) as string[]).includes(raw)) return raw;

@@ -1,12 +1,13 @@
 // Очередь расшифровки в main (спецификация Плана 3, §5): одна встреча за раз, процесс расшифровки,
 // прогресс, сторож зависания, отмена, продолжение после запуска. Electron сюда не подключается — процесс внедряется.
+import { asrModel, DEFAULT_ASR_MODEL } from '../../shared/asr-models';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { updateMeeting } from '../library/library';
 import { writeTranscript } from '../library/transcript-store';
 import type { Logger } from '../logger';
-import type { DownloadProgress } from '../models/model-manager';
-import { ASR_MODEL_ID } from '../models/registry';
+import type { EnsureOptions } from '../models/model-manager';
+import type { ModelGroupId } from '../models/registry';
 import { transcriptionTexts } from '../texts';
 import { buildPipelineInput } from './job-input';
 import type { PipelineInput, PipelineResult } from './pipeline';
@@ -23,7 +24,7 @@ export interface WorkerHandle {
 
 export interface TranscriptionQueueDeps {
   spawn(): WorkerHandle;
-  models: { root: string; ensure(onProgress: (progress: DownloadProgress) => void): Promise<void> };
+  models: { root: string; ensure(groups: readonly ModelGroupId[], options: EnsureOptions): Promise<void> };
   ffmpegPath(): string;
   /** Сколько потоков можно занять сейчас (во время записи — меньше, §5.3). */
   threads(): number;
@@ -270,8 +271,11 @@ export class TranscriptionQueue {
   private async transcribe(current: Current, meeting: Meeting): Promise<{ meeting: Meeting; ok: boolean } | null> {
     const { libraryDir, meetingId } = current.job;
     try {
+      const { title } = asrModel(DEFAULT_ASR_MODEL);
       await this.deps.models
-        .ensure((download) => this.setProgress(current, { stage: 'download', fraction: 0, download }))
+        .ensure([DEFAULT_ASR_MODEL, 'voices'], {
+          onProgress: (download) => this.setProgress(current, { stage: 'download', fraction: 0, download: { ...download, title } }),
+        })
         .catch((err: unknown) => {
           throw new ShownError(transcriptionTexts.download(err), { cause: err });
         });
@@ -288,13 +292,13 @@ export class TranscriptionQueue {
       }
       await writeTranscript(libraryDir, meetingId, {
         schemaVersion: 1,
-        model: ASR_MODEL_ID,
+        model: DEFAULT_ASR_MODEL,
         createdAt: new Date(this.deps.now()).toISOString(),
         speakers: outcome.result.speakers,
         segments: outcome.result.segments.map((s) => ({ ...s, edited: false })),
       });
       const done = await updateMeeting(libraryDir, meetingId, (m) =>
-        m.status === 'transcribing' ? { ...m, status: 'done', model: ASR_MODEL_ID, errorMessage: null } : m,
+        m.status === 'transcribing' ? { ...m, status: 'done', model: DEFAULT_ASR_MODEL, errorMessage: null } : m,
       );
       if (done.status !== 'done') {
         // Встречу поставили заново, пока результат сохранялся: её расшифруют ещё раз — сообщать о готовности рано.

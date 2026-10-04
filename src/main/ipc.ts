@@ -18,13 +18,17 @@ import {
   type RecorderMessageChannel,
   type SettingsState,
 } from '../shared/ipc';
+import { DEFAULT_ASR_MODEL } from '../shared/asr-models';
 import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
-import type { ModelGroupState, ModelsState, TranscriptionProgress } from '../shared/transcription';
+import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import { listMeetings, meetingDir } from './library/library';
 import { readTranscript } from './library/transcript-store';
 import type { Logger } from './logger';
+import type { ModelStore } from './models/model-manager';
+import { buildModelsState } from './models/models-state';
+import { MODEL_GROUP_IDS } from './models/registry';
 import type { RecordingController } from './recording/controller';
 import type { SettingsStore } from './settings/settings-store';
 import { systemSettingsUrl } from './texts';
@@ -52,10 +56,7 @@ export interface IpcDeps {
     isBusy(): boolean;
     stopIdleWorker(): void;
   };
-  models: {
-    state(): Promise<ModelGroupState[]>;
-    remove(group: 'gigaam' | 'voices'): Promise<void>;
-  };
+  models: Pick<ModelStore, 'state' | 'remove'>;
 }
 
 const StopDialogAnswerSchema = z.object({
@@ -271,15 +272,18 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.getTranscriptionProgress, () => deps.transcription.progress());
 
-  const modelsState = async (): Promise<ModelsState> => ({
-    groups: await deps.models.state(),
-    busy: deps.transcription.isBusy(),
-  });
+  const modelsState = async (): Promise<ModelsState> =>
+    buildModelsState(
+      await deps.models.state(),
+      deps.settings.get().asrModel,
+      { download: null, downloadError: null },
+      deps.transcription.isBusy(),
+    );
 
   handle(IPC.getModels, () => modelsState());
 
   handle(IPC.deleteModels, async (arg) => {
-    const group = z.enum(['gigaam', 'voices']).parse(arg);
+    const group = z.enum(MODEL_GROUP_IDS).parse(arg);
     if (deps.transcription.isBusy()) throw new Error(MODELS_BUSY);
     deps.transcription.stopIdleWorker();
     try {
@@ -287,6 +291,8 @@ export function registerIpc(deps: IpcDeps): void {
     } catch (err) {
       throw humanFsError('Не удалось удалить модели', err);
     }
+    // Удалили выбранную модель — новые встречи пойдут на модель по умолчанию (она скачается при расшифровке).
+    if (group === deps.settings.get().asrModel) await deps.settings.update({ asrModel: DEFAULT_ASR_MODEL });
     return modelsState();
   });
 

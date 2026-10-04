@@ -38,7 +38,7 @@ export function TranscribeDialog({ meetingId, again, replacesText, participantsH
     }
     setSaving(true);
     try {
-      await window.textmeet.transcribe({ meetingId, participantsHint: n });
+      await window.textmeet.transcribe({ meetingId, participantsHint: n, model: null });
       onClose();
     } catch (err) {
       setError(errorText(err));

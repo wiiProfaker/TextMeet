@@ -27,7 +27,8 @@ import { registerIpc } from './ipc';
 import { listMeetings } from './library/library';
 import { createLogger, type Logger } from './logger';
 import { MEDIA_SCHEME, serveMedia } from './media-protocol';
-import { ModelManager } from './models/model-manager';
+import { FakeModelStore } from './models/fake-model-store';
+import { ModelManager, type ModelStore } from './models/model-manager';
 import { modelsRoot } from './models/models-dir';
 import { createNotifier, type Notify } from './notifications';
 import { DEV_FOLDER_NAME, LIBRARY_FOLDER_NAME, resolveLibraryDir } from './paths';
@@ -59,8 +60,10 @@ const logFile = (): string => join(app.getPath('userData'), 'logs', 'textmeet.lo
 // Разрешение на микрофон по-прежнему решает обработчик программы (permissions.ts).
 const testMedia = testMediaMode();
 if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
-// Только для автотестов: поддельные движки расшифровки (worker.ts) — без моделей и их скачивания.
+// Только для автотестов: поддельные движки расшифровки (worker.ts) и поддельное хранилище моделей — без моделей и
+// их скачивания; TEXTMEET_TEST_DOWNLOAD_MS — сколько длится шаг «скачивания» из каталога (по умолчанию мгновенно).
 const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
+const fakeDownloadStepMs = Number(process.env.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
 /** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
 const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
 
@@ -306,19 +309,18 @@ async function start(logger: Logger): Promise<void> {
     onSettled: () => sendToMain(IPC.libraryChanged),
   });
 
-  const modelManager = new ModelManager({
-    root: modelsRoot({
-      platform: process.platform,
-      homeDir: app.getPath('home'),
-      localAppData: process.env.LOCALAPPDATA,
-      override: process.env.TEXTMEET_MODELS_DIR,
-    }),
-    logger,
-    freeBytes: freeDiskBytes,
+  const modelsDir = modelsRoot({
+    platform: process.platform,
+    homeDir: app.getPath('home'),
+    localAppData: process.env.LOCALAPPDATA,
+    override: process.env.TEXTMEET_MODELS_DIR,
   });
+  const models: ModelStore = fakeAsr
+    ? new FakeModelStore(modelsDir, fakeDownloadStepMs)
+    : new ModelManager({ root: modelsDir, logger, freeBytes: freeDiskBytes });
   const queue = new TranscriptionQueue({
     spawn: () => spawnTranscriptionWorker(logger),
-    models: fakeAsr ? { root: modelManager.root, ensure: async () => undefined } : modelManager,
+    models,
     ffmpegPath: () => resolveFfmpegPath(),
     // Запись начинается и кончается по ходу расшифровки: число потоков спрашивается каждый раз.
     threads: () => (controller.getState().phase === 'idle' ? FULL_THREADS : RECORDING_THREADS),
@@ -418,7 +420,7 @@ async function start(logger: Logger): Promise<void> {
     },
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
     transcription: queue,
-    models: modelManager,
+    models,
   });
 
   app.on('before-quit', (event) => {

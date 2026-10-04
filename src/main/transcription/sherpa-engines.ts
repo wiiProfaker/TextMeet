@@ -1,6 +1,6 @@
 // Настоящие движки на sherpa-onnx (проверяются интеграционными тестами на реальных моделях).
 import * as sherpa from 'sherpa-onnx-node';
-import type { ModelPaths } from '../models/registry';
+import { asrFilePath, voicePaths, type VoicePaths } from '../models/registry';
 import { SAMPLE_RATE } from './decode';
 import { latestByThreads, type Diarizer, type Engines, type Recognizer, type SpeechDetector, type VoiceprintExtractor } from './engines';
 import type { Interval } from './turns';
@@ -13,7 +13,7 @@ const VAD_BUFFER_SEC = 60;
 
 export const sherpaVersion = (): string => `sherpa-onnx ${sherpa.version}`;
 
-function detector(paths: ModelPaths): SpeechDetector {
+function detector(paths: VoicePaths): SpeechDetector {
   return {
     detect(samples: Float32Array): Interval[] {
       const vad = new sherpa.Vad(
@@ -55,12 +55,17 @@ function detector(paths: ModelPaths): SpeechDetector {
   };
 }
 
-function recognizer(paths: ModelPaths, threads: number): Recognizer {
+function recognizer(root: string, threads: number): Recognizer {
+  const file = (name: string): string => asrFilePath(root, 'gigaam-v3-e2e-rnnt', name);
   const native = new sherpa.OfflineRecognizer({
     featConfig: { sampleRate: SAMPLE_RATE, featureDim: 64 },
     modelConfig: {
-      transducer: { encoder: paths.encoder, decoder: paths.decoder, joiner: paths.joiner },
-      tokens: paths.tokens,
+      transducer: {
+        encoder: file('gigaam_v3_e2e_rnnt_encoder_int8.onnx'),
+        decoder: file('gigaam_v3_e2e_rnnt_decoder.onnx'),
+        joiner: file('gigaam_v3_e2e_rnnt_joint.onnx'),
+      },
+      tokens: file('gigaam_v3_e2e_rnnt_tokens.txt'),
       modelType: 'nemo_transducer',
       numThreads: threads,
       provider: 'cpu',
@@ -78,7 +83,7 @@ function recognizer(paths: ModelPaths, threads: number): Recognizer {
 }
 
 /** Модели разделения загружаются при первом разделении: встречам без «других» они не нужны. */
-function diarizer(paths: ModelPaths, threads: number): Diarizer {
+function diarizer(paths: VoicePaths, threads: number): Diarizer {
   let native: sherpa.OfflineSpeakerDiarization | null = null;
   return {
     diarize(samples: Float32Array, speakers: number) {
@@ -96,7 +101,7 @@ function diarizer(paths: ModelPaths, threads: number): Diarizer {
   };
 }
 
-function voiceprints(paths: ModelPaths, threads: number): VoiceprintExtractor {
+function voiceprints(paths: VoicePaths, threads: number): VoiceprintExtractor {
   const native = new sherpa.SpeakerEmbeddingExtractor({ model: paths.embedding, numThreads: threads, provider: 'cpu', debug: 0 });
   return {
     extract(samples: Float32Array): Float32Array | null {
@@ -112,10 +117,11 @@ function voiceprints(paths: ModelPaths, threads: number): VoiceprintExtractor {
  * Движки sherpa-onnx. Распознаватель, разделение по голосам и отпечатки живут, пока жив этот объект, и переиспользуются
  * встречами (загрузка GigaAM — секунды); каждого вида — одна копия, для последнего числа потоков (latestByThreads).
  */
-export function sherpaEngines(paths: ModelPaths): Engines {
+export function sherpaEngines(root: string): Engines {
+  const paths = voicePaths(root);
   return {
     detector: () => detector(paths),
-    recognizer: latestByThreads((threads) => recognizer(paths, threads)),
+    recognizer: latestByThreads((threads) => recognizer(root, threads)),
     diarizer: latestByThreads((threads) => diarizer(paths, threads)),
     voiceprints: latestByThreads((threads) => voiceprints(paths, threads)),
   };

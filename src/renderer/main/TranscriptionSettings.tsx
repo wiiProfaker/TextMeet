@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { asrModel, DEFAULT_ASR_MODEL } from '../../shared/asr-models';
 import { formatBytes } from '../../shared/format';
 import type { ModelGroupId, ModelsState } from '../../shared/transcription';
 import { errorText } from './errors';
@@ -50,8 +51,16 @@ export function TranscriptionSettings() {
     }
   };
 
-  const gigaam = models?.groups.find((g) => g.id === 'gigaam');
-  const installed = models?.groups.filter((g) => g.installed) ?? [];
+  const gigaam = models?.models.find((m) => m.id === DEFAULT_ASR_MODEL);
+  // Скачанные модели расшифровки и общие модели голосов — одним списком, как в Плане 3.
+  const installed: { id: ModelGroupId; title: string; sizeBytes: number }[] = models
+    ? [
+        ...models.models.filter((m) => m.installed).map((m) => ({ id: m.id, title: asrModel(m.id).title, sizeBytes: m.sizeBytes })),
+        ...(models.voices.installed
+          ? [{ id: 'voices' as const, title: 'Разделение по голосам и поиск речи', sizeBytes: models.voices.sizeBytes }]
+          : []),
+      ]
+    : [];
   return (
     <section className="sec">
       <h2>Расшифровка</h2>

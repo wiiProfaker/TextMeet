@@ -86,6 +86,8 @@ function setup(
   } = {},
 ) {
   const workers: FakeWorker[] = [];
+  /** Какие группы моделей просила каждая задача. */
+  const ensured: string[][] = [];
   const finished: { meeting: Meeting; ok: boolean }[] = [];
   const progress: TranscriptionProgress[][] = [];
   let now = 1_000;
@@ -97,7 +99,13 @@ function setup(
       workers.push(worker);
       return worker;
     },
-    models: { root: 'M', ensure: overrides.ensure ?? (async () => undefined) },
+    models: {
+      root: 'M',
+      ensure: (groups, options) => {
+        ensured.push([...groups]);
+        return (overrides.ensure ?? (async () => undefined))(options.onProgress ?? (() => undefined));
+      },
+    },
     ffmpegPath: overrides.ffmpegPath ?? (() => 'ffmpeg'),
     threads: () => threads,
     now: () => now,
@@ -117,6 +125,7 @@ function setup(
   return {
     queue,
     workers,
+    ensured,
     finished,
     progress,
     worker: () => workers.at(-1)!,
@@ -165,6 +174,7 @@ describe('TranscriptionQueue', () => {
     await t.queue.enqueue(lib, meeting.id);
     const command = await transcribeSent(t.worker);
     expect(command).toMatchObject({ modelsDir: 'M', ffmpegPath: 'ffmpeg', threads: 7 });
+    expect(t.ensured).toEqual([['gigaam-v3-e2e-rnnt', 'voices']]);
     expect(command.input).toEqual({
       tracks: [
         { kind: 'mic', file: join(audioDir(lib, meeting.id), 'mic.webm'), offsetSec: 0 },
@@ -322,7 +332,7 @@ describe('TranscriptionQueue', () => {
       meetingId: meeting.id,
       stage: 'download',
       fraction: 0,
-      download: { done: 100, total: 400 },
+      download: { done: 100, total: 400, title: 'GigaAM v3' },
     });
     expect((await readMeeting(lib, meeting.id)).errorMessage).toContain('нет связи');
     expect(t.workers).toHaveLength(0);

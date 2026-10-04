@@ -139,9 +139,13 @@ describe('transcription texts', () => {
   it('explains why models could not be prepared', () => {
     expect(transcriptionTexts.download(new DownloadError('network', 'x'))).toContain('нет связи');
     expect(transcriptionTexts.download(new DownloadError('corrupt', 'x'))).toContain('повреждён');
-    expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toMatch(/нужно \d+ МБ/);
+    expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toBe('Не хватает места на диске для модели расшифровки.');
     expect(transcriptionTexts.download(new DownloadError('disk', 'x'))).toContain('на диск');
     expect(transcriptionTexts.download(new DownloadError('cancelled', 'x'))).toBe('Скачивание модели отменено.');
+  });
+
+  it('names the model that could not be loaded', () => {
+    expect(transcriptionTexts.modelLoad('Parakeet v3')).toMatch(/^Не удалось загрузить модель «Parakeet v3»\. /);
   });
 
   it('asks for the space the download needs, not for the size of all models', () => {

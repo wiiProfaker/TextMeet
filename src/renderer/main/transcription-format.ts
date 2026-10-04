@@ -1,5 +1,5 @@
 // Тексты и форматы расшифровки для окна (чистые функции — проверяются модульными тестами).
-import { formatBytes } from '../../shared/format';
+import { formatDownloaded } from '../../shared/format';
 import type { MeetingStatus } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 
@@ -24,9 +24,10 @@ export function stageText(progress: TranscriptionProgress): string {
     case 'queued':
       return 'В очереди на расшифровку';
     case 'download':
-      return progress.download
-        ? `Скачиваем модель расшифровки — ${formatBytes(progress.download.done)} из ${formatBytes(progress.download.total)}`
-        : 'Скачиваем модель расшифровки';
+      if (!progress.download) return 'Скачиваем модель расшифровки';
+      // Байтов нет — модель проверяется по суммам или ждёт, пока скачается другая.
+      if (progress.download.total === 0) return `Готовим модель ${progress.download.title}`;
+      return `Скачиваем модель ${progress.download.title} — ${formatDownloaded(progress.download.done, progress.download.total)}`;
     case 'prepare':
       return 'Готовим звук';
     case 'me':

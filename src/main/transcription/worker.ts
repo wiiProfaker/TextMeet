@@ -1,6 +1,5 @@
 // Процесс расшифровки (Electron utilityProcess): тяжёлый нативный код отдельно от окон и записи (спецификация §5.2).
 // Одна задача за раз; main присылает команды, процесс — прогресс и результат. Падение процесса ловит main.
-import { modelPaths } from '../models/registry';
 import { decodeToMono16k } from './decode';
 import { enginesByModelsDir } from './engines';
 import { fakeEngines } from './fake-engines';
@@ -16,7 +15,7 @@ const fake = process.env.TEXTMEET_TEST_ASR === 'fake';
 let threads = 1;
 let busy = false;
 /** Загруженные модели остаются в процессе между встречами (он закрывается сам после простоя). */
-const enginesFor = enginesByModelsDir((modelsDir) => (fake ? fakeEngines() : sherpaEngines(modelPaths(modelsDir))));
+const enginesFor = enginesByModelsDir((modelsDir) => (fake ? fakeEngines() : sherpaEngines(modelsDir)));
 
 async function transcribe(command: TranscribeCommand): Promise<void> {
   threads = command.threads;

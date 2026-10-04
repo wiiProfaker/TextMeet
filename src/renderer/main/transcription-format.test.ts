@@ -39,17 +39,21 @@ describe('stageText', () => {
 
   it('shows how much of the models is downloaded', () => {
     const MB = 1024 * 1024;
-    expect(stageText(progress({ stage: 'download', download: { done: 20 * MB, total: 60 * MB } }))).toBe(
-      'Скачиваем модель расшифровки — 20 МБ из 60 МБ',
+    expect(stageText(progress({ stage: 'download', download: { done: 20 * MB, total: 60 * MB, title: 'Parakeet v3' } }))).toBe(
+      'Скачиваем модель Parakeet v3 — 20 из 60 МБ',
     );
     expect(stageText(progress({ stage: 'download' }))).toBe('Скачиваем модель расшифровки');
+    expect(stageText(progress({ stage: 'download', download: { done: 0, total: 0, title: 'Whisper large-v3-turbo' } }))).toBe(
+      'Готовим модель Whisper large-v3-turbo',
+    );
   });
 });
 
 describe('barFraction and percent', () => {
   it('uses bytes while downloading and the whole work otherwise', () => {
-    expect(barFraction(progress({ stage: 'download', fraction: 0, download: { done: 25, total: 100 } }))).toBe(0.25);
-    expect(barFraction(progress({ stage: 'download', fraction: 0.1, download: { done: 0, total: 0 } }))).toBe(0.1);
+    const download = (done: number, total: number) => ({ done, total, title: 'GigaAM v3' });
+    expect(barFraction(progress({ stage: 'download', fraction: 0, download: download(25, 100) }))).toBe(0.25);
+    expect(barFraction(progress({ stage: 'download', fraction: 0.1, download: download(0, 0) }))).toBe(0.1);
     expect(barFraction(progress({ fraction: 0.7 }))).toBe(0.7);
     expect(percent(0.624)).toBe(62);
     expect(percent(2)).toBe(100);

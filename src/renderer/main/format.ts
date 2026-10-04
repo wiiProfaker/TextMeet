@@ -144,7 +144,10 @@ export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress):
     case 'queued':
       return { text: 'в очереди на расшифровку', tone: 'accent' };
     case 'transcribing':
-      if (progress?.stage === 'download') return { text: 'скачиваем модель…', tone: 'accent' };
+      if (progress?.stage === 'download') {
+        // Байтов нет — модель проверяется или ждёт другого скачивания.
+        return { text: progress.download?.total === 0 ? 'готовим модель…' : 'скачиваем модель…', tone: 'accent' };
+      }
       return progress
         ? { text: `расшифровка ${percent(progress.fraction)}%`, tone: 'accent' }
         : { text: 'расшифровка…', tone: 'accent' };

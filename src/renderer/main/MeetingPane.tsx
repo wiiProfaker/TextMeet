@@ -133,7 +133,7 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
   const actions = transcribeActions(meeting.status, hasAudio, load.kind);
   const retry = () =>
     window.textmeet
-      .transcribe({ meetingId: meeting.id, participantsHint: meeting.participantsHint })
+      .transcribe({ meetingId: meeting.id, participantsHint: meeting.participantsHint, model: null })
       .catch((err: unknown) => onError(errorText(err)));
 
   return (

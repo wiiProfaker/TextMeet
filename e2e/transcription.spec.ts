@@ -153,11 +153,13 @@ test('«Расшифровать заново» replaces the text and keeps the 
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'Расшифровать заново' })).toBeFocused();
 
-  // Пока новая расшифровка идёт, старый текст виден, а над ним — её ход.
+  // Пока новая расшифровка идёт, старый текст виден, а над ним — её ход (модели в тестах «скачиваются» мгновенно).
   await expect(page.getByText('Текст заменится, когда новая расшифровка закончится.')).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: /В очереди на расшифровку|Готовим звук/ })).toBeVisible();
+  await expect(
+    page.getByRole('status').filter({ hasText: /В очереди на расшифровку|Скачиваем модель GigaAM v3|Готовим звук/ }),
+  ).toBeVisible();
   await expect(page.getByLabel('Текст встречи')).toContainText('Старый текст.');
-  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText(/в очереди на расшифровку|расшифровка/);
+  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText(/в очереди на расшифровку|скачиваем модель|расшифровка/);
 
   await transcription.release();
   await expect(page.getByLabel('Текст встречи')).toContainText('Проверка расшифровки', { timeout: 20_000 });

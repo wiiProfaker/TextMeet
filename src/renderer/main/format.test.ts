@@ -186,6 +186,8 @@ describe('meetingNote', () => {
     expect(
       meetingNote(meeting('a', at, { status: 'transcribing' }), { ...progress, stage: 'download', fraction: 0 })?.text,
     ).toBe('скачиваем модель…');
+    const preparing = { ...progress, stage: 'download' as const, fraction: 0, download: { done: 0, total: 0, title: 'T-one' } };
+    expect(meetingNote(meeting('a', at, { status: 'transcribing' }), preparing)?.text).toBe('готовим модель…');
     expect(meetingNote(meeting('a', at, { status: 'error', tracks }))).toEqual({ text: 'ошибка расшифровки', tone: 'error' });
   });
 

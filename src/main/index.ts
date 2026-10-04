@@ -8,6 +8,7 @@ import {
   powerMonitor,
   protocol,
   session,
+  shell,
   systemPreferences,
   type BrowserWindow,
 } from 'electron';
@@ -26,6 +27,7 @@ import { HotkeyManager } from './hotkey-manager';
 import { registerIpc } from './ipc';
 import { listMeetings } from './library/library';
 import { SearchIndex } from './library/search-index';
+import { folderTrash, type Trash } from './library/trash';
 import { createLogger, type Logger } from './logger';
 import { MEDIA_SCHEME, serveMedia } from './media-protocol';
 import { CatalogDownloads } from './models/catalog-downloads';
@@ -66,6 +68,10 @@ if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 // их скачивания; TEXTMEET_TEST_DOWNLOAD_MS — сколько длится шаг «скачивания» из каталога (по умолчанию мгновенно).
 const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
 const fakeDownloadStepMs = Number(process.env.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
+/** Только для автотестов: «Корзина» — обычная папка (на машинах CI настоящей Корзины может не быть). */
+const trash: Trash = process.env.TEXTMEET_TEST_TRASH
+  ? folderTrash(process.env.TEXTMEET_TEST_TRASH)
+  : (path) => shell.trashItem(path);
 /** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
 const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
 
@@ -431,6 +437,17 @@ async function start(logger: Logger): Promise<void> {
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
     libraryChanged: () => sendToMain(IPC.libraryChanged),
     search: searchIndex,
+    deletion: {
+      libraryDir,
+      trash,
+      isRecording: (id) => {
+        const state = controller.getState();
+        return state.phase !== 'idle' && state.meetingId === id;
+      },
+      transcription: queue,
+      mixer,
+      dropStopDialog: (id) => controller.dropStopDialog(id),
+    },
     transcription: queue,
     models,
     downloads: catalogDownloads,

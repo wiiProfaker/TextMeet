@@ -40,6 +40,9 @@ export const IPC = {
   renameSpeaker: 'library:rename-speaker',
   editTranscript: 'library:edit-transcript',
   search: 'library:search',
+  audioSize: 'library:audio-size',
+  deleteAudio: 'library:delete-audio',
+  deleteMeeting: 'library:delete-meeting',
   getAppInfo: 'app:info',
   getRecordingState: 'recording:get-state',
   toggleRecording: 'recording:toggle',
@@ -146,6 +149,9 @@ export interface MainInvokeContract {
   [IPC.renameSpeaker]: { arg: RenameSpeakerRequest; result: Meeting };
   [IPC.editTranscript]: { arg: EditTranscriptRequest; result: EditedTranscript };
   [IPC.search]: { arg: string; result: SearchResult };
+  [IPC.audioSize]: { arg: string; result: number };
+  [IPC.deleteAudio]: { arg: string; result: void };
+  [IPC.deleteMeeting]: { arg: string; result: void };
   [IPC.getAppInfo]: { arg: void; result: AppInfo };
   [IPC.getRecordingState]: { arg: void; result: RecordingState };
   [IPC.toggleRecording]: { arg: void; result: void };
@@ -220,6 +226,12 @@ export interface TextMeetApi {
   editTranscript(request: EditTranscriptRequest): Promise<EditedTranscript>;
   /** Поиск по всем встречам. */
   search(query: string): Promise<SearchResult>;
+  /** Сколько байт занимает аудио встречи (для окна «Удалить аудио?»). */
+  audioSize(meetingId: string): Promise<number>;
+  /** «Удалить аудио»: папка audio/ — в Корзину, текст остаётся. */
+  deleteAudio(meetingId: string): Promise<void>;
+  /** «Удалить встречу»: папка встречи — в Корзину (и папка, которую не удалось прочитать). */
+  deleteMeeting(meetingId: string): Promise<void>;
   getAppInfo(): Promise<AppInfo>;
   getRecordingState(): Promise<RecordingState>;
   toggleRecording(): Promise<void>;

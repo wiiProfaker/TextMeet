@@ -471,6 +471,72 @@ describe('TranscriptionQueue', () => {
     expect((await readMeeting(lib, meeting.id)).errorMessage).toBeNull();
   });
 
+  it('cancel stops the running meeting, drops a queued one and goes on with the rest', async () => {
+    const lib = makeTempDir();
+    const running = await recordedMeeting(lib);
+    const queued = await recordedMeeting(lib);
+    const next = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, running.id);
+    await t.queue.enqueue(lib, queued.id);
+    await t.queue.enqueue(lib, next.id);
+    await transcribeSent(t.worker);
+    const first = t.worker();
+
+    await t.queue.cancel(lib, queued.id);
+    expect(t.queue.progress().map((p) => p.meetingId)).toEqual([running.id, next.id]);
+    await t.queue.cancel(lib, running.id);
+    // Процесс расшифровки закрыт, задача завершилась без уведомления.
+    expect(first.killed).toBe(true);
+    expect(t.finished).toEqual([]);
+
+    await vi.waitFor(() => expect(t.workers).toHaveLength(2));
+    const command = await transcribeSent(t.worker);
+    expect(command.input.tracks[0]?.file).toContain(next.id);
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect(t.finished[0]?.meeting.id).toBe(next.id);
+    expect((await readMeeting(lib, queued.id)).status).toBe('queued');
+  });
+
+  it('cancel stops a meeting whose models are still being prepared', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    let signal: AbortSignal | undefined;
+    const t = setup({
+      ensure: (_onProgress, s) => {
+        signal = s;
+        return new Promise<void>((_resolve, reject) =>
+          s?.addEventListener('abort', () => reject(new DownloadError('cancelled', 'скачивание отменено'))),
+        );
+      },
+    });
+    await t.queue.enqueue(lib, meeting.id);
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    await t.queue.cancel(lib, meeting.id);
+    expect(signal?.aborted).toBe(true);
+    expect(t.finished).toEqual([]);
+    expect(t.workers).toHaveLength(0);
+    expect(t.queue.isBusy()).toBe(false);
+  });
+
+  it('cancel stops a meeting that is just starting', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    // Задача уже взята, но ещё пишет статус «расшифровывается».
+    await t.queue.cancel(lib, meeting.id);
+    expect(t.ensured).toEqual([]);
+    expect(t.workers).toHaveLength(0);
+    expect(t.finished).toEqual([]);
+  });
+
+  it('cancel of a meeting that is not in the queue does nothing', async () => {
+    const t = setup();
+    await expect(t.queue.cancel(makeTempDir(), '2026-01-01_0000_ffffff')).resolves.toBeUndefined();
+  });
+
   it('fails clearly when there are no recorded tracks', async () => {
     const lib = makeTempDir();
     const meeting = await recordedMeeting(lib, { tracks: [] });

@@ -36,12 +36,21 @@ export interface FfmpegRun {
 export interface FfmpegOptions {
   /** Сколько ffmpeg может молчать, прежде чем его остановят как зависший. */
   stallMs?: number;
+  /** Отмена: ffmpeg останавливается, обещание отклоняется с FFMPEG_CANCELLED. */
+  signal?: AbortSignal;
 }
+
+export const FFMPEG_CANCELLED = 'ffmpeg остановлен: работа отменена';
 
 /** Запускает ffmpeg с пониженным приоритетом (не мешать идущей записи); ошибка — с хвостом его вывода. */
 export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: FfmpegOptions = {}): Promise<FfmpegRun> {
   const stallMs = options.stallMs ?? FFMPEG_STALL_MS;
+  const { signal } = options;
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(FFMPEG_CANCELLED));
+      return;
+    }
     const child = spawn(ffmpegPath, ['-hide_banner', '-nostdin', '-y', '-nostats', '-progress', 'pipe:1', ...args], {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -65,6 +74,12 @@ export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: 
       }, stallMs);
     };
     rearmWatchdog();
+    let cancelled = false;
+    const onAbort = (): void => {
+      cancelled = true;
+      child.kill('SIGKILL');
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     let progress = '';
     let errors = '';
@@ -78,14 +93,17 @@ export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: 
     });
     child.on('error', (err) => {
       clearTimeout(watchdog);
+      signal?.removeEventListener('abort', onAbort);
       reject(err);
     });
-    child.on('close', (code, signal) => {
+    child.on('close', (code, killSignal) => {
       clearTimeout(watchdog);
-      if (stalled) reject(new Error('ffmpeg завис — долго ничего не сообщал и был остановлен'));
+      signal?.removeEventListener('abort', onAbort);
+      if (cancelled) reject(new Error(FFMPEG_CANCELLED));
+      else if (stalled) reject(new Error('ffmpeg завис — долго ничего не сообщал и был остановлен'));
       else if (code === 0) resolve({ durationSec: parseProgressDuration(progress) });
       else {
-        const how = code === null ? `сигналом ${signal}` : `кодом ${code}`;
+        const how = code === null ? `сигналом ${killSignal}` : `кодом ${code}`;
         reject(new Error(`ffmpeg завершился с ${how}: ${errors.trim().split('\n').slice(-3).join(' | ')}`));
       }
     });

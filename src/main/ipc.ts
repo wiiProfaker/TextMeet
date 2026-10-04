@@ -25,6 +25,7 @@ import type { ModelsState, TranscriptionProgress } from '../shared/transcription
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import { listMeetings, meetingDir } from './library/library';
+import { audioSize, deleteAudio, deleteMeeting, type DeleteDeps } from './library/meeting-delete';
 import { editTranscript, renameMeeting, renameSpeaker, TranscriptEditSchema } from './library/meeting-edits';
 import type { SearchIndex } from './library/search-index';
 import { readTranscript } from './library/transcript-store';
@@ -55,7 +56,8 @@ export interface IpcDeps {
   hotkeyChanged(): void;
   /** Встреча изменилась — окно перечитает список встреч. */
   libraryChanged(): void;
-  search: Pick<SearchIndex, 'refresh' | 'invalidate' | 'search'>;
+  search: Pick<SearchIndex, 'refresh' | 'invalidate' | 'remove' | 'search'>;
+  deletion: DeleteDeps;
   transcription: {
     enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null, model?: AsrModelId): Promise<void>;
     progress(): TranscriptionProgress[];
@@ -296,6 +298,21 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.search, (arg) => deps.search.search(z.string().max(500).parse(arg)));
+
+  handle(IPC.audioSize, (arg) => audioSize(deps.libraryDir(), MeetingIdSchema.parse(arg)));
+
+  handle(IPC.deleteAudio, async (arg) => {
+    await deleteAudio(deps.deletion, MeetingIdSchema.parse(arg));
+    deps.libraryChanged();
+  });
+
+  // Имя папки, а не только прочитанная встреча: удалить можно и папку, которую не удалось прочитать.
+  handle(IPC.deleteMeeting, async (arg) => {
+    const id = MeetingIdSchema.parse(arg);
+    await deleteMeeting(deps.deletion, id);
+    deps.search.remove(id);
+    deps.libraryChanged();
+  });
 
   handle(IPC.getAppInfo, () => deps.appInfo());
 

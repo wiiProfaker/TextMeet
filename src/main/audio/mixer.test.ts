@@ -128,7 +128,10 @@ describe('meetingsNeedingMix', () => {
 });
 
 describe('Mixer', () => {
-  function mixerWith(mix: (libraryDir: string, meetingId: string) => Promise<void>, logger = fakeLogger()) {
+  function mixerWith(
+    mix: (libraryDir: string, meetingId: string, ffmpegPath: string, signal?: AbortSignal) => Promise<void>,
+    logger = fakeLogger(),
+  ) {
     const onSettled = vi.fn<(meetingId: string) => void>();
     const mixer = new Mixer({ ffmpegPath: () => 'ffmpeg', logger, onSettled, mix });
     return { mixer, onSettled, logger };
@@ -177,6 +180,52 @@ describe('Mixer', () => {
     expect(mixer.hasFailed('lib', 'bad')).toBe(true);
     expect(mixer.hasFailed('lib', 'good')).toBe(false);
     expect(mixer.hasFailed('other-lib', 'bad')).toBe(false);
+  });
+
+  it('cancels a queued meeting and stops the one being mixed, waiting until it lets the files go', async () => {
+    const order: string[] = [];
+    let stopped = false;
+    const { mixer, onSettled, logger } = mixerWith(
+      (_lib, id, _ffmpeg, signal) =>
+        new Promise<void>((resolve, reject) => {
+          order.push(id);
+          if (id !== 'a') {
+            resolve();
+            return;
+          }
+          signal?.addEventListener('abort', () => {
+            setTimeout(() => {
+              stopped = true;
+              reject(new Error('cancelled'));
+            }, 20);
+          });
+        }),
+    );
+    mixer.enqueue('lib', 'a');
+    mixer.enqueue('lib', 'b');
+    mixer.enqueue('lib', 'c');
+    await vi.waitFor(() => expect(order).toEqual(['a']));
+    expect(mixer.isPending('lib', 'a')).toBe(true);
+    expect(mixer.isPending('lib', 'b')).toBe(true);
+    expect(mixer.isPending('other', 'b')).toBe(false);
+
+    await mixer.cancel('lib', 'b');
+    expect(mixer.isPending('lib', 'b')).toBe(false);
+    await mixer.cancel('lib', 'a');
+    expect(stopped).toBe(true);
+
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledWith('c'));
+    expect(order).toEqual(['a', 'c']);
+    // Отменённое сведение — не сбой: ни ошибки в журнале, ни «не удалось подготовить запись».
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(mixer.hasFailed('lib', 'a')).toBe(false);
+    expect(mixer.isPending('lib', 'c')).toBe(false);
+  });
+
+  it('cancels nothing for a meeting that is not in the queue', async () => {
+    const { mixer } = mixerWith(async () => undefined);
+    await expect(mixer.cancel('lib', 'x')).resolves.toBeUndefined();
   });
 
   it('forgets a failure once the meeting is mixed after all', async () => {

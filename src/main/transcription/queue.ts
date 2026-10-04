@@ -103,6 +103,10 @@ export class TranscriptionQueue {
   private active: Job | null = null;
   /** Задача взята из очереди, а meeting.json ещё не прочитан: она прочитает и то, что запишут до этого. */
   private starting: Job | null = null;
+  /** Задача, которая сейчас выполняется (active), закончилась — для отмены, которой надо дождаться. */
+  private activeDone: Promise<void> | null = null;
+  /** Задачу отменяют (встречу удаляют), пока она ещё готовится: она не начнёт работу. */
+  private cancelling: Job | null = null;
   private pendingEnqueues = 0;
   private worker: WorkerHandle | null = null;
   /** Модель последней задачи этого процесса: он держит её в памяти (Whisper — около 1 ГБ). */
@@ -156,6 +160,30 @@ export class TranscriptionQueue {
       // По времени создания: createdAt точнее id (в id — минуты местного времени), id — на случай совпадения.
       .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     for (const meeting of meetings) this.add({ libraryDir, meetingId: meeting.id });
+  }
+
+  /**
+   * Встречу удаляют: снять её из очереди; если она расшифровывается — прервать (процесс расшифровки закрывается) и
+   * дождаться, пока задача отпустит файлы встречи. Статус в meeting.json не меняется — папку всё равно удалят.
+   */
+  async cancel(libraryDir: string, meetingId: string): Promise<void> {
+    const job: Job = { libraryDir, meetingId };
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      if (sameJob(this.queue[i]!, job)) this.queue.splice(i, 1);
+    }
+    const active = this.active;
+    if (active && sameJob(active, job)) {
+      this.cancelling = active;
+      const current = this.current;
+      if (current && sameJob(current.job, job)) {
+        current.cancelled = true;
+        current.abort.abort();
+        if (current.settle) this.killWorker(current.worker);
+      }
+      await this.activeDone;
+      if (this.cancelling === active) this.cancelling = null;
+    }
+    this.emitProgress(true);
   }
 
   /** Началась или закончилась запись: процессу — новое число потоков. */
@@ -230,11 +258,17 @@ export class TranscriptionQueue {
       this.active = job;
       this.starting = job;
       try {
-        await this.runJob(job);
+        const run = this.runJob(job);
+        this.activeDone = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        await run;
       } catch (err) {
         this.deps.logger.error(`Очередь расшифровки: сбой задачи ${job.meetingId}`, err);
       } finally {
         this.active = null;
+        this.activeDone = null;
         this.starting = null;
       }
     }
@@ -261,7 +295,7 @@ export class TranscriptionQueue {
       worker: null,
       progress: { meetingId, stage: 'prepare', fraction: 0, download: null },
       clock: null,
-      cancelled: this.disposed,
+      cancelled: this.disposed || this.cancelling === job,
       abort: new AbortController(),
       settle: null,
       rearm: null,

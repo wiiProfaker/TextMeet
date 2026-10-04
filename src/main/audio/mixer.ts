@@ -4,7 +4,7 @@ import type { MeetingListEntry, Track } from '../../shared/meeting';
 import { MIX_FILE } from '../../shared/recording';
 import { audioDir, readMeeting, updateMeeting } from '../library/library';
 import type { Logger } from '../logger';
-import { runFfmpeg } from './ffmpeg';
+import { FFMPEG_CANCELLED, runFfmpeg } from './ffmpeg';
 
 export interface MixInput {
   file: string;
@@ -60,14 +60,19 @@ export async function existingInputs(dir: string, tracks: readonly Track[]): Pro
 }
 
 /** Сводит дорожки встречи в audio/mix.opus; длительность записывает, если её ещё нет (восстановленная запись). */
-export async function mixMeeting(libraryDir: string, meetingId: string, ffmpegPath: string): Promise<void> {
+export async function mixMeeting(
+  libraryDir: string,
+  meetingId: string,
+  ffmpegPath: string,
+  signal?: AbortSignal,
+): Promise<void> {
   const meeting = await readMeeting(libraryDir, meetingId);
   const dir = audioDir(libraryDir, meetingId);
   const inputs = await existingInputs(dir, meeting.tracks);
   if (inputs.length === 0) throw new Error('нет записанных дорожек');
   const part = join(dir, `${MIX_FILE}.part`);
   try {
-    const { durationSec } = await runFfmpeg(ffmpegPath, mixArgs(inputs, part));
+    const { durationSec } = await runFfmpeg(ffmpegPath, mixArgs(inputs, part), { signal });
     await fsp.rename(part, join(dir, MIX_FILE));
     if (meeting.durationSec === null && durationSec !== null) {
       await updateMeeting(libraryDir, meetingId, (m) => ({ ...m, durationSec: m.durationSec ?? durationSec }));
@@ -119,6 +124,7 @@ export class Mixer {
   /** Встречи, которые не удалось свести в этом запуске: вместо вечного «Готовим…» окно покажет, что не вышло. */
   private readonly failed = new Set<string>();
   private running = false;
+  private current: { job: MixJob; abort: AbortController; done: Promise<void> } | null = null;
 
   constructor(private readonly deps: MixerDeps) {}
 
@@ -135,20 +141,57 @@ export class Mixer {
     return this.failed.has(jobKey(libraryDir, meetingId));
   }
 
+  /** Встреча ждёт сведения или сводится. */
+  isPending(libraryDir: string, meetingId: string): boolean {
+    const key = jobKey(libraryDir, meetingId);
+    const current = this.current;
+    return (
+      this.queue.some((job) => jobKey(job.libraryDir, job.meetingId) === key) ||
+      (current !== null && jobKey(current.job.libraryDir, current.job.meetingId) === key)
+    );
+  }
+
+  /** Встречу удаляют: снять из очереди, а если она сводится — остановить ffmpeg и дождаться, пока он отпустит файлы. */
+  async cancel(libraryDir: string, meetingId: string): Promise<void> {
+    const key = jobKey(libraryDir, meetingId);
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      const job = this.queue[i]!;
+      if (jobKey(job.libraryDir, job.meetingId) === key) this.queue.splice(i, 1);
+    }
+    this.failed.delete(key);
+    const current = this.current;
+    if (current && jobKey(current.job.libraryDir, current.job.meetingId) === key) {
+      current.abort.abort();
+      await current.done;
+    }
+  }
+
   private async drain(): Promise<void> {
     const mix = this.deps.mix ?? mixMeeting;
     for (let job = this.queue.shift(); job !== undefined; job = this.queue.shift()) {
-      const { libraryDir, meetingId } = job;
-      try {
-        await mix(libraryDir, meetingId, this.deps.ffmpegPath());
-        this.failed.delete(jobKey(libraryDir, meetingId));
-        this.deps.logger.info(`Сведение готово: ${meetingId}`);
-      } catch (err) {
-        this.failed.add(jobKey(libraryDir, meetingId));
-        this.deps.logger.error(`Не удалось свести дорожки встречи ${meetingId}`, err);
-      }
-      this.deps.onSettled(meetingId);
+      const abort = new AbortController();
+      const done = this.mixOne(mix, job, abort.signal);
+      this.current = { job, abort, done };
+      await done;
+      this.current = null;
     }
     this.running = false;
+  }
+
+  private async mixOne(mix: typeof mixMeeting, job: MixJob, signal: AbortSignal): Promise<void> {
+    const { libraryDir, meetingId } = job;
+    try {
+      await mix(libraryDir, meetingId, this.deps.ffmpegPath(), signal);
+      this.failed.delete(jobKey(libraryDir, meetingId));
+      this.deps.logger.info(`Сведение готово: ${meetingId}`);
+    } catch (err) {
+      if (signal.aborted) {
+        this.deps.logger.info(`Сведение отменено: ${meetingId}`);
+        return;
+      }
+      this.failed.add(jobKey(libraryDir, meetingId));
+      this.deps.logger.error(`Не удалось свести дорожки встречи ${meetingId}`, err);
+    }
+    this.deps.onSettled(meetingId);
   }
 }

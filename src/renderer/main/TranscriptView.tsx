@@ -33,6 +33,9 @@ interface Props {
 /** Сколько висит «Реплика удалена · Вернуть». */
 const UNDO_MS = 10_000;
 
+/** Правка недоступна, пока идёт расшифровка заново (окно успело показать правку до того, как она началась). */
+const EDIT_UNAVAILABLE = 'Идёт расшифровка заново — пока текст не правится. Дождитесь её окончания.';
+
 /** Клавиши, которыми человек листает текст сам. */
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
@@ -164,8 +167,8 @@ export function TranscriptView({
   const box = useRef<HTMLDivElement>(null);
   const lastManualScroll = useRef(0);
   const [editingId, setEditingId] = useState<string | null>(null);
-  /** Удалённая реплика, которую ещё можно вернуть. */
-  const [removed, setRemoved] = useState<TranscriptSegment | null>(null);
+  /** Удалённые реплики, которые ещё можно вернуть; последняя удалённая — в конце. */
+  const [removed, setRemoved] = useState<readonly TranscriptSegment[]>([]);
   const [undoError, setUndoError] = useState<string | null>(null);
   /** Реплика, у которой открыто меню «Кто говорит». */
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -199,11 +202,12 @@ export function TranscriptView({
     row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [nowId, playing, editing]);
 
+  // Таймер начинается заново при каждом удалении и возврате; не вернулось (ошибка) — плашка висит с ошибкой.
   useEffect(() => {
-    if (!removed) return;
-    const timer = setTimeout(() => setRemoved(null), UNDO_MS);
+    if (removed.length === 0 || undoError !== null) return;
+    const timer = setTimeout(() => setRemoved([]), UNDO_MS);
     return () => clearTimeout(timer);
-  }, [removed]);
+  }, [removed, undoError]);
 
   // Правка стала невозможна (началась расшифровка заново) — поле правки и меню закрываются.
   useEffect(() => {
@@ -221,32 +225,40 @@ export function TranscriptView({
   );
 
   const mergeSpeakers = async (from: SpeakerId, into: SpeakerId) => {
-    if (onEdit) await onEdit({ kind: 'merge', from, into });
+    if (!onEdit) throw new Error(EDIT_UNAVAILABLE);
+    await onEdit({ kind: 'merge', from, into });
   };
 
   const saveText = useCallback(
     async (segment: TranscriptSegment, text: string) => {
-      if (!onEdit) return;
+      if (!onEdit) throw new Error(EDIT_UNAVAILABLE);
       await onEdit({ kind: 'text', segmentId: segment.id, text });
       if (text.trim() === '') {
         setUndoError(null);
-        setRemoved(segment);
+        setRemoved((list) => [...list, segment]);
       }
     },
     [onEdit],
   );
 
+  const lastRemoved = removed.at(-1) ?? null;
   const restore = async () => {
-    if (!removed || !onEdit) return;
+    if (!lastRemoved) return;
+    if (!onEdit) {
+      setUndoError(EDIT_UNAVAILABLE);
+      return;
+    }
     try {
-      await onEdit({ kind: 'restore', segment: removed });
-      setRemoved(null);
+      await onEdit({ kind: 'restore', segment: lastRemoved });
+      setUndoError(null);
+      // Пока возвращалась эта реплика, могли удалить ещё одну — убираем именно возвращённую.
+      setRemoved((list) => list.filter((s) => s.id !== lastRemoved.id));
     } catch (err) {
       setUndoError(errorText(err));
     }
   };
 
-  if (transcript.segments.length === 0 && !removed) {
+  if (transcript.segments.length === 0 && !lastRemoved) {
     return (
       <div className="empty-note">
         <b>В записи не найдено речи</b>
@@ -300,9 +312,9 @@ export function TranscriptView({
             onError={onError}
           />
         ))}
-        {removed && (
+        {lastRemoved && (
           <div className="undo" role="status">
-            Реплика {formatTimestamp(removed.start)} удалена
+            Реплика {formatTimestamp(lastRemoved.start)} удалена
             <button type="button" className="lnk" onClick={() => void restore()}>
               Вернуть
             </button>

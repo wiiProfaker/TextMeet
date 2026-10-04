@@ -83,12 +83,18 @@ export function App() {
   const selectedId = selection?.kind === 'meeting' ? selection.id : null;
   const selectedEntry = entries?.find((e) => entryId(e) === selectedId) ?? null;
 
-  /** Встречу удалили — выбрать соседнюю: ниже по списку, а если её нет — выше. */
+  /**
+   * Встречу удалили — выбрать соседнюю: ниже по списку, а если её нет — выше. Пока удаление шло, человек мог выбрать
+   * другую встречу — тогда выбор не трогаем.
+   */
   const selectNeighbor = (id: string) => {
     const list = entries ?? [];
     const at = list.findIndex((e) => entryId(e) === id);
     const next = list[at + 1] ?? list[at - 1];
-    setSelection(next && at !== -1 ? { kind: 'meeting', id: entryId(next) } : null);
+    setSelection((current) => {
+      if (current?.kind !== 'meeting' || current.id !== id) return current;
+      return next && at !== -1 ? { kind: 'meeting', id: entryId(next) } : null;
+    });
   };
 
   let pane;

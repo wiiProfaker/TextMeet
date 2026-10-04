@@ -140,6 +140,39 @@ test('an emptied segment is deleted and «Вернуть» brings it back', asyn
   ]);
 });
 
+test('two deleted segments are brought back one by one, the latest first', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page, libraryDir } = launched;
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  const field = text.getByRole('textbox', { name: 'Текст реплики' });
+  const undo = text.getByRole('status');
+
+  await text.getByRole('button', { name: 'Без подрядчиков.' }).click();
+  await field.fill('');
+  await field.press('Enter');
+  await expect(undo).toContainText('Реплика 0:04 удалена');
+
+  await text.getByRole('button', { name: 'С подрядчиками или без?' }).click();
+  await field.fill('');
+  await field.press('Enter');
+  await expect(text.locator('.row')).toHaveCount(1);
+  await expect(undo).toContainText('Реплика 0:02 удалена');
+
+  await page.getByRole('button', { name: 'Вернуть' }).click();
+  await expect(text.locator('.row')).toHaveCount(2);
+  await expect(undo).toContainText('Реплика 0:04 удалена');
+
+  await page.getByRole('button', { name: 'Вернуть' }).click();
+  await expect(text.locator('.row')).toHaveCount(3);
+  await expect(page.getByRole('button', { name: 'Вернуть' })).toHaveCount(0);
+  await expect.poll(async () => (await pollTranscript(libraryDir))?.segments.map((s) => s.id)).toEqual([
+    'seg-1',
+    'seg-2',
+    'seg-3',
+  ]);
+});
+
 test('a click on the title renames the meeting', async () => {
   launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
   const { page, libraryDir } = launched;

@@ -2,6 +2,7 @@
 // preload и main пользуются типизированными обёртками над этими таблицами, поэтому расхождение ловит
 // проверка типов. preload работает в песочнице и не может подключать zod и другие пакеты:
 // здесь только константы и типы, из других файлов — только `import type`.
+import type { AsrModelId } from './asr-models';
 import type { MeetingListEntry } from './meeting';
 import type {
   Peaks,
@@ -45,11 +46,16 @@ export const IPC = {
   getTranscriptionProgress: 'transcription:get-progress',
   getModels: 'models:get',
   deleteModels: 'models:delete',
+  downloadModel: 'models:download',
+  cancelModelDownload: 'models:cancel-download',
+  selectModel: 'models:select',
   // main → главное окно (события).
   recordingState: 'recording:state',
   recordingPeaks: 'recording:peaks',
   libraryChanged: 'library:changed',
   transcriptionProgress: 'transcription:progress',
+  /** Скачивание из каталога продвинулось, началось или закончилось — перечитать модели. */
+  modelsChanged: 'models:changed',
   /** Щелчок по уведомлению о расшифровке: показать эту встречу. */
   showMeeting: 'app:show-meeting',
   // main → окно записи (команды).
@@ -120,6 +126,9 @@ export interface MainInvokeContract {
   [IPC.getTranscriptionProgress]: { arg: void; result: TranscriptionProgress[] };
   [IPC.getModels]: { arg: void; result: ModelsState };
   [IPC.deleteModels]: { arg: ModelGroupId; result: ModelsState };
+  [IPC.downloadModel]: { arg: AsrModelId; result: ModelsState };
+  [IPC.cancelModelDownload]: { arg: AsrModelId; result: ModelsState };
+  [IPC.selectModel]: { arg: AsrModelId; result: ModelsState };
 }
 export type MainInvokeChannel = keyof MainInvokeContract;
 export type InvokeArg<C extends MainInvokeChannel> = MainInvokeContract[C]['arg'];
@@ -131,6 +140,7 @@ export interface MainEventContract {
   [IPC.recordingPeaks]: Peaks;
   [IPC.libraryChanged]: void;
   [IPC.transcriptionProgress]: TranscriptionProgress[];
+  [IPC.modelsChanged]: void;
   [IPC.showMeeting]: string;
 }
 export type MainEventChannel = keyof MainEventContract;
@@ -186,10 +196,17 @@ export interface TextMeetApi {
   getTranscriptionProgress(): Promise<TranscriptionProgress[]>;
   getModels(): Promise<ModelsState>;
   deleteModels(group: ModelGroupId): Promise<ModelsState>;
+  /** «Скачать» в карточке модели. */
+  downloadModel(id: AsrModelId): Promise<ModelsState>;
+  /** «Отменить» скачивание: недокачанное стирается. */
+  cancelModelDownload(id: AsrModelId): Promise<ModelsState>;
+  /** «Выбрать»: модель для новых встреч. */
+  selectModel(id: AsrModelId): Promise<ModelsState>;
   onRecordingState(listener: Listener<RecordingState>): Unsubscribe;
   onPeaks(listener: Listener<Peaks>): Unsubscribe;
   onLibraryChanged(listener: () => void): Unsubscribe;
   onTranscriptionProgress(listener: Listener<TranscriptionProgress[]>): Unsubscribe;
+  onModelsChanged(listener: () => void): Unsubscribe;
   onShowMeeting(listener: Listener<string>): Unsubscribe;
 }
 

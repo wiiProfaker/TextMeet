@@ -47,6 +47,10 @@ export interface PipelineDeps {
   /** Сколько потоков можно занять сейчас (во время записи — меньше). */
   threads(): number;
   onProgress(progress: PipelineProgress): void;
+  /** Во сколько раз модель расшифровки медленнее GigaAM — для долей прогресса; нет — как GigaAM. */
+  slowdown?: number;
+  /** Чистка текста куска (фильтр «галлюцинаций» у Whisper и Qwen3); нет — только обрезка пробелов. */
+  cleanText?(text: string): string;
 }
 
 /** Отпечаток голоса снимается с начала хода — этого хватает, а длинные ходы не тормозят. */
@@ -93,13 +97,15 @@ class RecognizerHolder {
 
 class Run {
   private stepIndex = 0;
-  private readonly recognizer: RecognizerHolder;
+  readonly recognizer: RecognizerHolder;
+  private readonly clean: (text: string) => string;
 
   constructor(
     private readonly deps: PipelineDeps,
     private readonly steps: readonly Step[],
   ) {
     this.recognizer = new RecognizerHolder(deps.engines, deps.threads);
+    this.clean = deps.cleanText ?? ((text) => text.trim());
   }
 
   report(fraction: number, diarize?: { expectedMs: number }): void {
@@ -167,7 +173,7 @@ class Run {
     let done = 0;
     for (const piece of pieces) {
       await breathe();
-      const text = piece.end - piece.start < MIN_PIECE_SEC ? '' : this.recognizer.get().recognize(slice(samples, piece)).trim();
+      const text = piece.end - piece.start < MIN_PIECE_SEC ? '' : this.clean(this.recognizer.get().recognize(slice(samples, piece)));
       done += piece.end - piece.start;
       this.report(total > 0 ? done / total : 1);
       if (text === '') continue;
@@ -198,9 +204,12 @@ function renumberOthers(segments: readonly DraftSegment[]): DraftSegment[] {
 export async function runPipeline(input: PipelineInput, deps: PipelineDeps): Promise<PipelineResult> {
   const plans = planTracks(input.tracks, input.recordedSystem, input.participantsHint);
   const durations = plans.map(() => input.durationSec);
-  const steps = planSteps(plans, durations);
+  const steps = planSteps(plans, durations, deps.slowdown);
   const run = new Run(deps, steps);
   run.report(0);
+  // Модель расшифровки загружается сразу: если она не загружается, встреча узнает об этом за секунды, а не после
+  // чтения звука и разделения по голосам.
+  if (plans.length > 0) run.recognizer.get();
 
   const segments: DraftSegment[] = [];
   const skippedTracks: PipelineResult['skippedTracks'] = [];

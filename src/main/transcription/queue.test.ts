@@ -10,7 +10,7 @@ import { describeError, type Logger } from '../logger';
 import { DownloadError } from '../models/download';
 import { transcriptionTexts } from '../texts';
 import type { MainToWorker, TranscribeCommand, WorkerToMain } from './protocol';
-import { IDLE_SHUTDOWN_MS, TranscriptionQueue, WATCHDOG_MIN_MS, type WorkerHandle } from './queue';
+import { IDLE_SHUTDOWN_MS, MODELS_SLOW_MS, TranscriptionQueue, WATCHDOG_MIN_MS, type WorkerHandle } from './queue';
 
 /** Поддельный процесс расшифровки: запоминает команды, тест присылает ответы и «роняет» его. */
 class FakeWorker implements WorkerHandle {
@@ -77,7 +77,7 @@ async function recordedMeeting(lib: string, patch: Partial<Meeting> = {}, now?: 
 
 function setup(
   overrides: {
-    ensure?: (onProgress: (p: { done: number; total: number }) => void) => Promise<void>;
+    ensure?: (onProgress: (p: { done: number; total: number }) => void, signal?: AbortSignal) => Promise<void>;
     deferExit?: boolean;
     ffmpegPath?: () => string;
     finished?: (event: { meeting: Meeting; ok: boolean }) => void;
@@ -86,6 +86,8 @@ function setup(
   } = {},
 ) {
   const workers: FakeWorker[] = [];
+  /** Какие группы моделей просила каждая задача. */
+  const ensured: string[][] = [];
   const finished: { meeting: Meeting; ok: boolean }[] = [];
   const progress: TranscriptionProgress[][] = [];
   let now = 1_000;
@@ -97,7 +99,13 @@ function setup(
       workers.push(worker);
       return worker;
     },
-    models: { root: 'M', ensure: overrides.ensure ?? (async () => undefined) },
+    models: {
+      root: 'M',
+      ensure: (groups, options) => {
+        ensured.push([...groups]);
+        return (overrides.ensure ?? (async () => undefined))(options.onProgress ?? (() => undefined), options.signal);
+      },
+    },
     ffmpegPath: overrides.ffmpegPath ?? (() => 'ffmpeg'),
     threads: () => threads,
     now: () => now,
@@ -117,6 +125,7 @@ function setup(
   return {
     queue,
     workers,
+    ensured,
     finished,
     progress,
     worker: () => workers.at(-1)!,
@@ -164,7 +173,8 @@ describe('TranscriptionQueue', () => {
     const t = setup();
     await t.queue.enqueue(lib, meeting.id);
     const command = await transcribeSent(t.worker);
-    expect(command).toMatchObject({ modelsDir: 'M', ffmpegPath: 'ffmpeg', threads: 7 });
+    expect(command).toMatchObject({ modelsDir: 'M', model: 'gigaam-v3-e2e-rnnt', ffmpegPath: 'ffmpeg', threads: 7 });
+    expect(t.ensured).toEqual([['gigaam-v3-e2e-rnnt', 'voices']]);
     expect(command.input).toEqual({
       tracks: [
         { kind: 'mic', file: join(audioDir(lib, meeting.id), 'mic.webm'), offsetSec: 0 },
@@ -183,10 +193,79 @@ describe('TranscriptionQueue', () => {
     await vi.waitFor(() => expect(t.finished).toHaveLength(1));
     expect(t.finished[0]).toMatchObject({ ok: true, meeting: { status: 'done', model: 'gigaam-v3-e2e-rnnt' } });
     const transcript = await readTranscript(lib, meeting.id);
+    expect(transcript).toMatchObject({ model: 'gigaam-v3-e2e-rnnt', modelTitle: 'GigaAM v3' });
     expect(transcript?.segments.map((s) => s.text)).toEqual(['Привет.', 'Здравствуйте.']);
     expect(transcript?.segments[0]?.edited).toBe(false);
     expect(t.queue.isBusy()).toBe(false);
     expect(t.queue.progress()).toEqual([]);
+  });
+
+  it('transcribes with the model asked for and remembers it in meeting.json', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id, undefined, 'parakeet-tdt-0.6b-v3');
+    expect((await readMeeting(lib, meeting.id)).model).toBe('parakeet-tdt-0.6b-v3');
+    const command = await transcribeSent(t.worker);
+    expect(command.model).toBe('parakeet-tdt-0.6b-v3');
+    expect(t.ensured).toEqual([['parakeet-tdt-0.6b-v3', 'voices']]);
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect(t.finished[0]?.meeting.model).toBe('parakeet-tdt-0.6b-v3');
+    expect(await readTranscript(lib, meeting.id)).toMatchObject({ model: 'parakeet-tdt-0.6b-v3', modelTitle: 'Parakeet v3' });
+  });
+
+  it('keeps the model of meeting.json when none is given, and takes the default one for an unknown model', async () => {
+    const lib = makeTempDir();
+    const chosen = await recordedMeeting(lib, { model: 't-one' });
+    const unknown = await recordedMeeting(lib, { model: 'whisper-tiny' });
+    const t = setup();
+    await t.queue.enqueue(lib, chosen.id);
+    const first = await transcribeSent(t.worker);
+    expect(first.model).toBe('t-one');
+    t.worker().post(done(first.jobId));
+    await t.queue.enqueue(lib, unknown.id);
+    // Модель другая — у второй встречи новый процесс.
+    await vi.waitFor(() => expect(t.workers).toHaveLength(2));
+    const second = await transcribeSent(t.worker);
+    expect(second.model).toBe('gigaam-v3-e2e-rnnt');
+    expect(vi.mocked(logger.warn).mock.calls.map(([m]) => m).join('\n')).toContain('whisper-tiny');
+  });
+
+  it('starts a fresh process when the next meeting has another model, and reuses it for the same model', async () => {
+    const lib = makeTempDir();
+    const first = await recordedMeeting(lib);
+    const same = await recordedMeeting(lib);
+    const other = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, first.id, undefined, 't-one');
+    const one = await transcribeSent(t.worker);
+    t.worker().post(done(one.jobId));
+    await t.queue.enqueue(lib, same.id, undefined, 't-one');
+    const two = await transcribeSent(t.worker, 2);
+    t.worker().post(done(two.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(2));
+    expect(t.workers).toHaveLength(1);
+    // Другая модель: прежний процесс закрывается и освобождает память своей модели, не дожидаясь сборщика мусора.
+    await t.queue.enqueue(lib, other.id, undefined, 'whisper-large-v3-turbo');
+    await vi.waitFor(() => expect(t.workers).toHaveLength(2));
+    expect(t.workers[0]?.killed).toBe(true);
+    const command = await transcribeSent(t.worker);
+    expect(command.model).toBe('whisper-large-v3-turbo');
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(3));
+    expect(t.finished.map((f) => f.ok)).toEqual([true, true, true]);
+  });
+
+  it('names the model that could not be loaded', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id, undefined, 'qwen3-asr-0.6b');
+    const command = await transcribeSent(t.worker);
+    t.worker().post({ type: 'failed', jobId: command.jobId, message: 'Load model failed: C:\\models\\x', code: 'model-load' });
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    expect((await readMeeting(lib, meeting.id)).errorMessage).toBe(transcriptionTexts.modelLoad('Qwen3-ASR 0.6B'));
   });
 
   it('saves a new number of participants and passes it on', async () => {
@@ -322,11 +401,61 @@ describe('TranscriptionQueue', () => {
       meetingId: meeting.id,
       stage: 'download',
       fraction: 0,
-      download: { done: 100, total: 400 },
+      download: { done: 100, total: 400, title: 'GigaAM v3' },
     });
     expect((await readMeeting(lib, meeting.id)).errorMessage).toContain('нет связи');
     expect(t.workers).toHaveLength(0);
     expect(loggedErrors()).toContain('DownloadError: нет связи с сервером');
+  });
+
+  it('leaves the download stage as soon as the models are ready', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup({ ensure: async (onProgress) => onProgress({ done: 400, total: 400 }) });
+    await t.queue.enqueue(lib, meeting.id);
+    await transcribeSent(t.worker);
+    // Процесс ещё ничего не прислал, а байты скачивания уже не показываются.
+    expect(t.queue.progress()).toEqual([{ meetingId: meeting.id, stage: 'prepare', fraction: 0, download: null }]);
+  });
+
+  it('shows «preparing the model» when the check of the models takes long', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    let finish = (): void => undefined;
+    const t = setup({
+      ensure: () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    });
+    await t.queue.enqueue(lib, meeting.id, undefined, 'whisper-large-v3-turbo');
+    await vi.waitFor(() => expect(t.queue.progress()[0]?.stage).toBe('download'), { timeout: MODELS_SLOW_MS + 2000 });
+    expect(t.queue.progress()[0]?.download).toEqual({ done: 0, total: 0, title: 'Whisper large-v3-turbo' });
+    finish();
+    await transcribeSent(t.worker);
+  });
+
+  it('a new request for the same meeting stops the download of its models and starts over', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const signals: (AbortSignal | undefined)[] = [];
+    const t = setup({
+      ensure: (_onProgress, signal) => {
+        signals.push(signal);
+        if (signals.length > 1) return Promise.resolve();
+        return new Promise<void>((_resolve, reject) =>
+          signal?.addEventListener('abort', () => reject(new DownloadError('cancelled', 'скачивание отменено'))),
+        );
+      },
+    });
+    await t.queue.enqueue(lib, meeting.id, undefined, 'qwen3-asr-0.6b');
+    await vi.waitFor(() => expect(signals).toHaveLength(1));
+    await t.queue.enqueue(lib, meeting.id, undefined, 't-one');
+    expect(signals[0]?.aborted).toBe(true);
+    const command = await transcribeSent(t.worker);
+    expect(command.model).toBe('t-one');
+    expect(t.finished).toEqual([]);
+    expect((await readMeeting(lib, meeting.id)).errorMessage).toBeNull();
   });
 
   it('fails clearly when there are no recorded tracks', async () => {
@@ -464,6 +593,19 @@ describe('TranscriptionQueue', () => {
     expect((await readMeeting(lib, second.id)).status).toBe('queued');
     await t.queue.enqueue(lib, second.id);
     expect(t.workers).toHaveLength(1);
+  });
+
+  it('on quit while a job is being picked up does not start preparing its models', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    // Задача уже взята и записывает статус «расшифровывается» — программа закрывается.
+    t.queue.dispose();
+    await vi.waitFor(() => expect(t.queue.isBusy()).toBe(false));
+    expect(t.ensured).toEqual([]);
+    expect(t.workers).toHaveLength(0);
+    expect(t.finished).toHaveLength(0);
   });
 
   it('drops a result that arrives after the meeting was asked again', async () => {

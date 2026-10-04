@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { otherSpeakerId, speakerLabel, TranscriptSchema } from './transcript';
+import { otherSpeakerId, speakerLabel, transcriptModelTitle, TranscriptSchema } from './transcript';
 
 const valid = {
   schemaVersion: 1,
@@ -21,9 +21,22 @@ describe('TranscriptSchema', () => {
     expect(TranscriptSchema.parse({ ...valid, future: 1 })).toMatchObject({ future: 1 });
   });
 
+  it('keeps the title of the model the text was made with', () => {
+    expect(TranscriptSchema.parse({ ...valid, modelTitle: 'Parakeet v3' }).modelTitle).toBe('Parakeet v3');
+    expect(TranscriptSchema.parse(valid).modelTitle).toBeUndefined();
+  });
+
   it('rejects unknown speaker ids', () => {
     const bad = { ...valid, segments: [{ ...valid.segments[0], speakerId: '../x' }] };
     expect(TranscriptSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe('transcriptModelTitle', () => {
+  it('takes the saved title, then the catalog, then the bare id', () => {
+    expect(transcriptModelTitle({ model: 't-one', modelTitle: 'Старое имя' })).toBe('Старое имя');
+    expect(transcriptModelTitle({ model: 'gigaam-v3-e2e-rnnt' })).toBe('GigaAM v3');
+    expect(transcriptModelTitle({ model: 'future-model' })).toBe('future-model');
   });
 });
 

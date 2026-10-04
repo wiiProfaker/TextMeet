@@ -153,11 +153,13 @@ test('«Расшифровать заново» replaces the text and keeps the 
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('button', { name: 'Расшифровать заново' })).toBeFocused();
 
-  // Пока новая расшифровка идёт, старый текст виден, а над ним — её ход.
+  // Пока новая расшифровка идёт, старый текст виден, а над ним — её ход (модели в тестах «скачиваются» мгновенно).
   await expect(page.getByText('Текст заменится, когда новая расшифровка закончится.')).toBeVisible();
-  await expect(page.getByRole('status').filter({ hasText: /В очереди на расшифровку|Готовим звук/ })).toBeVisible();
+  await expect(
+    page.getByRole('status').filter({ hasText: /В очереди на расшифровку|Скачиваем модель GigaAM v3|Готовим звук/ }),
+  ).toBeVisible();
   await expect(page.getByLabel('Текст встречи')).toContainText('Старый текст.');
-  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText(/в очереди на расшифровку|расшифровка/);
+  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText(/в очереди на расшифровку|скачиваем модель|расшифровка/);
 
   await transcription.release();
   await expect(page.getByLabel('Текст встречи')).toContainText('Проверка расшифровки', { timeout: 20_000 });
@@ -189,11 +191,14 @@ test('after a failed re-run the old text stays and another number of participant
   expect(await readMeetingJson(libraryDir, ID)).toMatchObject({ status: 'done', participantsHint: 3 });
 });
 
-test('settings show the transcription model and that nothing is downloaded yet', async () => {
+test('settings show the transcription model and that it is not downloaded yet', async () => {
   launched = await launchApp();
   const { page } = launched;
   await page.getByRole('button', { name: 'Настройки' }).click();
   await expect(page.getByRole('heading', { name: 'Расшифровка' })).toBeVisible();
-  await expect(page.getByText('Скачается при первой расшифровке.')).toBeVisible();
-  await expect(page.getByText('Пока ничего не скачано.')).toBeVisible();
+  const selected = page.getByRole('group', { name: 'Выбрана' });
+  await expect(selected.getByRole('article', { name: 'GigaAM v3' })).toBeVisible();
+  await expect(selected).toContainText('Скачается при первой расшифровке.');
+  // Общие модели голосов ещё не скачаны — их строки нет.
+  await expect(page.getByRole('list', { name: 'Общие модели' })).toHaveCount(0);
 });

@@ -10,6 +10,7 @@ import {
   transcriptionTexts,
 } from './texts';
 import { DownloadError } from './models/download';
+import { MODELS_ENSURING } from './models/model-manager';
 import { WORKER_REFUSALS } from './transcription/protocol';
 
 describe('notificationTexts', () => {
@@ -139,8 +140,13 @@ describe('transcription texts', () => {
   it('explains why models could not be prepared', () => {
     expect(transcriptionTexts.download(new DownloadError('network', 'x'))).toContain('нет связи');
     expect(transcriptionTexts.download(new DownloadError('corrupt', 'x'))).toContain('повреждён');
-    expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toMatch(/нужно \d+ МБ/);
+    expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toBe('Не хватает места на диске для модели расшифровки.');
     expect(transcriptionTexts.download(new DownloadError('disk', 'x'))).toContain('на диск');
+    expect(transcriptionTexts.download(new DownloadError('cancelled', 'x'))).toBe('Скачивание модели отменено.');
+  });
+
+  it('names the model that could not be loaded', () => {
+    expect(transcriptionTexts.modelLoad('Parakeet v3')).toMatch(/^Не удалось загрузить модель «Parakeet v3»\. /);
   });
 
   it('asks for the space the download needs, not for the size of all models', () => {
@@ -203,6 +209,16 @@ describe('transcription texts', () => {
     expect(transcriptionTexts.unexpected(new Error('TypeError: x is undefined'))).toBe(
       transcriptionTexts.workerFailed('что-то внутри'),
     );
+  });
+
+  it('explains why models were not deleted without showing paths', () => {
+    const busy = Object.assign(new Error("EBUSY: resource busy or locked, unlink 'C:\\models\\encoder.onnx'"), { code: 'EBUSY' });
+    expect(transcriptionTexts.deleteModels(busy)).toBe('Не удалось удалить модели: файл занят другой программой');
+    expect(transcriptionTexts.deleteModels(new Error(MODELS_ENSURING))).toBe(`Не удалось удалить модели: ${MODELS_ENSURING}`);
+    const odd = Object.assign(new Error("ENOTEMPTY: directory not empty, rmdir 'C:\\Users\\me\\models'"), { code: 'ENOTEMPTY' });
+    const text = transcriptionTexts.deleteModels(odd);
+    expect(text).toMatch(/^Не удалось удалить модели\. Попробуйте ещё раз/);
+    expect(text).not.toContain('C:');
   });
 
   it('does not double the full stop after a meeting title', () => {

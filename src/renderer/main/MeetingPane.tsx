@@ -1,6 +1,8 @@
 import { useState } from 'react';
+import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
+import { transcriptModelTitle } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { formatLongDate, participantsText } from './format';
@@ -126,14 +128,20 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
   const load = useTranscript(meeting.id, meeting.status, busy !== null || progress !== null);
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
   if (meeting.participantsHint !== null) meta.push(participantsText(meeting.participantsHint));
+  if (load.kind === 'ready') meta.push(`Текст: ${transcriptModelTitle(load.transcript)}`);
   const hasAudio = meeting.tracks.length > 0;
   // Текст уже есть (он виден, пока новый не готов) — в окне предупреждаем, что он заменится.
   const hasText = load.kind === 'ready';
   const transcribeError = meeting.status === 'error' && hasAudio;
   const actions = transcribeActions(meeting.status, hasAudio, load.kind);
+  // «Повторить» — той же моделью, что не справилась (её id в meeting.json); неизвестная — из настроек.
   const retry = () =>
     window.textmeet
-      .transcribe({ meetingId: meeting.id, participantsHint: meeting.participantsHint })
+      .transcribe({
+        meetingId: meeting.id,
+        participantsHint: meeting.participantsHint,
+        model: isAsrModelId(meeting.model) ? meeting.model : null,
+      })
       .catch((err: unknown) => onError(errorText(err)));
 
   return (

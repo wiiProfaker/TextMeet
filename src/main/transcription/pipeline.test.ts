@@ -4,6 +4,7 @@ import type { Engines } from './engines';
 import { fakeEngines, loudIntervals } from './fake-engines';
 import { runPipeline, type PipelineDeps, type PipelineInput, type PipelineProgress } from './pipeline';
 import type { TrackInput } from './routing';
+import { cleanRecognizedText } from './text-cleanup';
 import type { Interval, Turn } from './turns';
 
 /** Сигнал длиной seconds: громкий (0,1) в заданных участках, тишина вокруг. */
@@ -174,7 +175,8 @@ describe('runPipeline', () => {
     const run = runPipeline(input({ tracks: [mic] }), deps);
     threads = 2;
     await run;
-    expect(recognizerThreads).toEqual([2]);
+    // Первый — сразу при запуске (проверка, что модель загружается), второй — после смены числа потоков.
+    expect(recognizerThreads).toEqual([4, 2]);
     const { deps: deps2, recognizerThreads: seen } = setup({
       audio: { mic: signal(30, [{ start: 0, end: 2 }, { start: 5, end: 7 }]) },
       threads: () => (seen.length === 0 ? 4 : 2),
@@ -202,6 +204,25 @@ describe('runPipeline', () => {
     const { deps, progress } = setup({ audio: { mic: signal(10, []), system: signal(10, []) } });
     expect(await runPipeline(input({ durationSec: 10 }), deps)).toEqual({ segments: [], speakers: [], skippedTracks: [] });
     expect(progress.at(-1)?.fraction).toBe(1);
+  });
+
+  it('passes the text of every piece through the filter of the model, if it has one', async () => {
+    const audio = { mic: signal(30, [{ start: 1, end: 3 }, { start: 10, end: 12 }]), system: signal(30, []) };
+    const made = setup({ audio, text: () => 'Продолжение следует...' });
+    const dropped = await runPipeline(input({ participantsHint: null }), { ...made.deps, cleanText: cleanRecognizedText });
+    expect(dropped.segments.map((s) => s.text)).toEqual([]);
+    // Модель без фильтра: та же фраза — настоящая речь.
+    const real = setup({ audio, text: () => ' Продолжение следует... ' });
+    const kept = await runPipeline(input({ participantsHint: null }), real.deps);
+    expect(kept.segments.map((s) => s.text)).toEqual(['Продолжение следует...', 'Продолжение следует...']);
+  });
+
+  it('loads the recognizer before reading the sound, so a broken model fails at once', async () => {
+    const { deps } = setup({ audio: { mic: signal(10, [{ start: 1, end: 3 }]) } });
+    const decode = vi.fn(deps.decode);
+    const broken = { ...deps, decode, engines: { ...deps.engines, recognizer: () => { throw new Error('модель не загрузилась'); } } };
+    await expect(runPipeline(input({ tracks: [mic] }), broken)).rejects.toThrow('модель не загрузилась');
+    expect(decode).not.toHaveBeenCalled();
   });
 
   it('transcribes the readable track when the other one cannot be read', async () => {

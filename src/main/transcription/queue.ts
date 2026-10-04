@@ -1,12 +1,13 @@
 // Очередь расшифровки в main (спецификация Плана 3, §5): одна встреча за раз, процесс расшифровки,
 // прогресс, сторож зависания, отмена, продолжение после запуска. Electron сюда не подключается — процесс внедряется.
+import { asrModel, DEFAULT_ASR_MODEL, isAsrModelId, type AsrModelId } from '../../shared/asr-models';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { updateMeeting } from '../library/library';
 import { writeTranscript } from '../library/transcript-store';
 import type { Logger } from '../logger';
-import type { DownloadProgress } from '../models/model-manager';
-import { ASR_MODEL_ID } from '../models/registry';
+import type { EnsureOptions } from '../models/model-manager';
+import type { ModelGroupId } from '../models/registry';
 import { transcriptionTexts } from '../texts';
 import { buildPipelineInput } from './job-input';
 import type { PipelineInput, PipelineResult } from './pipeline';
@@ -23,7 +24,7 @@ export interface WorkerHandle {
 
 export interface TranscriptionQueueDeps {
   spawn(): WorkerHandle;
-  models: { root: string; ensure(onProgress: (progress: DownloadProgress) => void): Promise<void> };
+  models: { root: string; ensure(groups: readonly ModelGroupId[], options: EnsureOptions): Promise<void> };
   ffmpegPath(): string;
   /** Сколько потоков можно занять сейчас (во время записи — меньше, §5.3). */
   threads(): number;
@@ -45,6 +46,8 @@ export const WATCHDOG_SHARE = 0.5;
  * у которой длительность встречи ещё неизвестна.
  */
 export const DIARIZE_WATCHDOG_FACTOR = 6;
+/** Модели проверяются дольше — во встрече «Готовим модель …» (первая проверка сумм, ожидание чужого скачивания). */
+export const MODELS_SLOW_MS = 700;
 /** Процесс без задач закрывается: модели занимают ~1 ГБ памяти. */
 export const IDLE_SHUTDOWN_MS = 5 * 60_000;
 /** Прогресс в окно — не чаще. */
@@ -56,10 +59,13 @@ interface Job {
   meetingId: string;
 }
 
-/** failed: message — для человека, detail — исходный текст процесса расшифровки (только в журнал). */
+/**
+ * failed: message — для человека, detail — исходный текст процесса расшифровки (только в журнал); modelLoad —
+ * не загрузилась модель расшифровки.
+ */
 type Outcome =
   | { kind: 'done'; result: PipelineResult }
-  | { kind: 'failed'; message: string; detail?: string }
+  | { kind: 'failed'; message: string; detail?: string; modelLoad?: boolean }
   | { kind: 'cancelled' };
 
 /** Ошибка, текст которой написан для человека: во встречу он попадает как есть, остальные — общим текстом. */
@@ -73,6 +79,8 @@ interface Current {
   progress: TranscriptionProgress;
   clock: (DiarizeClock & { startedAt: number }) | null;
   cancelled: boolean;
+  /** Отмена скачивания моделей этой задачи (встречу поставили заново, программа закрывается). */
+  abort: AbortController;
   /** Задача в процессе расшифровки: завершить её (один раз). */
   settle: ((outcome: Outcome) => void) | null;
   /** Сообщение от процесса — сторож зависания начинает отсчёт заново (с новым сроком). */
@@ -92,6 +100,8 @@ export class TranscriptionQueue {
   private starting: Job | null = null;
   private pendingEnqueues = 0;
   private worker: WorkerHandle | null = null;
+  /** Модель последней задачи этого процесса: он держит её в памяти (Whisper — около 1 ГБ). */
+  private workerModel: AsrModelId | null = null;
   private running = false;
   private disposed = false;
   private jobCounter = 0;
@@ -104,10 +114,11 @@ export class TranscriptionQueue {
 
   /**
    * Поставить встречу в очередь («Расшифровать», «Расшифровать заново», «Повторить», после окна «Запись
-   * остановлена»). participantsHint: undefined — оставить как в meeting.json. Если встреча уже расшифровывается —
-   * работа прерывается и начинается заново.
+   * остановлена»). participantsHint и model: undefined — оставить как в meeting.json. Модель пишется в meeting.json
+   * (поле model): по ней продолжится расшифровка после перезапуска. Если встреча уже расшифровывается — работа
+   * прерывается и начинается заново.
    */
-  async enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null): Promise<void> {
+  async enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null, model?: AsrModelId): Promise<void> {
     this.pendingEnqueues += 1;
     try {
       await updateMeeting(libraryDir, meetingId, (m) => {
@@ -117,6 +128,7 @@ export class TranscriptionQueue {
           status: 'queued',
           errorMessage: null,
           ...(participantsHint !== undefined && { participantsHint }),
+          ...(model !== undefined && { model }),
         };
       });
       // Сначала в очередь: сбой обработчика окна не должен оставить встречу «в очереди» без задачи.
@@ -176,7 +188,10 @@ export class TranscriptionQueue {
     clearTimeout(this.idleTimer);
     clearTimeout(this.watchdog);
     clearInterval(this.ticker);
-    if (this.current) this.current.cancelled = true;
+    if (this.current) {
+      this.current.cancelled = true;
+      this.current.abort.abort();
+    }
     this.killWorker(this.worker);
   }
 
@@ -193,6 +208,7 @@ export class TranscriptionQueue {
     const current = this.current;
     if (current && sameJob(current.job, job)) {
       current.cancelled = true;
+      current.abort.abort();
       // Процесс останавливается, только пока он занят этой встречей: готовый результат он уже прислал.
       if (current.settle) this.killWorker(current.worker);
     }
@@ -241,10 +257,12 @@ export class TranscriptionQueue {
       progress: { meetingId, stage: 'prepare', fraction: 0, download: null },
       clock: null,
       cancelled: this.disposed,
+      abort: new AbortController(),
       settle: null,
       rearm: null,
       baseLimitMs: WATCHDOG_MIN_MS,
     };
+    if (current.cancelled) current.abort.abort();
     this.current = current;
     this.report(() => this.deps.libraryChanged());
     this.emitProgress(true);
@@ -266,35 +284,72 @@ export class TranscriptionQueue {
     if (event) this.report(() => this.deps.finished(event));
   }
 
+  /** Модель встречи; встреча Плана 3 (model: null) и неизвестная модель — модель по умолчанию. */
+  private modelOf(meeting: Meeting): AsrModelId {
+    if (isAsrModelId(meeting.model)) return meeting.model;
+    if (meeting.model !== null) {
+      this.deps.logger.warn(`Расшифровка ${meeting.id}: модели «${meeting.model}» нет в каталоге — берём ${DEFAULT_ASR_MODEL}`);
+    }
+    return DEFAULT_ASR_MODEL;
+  }
+
+  /**
+   * Модель встречи и общие модели голосов на месте (скачиваются, если нет). Обычно это доли секунды; дольше —
+   * во встрече «Готовим модель …», пока не пошли байты своего скачивания.
+   */
+  private async ensureModels(current: Current, model: AsrModelId, title: string): Promise<void> {
+    const slow = setTimeout(() => {
+      if (current.progress.stage !== 'download') {
+        this.setProgress(current, { stage: 'download', fraction: 0, download: { done: 0, total: 0, title } });
+      }
+    }, MODELS_SLOW_MS);
+    try {
+      await this.deps.models.ensure([model, 'voices'], {
+        signal: current.abort.signal,
+        onProgress: (download) => this.setProgress(current, { stage: 'download', fraction: 0, download: { ...download, title } }),
+      });
+    } catch (err) {
+      throw new ShownError(transcriptionTexts.download(err), { cause: err });
+    } finally {
+      clearTimeout(slow);
+    }
+    // Модели на месте: дальше — подготовка звука, а не застывшие байты скачивания до первого сообщения процесса.
+    this.setProgress(current, { stage: 'prepare', fraction: 0, download: null });
+  }
+
   /** Модели, процесс расшифровки, запись результата. null — уведомлять не о чем (встречу поставили заново). */
   private async transcribe(current: Current, meeting: Meeting): Promise<{ meeting: Meeting; ok: boolean } | null> {
     const { libraryDir, meetingId } = current.job;
+    const model = this.modelOf(meeting);
+    const { title } = asrModel(model);
+    // Программа закрылась, пока задача записывала статус: скачивание моделей при выходе не начинаем.
+    if (current.cancelled) return null;
     try {
-      await this.deps.models
-        .ensure((download) => this.setProgress(current, { stage: 'download', fraction: 0, download }))
-        .catch((err: unknown) => {
-          throw new ShownError(transcriptionTexts.download(err), { cause: err });
-        });
+      await this.ensureModels(current, model, title);
       if (current.cancelled) return null;
       const input = await buildPipelineInput(libraryDir, meeting);
       if (current.cancelled) return null;
       if (input.tracks.length === 0) throw new ShownError(transcriptionTexts.noTracks);
-      const outcome = await this.runInWorker(current, input);
+      const outcome = await this.runInWorker(current, input, model);
       // Встречу поставили заново (или программа закрывается), пока шла работа: этот результат не нужен.
       if (current.cancelled || outcome.kind === 'cancelled') return null;
-      if (outcome.kind === 'failed') throw new ShownError(outcome.message, { cause: outcome.detail });
+      if (outcome.kind === 'failed') {
+        const message = outcome.modelLoad ? transcriptionTexts.modelLoad(title) : outcome.message;
+        throw new ShownError(message, { cause: outcome.detail });
+      }
       for (const skipped of outcome.result.skippedTracks) {
         this.deps.logger.warn(`Расшифровка ${meetingId}: дорожка ${skipped.kind} не прочитана — ${skipped.message}`);
       }
       await writeTranscript(libraryDir, meetingId, {
         schemaVersion: 1,
-        model: ASR_MODEL_ID,
+        model,
+        modelTitle: title,
         createdAt: new Date(this.deps.now()).toISOString(),
         speakers: outcome.result.speakers,
         segments: outcome.result.segments.map((s) => ({ ...s, edited: false })),
       });
       const done = await updateMeeting(libraryDir, meetingId, (m) =>
-        m.status === 'transcribing' ? { ...m, status: 'done', model: ASR_MODEL_ID, errorMessage: null } : m,
+        m.status === 'transcribing' ? { ...m, status: 'done', model, errorMessage: null } : m,
       );
       if (done.status !== 'done') {
         // Встречу поставили заново, пока результат сохранялся: её расшифруют ещё раз — сообщать о готовности рано.
@@ -332,17 +387,22 @@ export class TranscriptionQueue {
     }
   }
 
-  private runInWorker(current: Current, input: PipelineInput): Promise<Outcome> {
+  private runInWorker(current: Current, input: PipelineInput, model: AsrModelId): Promise<Outcome> {
     // Команда собирается до запуска процесса и сторожа: сбой здесь не оставит взведённого сторожа.
     const command: TranscribeCommand = {
       type: 'transcribe',
       jobId: `job-${++this.jobCounter}`,
       input,
       modelsDir: this.deps.models.root,
+      model,
       ffmpegPath: this.deps.ffmpegPath(),
       threads: this.deps.threads(),
     };
+    // Другая модель: прежний процесс (он простаивает — задачи идут по одной) закрывается, и память его модели
+    // освобождается сразу, а не когда до неё дойдёт сборщик мусора.
+    if (this.worker && this.workerModel !== model) this.killWorker(this.worker);
     const worker = this.ensureWorker();
+    this.workerModel = model;
     return new Promise((resolve) => {
       current.worker = worker;
       current.jobId = command.jobId;
@@ -416,7 +476,12 @@ export class TranscriptionQueue {
     current.settle?.(
       message.type === 'done'
         ? { kind: 'done', result: message.result }
-        : { kind: 'failed', message: transcriptionTexts.workerFailed(message.message), detail: message.message },
+        : {
+            kind: 'failed',
+            message: transcriptionTexts.workerFailed(message.message),
+            detail: message.message,
+            modelLoad: message.code === 'model-load',
+          },
     );
   }
 

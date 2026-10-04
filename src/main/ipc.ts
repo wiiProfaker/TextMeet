@@ -18,16 +18,20 @@ import {
   type RecorderMessageChannel,
   type SettingsState,
 } from '../shared/ipc';
+import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
 import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
-import type { ModelGroupState, ModelsState, TranscriptionProgress } from '../shared/transcription';
+import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import { listMeetings, meetingDir } from './library/library';
 import { readTranscript } from './library/transcript-store';
 import type { Logger } from './logger';
+import type { ModelStore } from './models/model-manager';
+import { buildModelsState, type CatalogDownloadsSnapshot } from './models/models-state';
+import { MODEL_GROUP_IDS } from './models/registry';
 import type { RecordingController } from './recording/controller';
 import type { SettingsStore } from './settings/settings-store';
-import { systemSettingsUrl } from './texts';
+import { systemSettingsUrl, transcriptionTexts } from './texts';
 
 export interface IpcDeps {
   settings: SettingsStore;
@@ -47,14 +51,17 @@ export interface IpcDeps {
   /** Горячая клавиша сменилась — обновить подсказку в меню трея. */
   hotkeyChanged(): void;
   transcription: {
-    enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null): Promise<void>;
+    enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null, model?: AsrModelId): Promise<void>;
     progress(): TranscriptionProgress[];
     isBusy(): boolean;
     stopIdleWorker(): void;
   };
-  models: {
-    state(): Promise<ModelGroupState[]>;
-    remove(group: 'gigaam' | 'voices'): Promise<void>;
+  models: Pick<ModelStore, 'state' | 'remove'>;
+  downloads: {
+    start(id: AsrModelId): void;
+    cancel(id: AsrModelId): Promise<void>;
+    snapshot(): CatalogDownloadsSnapshot;
+    isBusy(): boolean;
   };
 }
 
@@ -74,10 +81,13 @@ const LIBRARY_LOCKED = 'Во время записи папку библиоте
 const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запись остановлена».';
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
+const MODELS_DOWNLOADING = 'Модели нельзя удалить, пока скачивается модель.';
 
+const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
 const TranscribeRequestSchema = z.object({
   meetingId: MeetingIdSchema,
   participantsHint: z.number().int().min(1).max(50).nullable(),
+  model: AsrModelIdSchema.nullable(),
 });
 
 const RecorderSchemas = {
@@ -264,29 +274,52 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.transcribe, async (arg) => {
     const request = TranscribeRequestSchema.parse(arg);
-    await deps.transcription.enqueue(deps.libraryDir(), request.meetingId, request.participantsHint);
+    const model = request.model ?? deps.settings.get().asrModel;
+    await deps.transcription.enqueue(deps.libraryDir(), request.meetingId, request.participantsHint, model);
   });
 
   handle(IPC.getTranscript, (arg) => readTranscript(deps.libraryDir(), MeetingIdSchema.parse(arg)));
 
   handle(IPC.getTranscriptionProgress, () => deps.transcription.progress());
 
-  const modelsState = async (): Promise<ModelsState> => ({
-    groups: await deps.models.state(),
-    busy: deps.transcription.isBusy(),
-  });
+  const modelsState = async (): Promise<ModelsState> =>
+    buildModelsState(
+      await deps.models.state(),
+      deps.settings.get().asrModel,
+      deps.downloads.snapshot(),
+      deps.transcription.isBusy(),
+    );
 
   handle(IPC.getModels, () => modelsState());
 
   handle(IPC.deleteModels, async (arg) => {
-    const group = z.enum(['gigaam', 'voices']).parse(arg);
+    const group = z.enum(MODEL_GROUP_IDS).parse(arg);
     if (deps.transcription.isBusy()) throw new Error(MODELS_BUSY);
+    if (deps.downloads.isBusy()) throw new Error(MODELS_DOWNLOADING);
     deps.transcription.stopIdleWorker();
     try {
       await deps.models.remove(group);
     } catch (err) {
-      throw humanFsError('Не удалось удалить модели', err);
+      // Исходная ошибка (cause) попадает в журнал вместе с этой.
+      throw new Error(transcriptionTexts.deleteModels(err), { cause: err });
     }
+    // Удалили выбранную модель — новые встречи пойдут на модель по умолчанию (она скачается при расшифровке).
+    if (group === deps.settings.get().asrModel) await deps.settings.update({ asrModel: DEFAULT_ASR_MODEL });
+    return modelsState();
+  });
+
+  handle(IPC.downloadModel, async (arg) => {
+    deps.downloads.start(AsrModelIdSchema.parse(arg));
+    return modelsState();
+  });
+
+  handle(IPC.cancelModelDownload, async (arg) => {
+    await deps.downloads.cancel(AsrModelIdSchema.parse(arg));
+    return modelsState();
+  });
+
+  handle(IPC.selectModel, async (arg) => {
+    await deps.settings.update({ asrModel: AsrModelIdSchema.parse(arg) });
     return modelsState();
   });
 

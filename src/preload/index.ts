@@ -64,10 +64,14 @@ const api: TextMeetApi = {
   getTranscriptionProgress: () => invoke(IPC.getTranscriptionProgress),
   getModels: () => invoke(IPC.getModels),
   deleteModels: (group) => invoke(IPC.deleteModels, group),
+  downloadModel: (id) => invoke(IPC.downloadModel, id),
+  cancelModelDownload: (id) => invoke(IPC.cancelModelDownload, id),
+  selectModel: (id) => invoke(IPC.selectModel, id),
   onRecordingState: (listener) => subscribe(IPC.recordingState, listener),
   onPeaks: (listener) => subscribe(IPC.recordingPeaks, listener),
   onLibraryChanged: (listener) => subscribe(IPC.libraryChanged, () => listener()),
   onTranscriptionProgress: (listener) => subscribe(IPC.transcriptionProgress, listener),
+  onModelsChanged: (listener) => subscribe(IPC.modelsChanged, () => listener()),
   onShowMeeting: (listener) => showMeeting.subscribe(listener),
 };
 

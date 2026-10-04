@@ -13,6 +13,7 @@ export default defineConfig({
       include: ['src/**/*.{ts,tsx}'],
       exclude: [
         '**/*.test.ts',
+        '**/*.catalog-test.ts',
         'src/test-support/**',
         'src/shared/ipc.ts',
         'src/preload/**',

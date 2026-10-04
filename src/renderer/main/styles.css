@@ -1163,73 +1163,185 @@ kbd.k {
   margin-left: auto;
 }
 
-/* ---- Настройки → Расшифровка ---- */
-.opts {
+/* ---- Настройки → Расшифровка: каталог моделей (решения Плана 7, §2) ---- */
+.catalog {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 18px;
   width: 100%;
 }
 
-.opt {
+.mgroup {
   display: flex;
-  gap: 12px;
-  padding: 12px 14px;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mgroup h3 {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.mcard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px 12px;
   border: 1px solid var(--line);
-  border-radius: var(--r);
+  border-radius: 10px;
   background: var(--surface);
-  text-align: left;
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 
-.opt.on {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+.mcard:hover {
+  border-color: var(--muted);
 }
 
-.radio {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1.5px solid var(--muted);
-  flex: none;
-  margin-top: 2px;
-  position: relative;
+/* Выбранная модель — чернильная рамка, как у главных кнопок. */
+.mcard.on {
+  border-color: var(--btn);
+  box-shadow: 0 0 0 1px var(--btn), 0 6px 18px rgba(38, 34, 27, 0.08);
 }
 
-.opt.on .radio {
-  border-color: var(--accent);
+.mcard-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
 }
 
-.opt.on .radio i {
-  position: absolute;
-  left: 3px;
-  top: 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-
-.opt-text {
+.mcard-name {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   flex: 1;
   min-width: 0;
 }
 
-.opt b {
-  display: block;
+.mcard-name b {
+  font-family: var(--f-text);
+  font-size: 17px;
   font-weight: 600;
 }
 
-.opt small {
-  display: block;
-  margin-top: 2px;
+.mcard-name .by {
+  color: var(--muted);
+  font-size: 12.5px;
 }
 
-.opt .side-note {
+.tag {
+  align-self: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--now);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.mcard-bars {
+  display: grid;
+  gap: 4px;
+  flex: none;
+}
+
+.pips-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.pips {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.pips i {
+  width: 12px;
+  height: 5px;
+  border-radius: 2px;
+  background: var(--meter-off);
+}
+
+.pips i.on {
+  background: var(--accent);
+}
+
+.mcard-desc,
+.mcard-warn {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.mcard-warn {
+  color: var(--warn);
+}
+
+.mcard-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mcard-progress .prog {
+  flex: 1;
+}
+
+.mcard-foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 4px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.mcard-acts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-left: auto;
+}
+
+.mcard-acts .btn {
+  height: 30px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.mcard-note {
   color: var(--muted);
   font-size: 12px;
-  white-space: nowrap;
+}
+
+/* Окно «Расшифровать»: выбор модели. */
+.dlg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dlg-field .selw select {
+  min-width: 0;
+  width: 100%;
+}
+
+.dlg-field .selw {
+  display: flex;
 }
 
 .mlist {

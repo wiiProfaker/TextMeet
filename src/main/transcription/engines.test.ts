@@ -1,18 +1,24 @@
 import { describe, expect, it, vi } from 'vitest';
-import { enginesByModelsDir, latestByThreads } from './engines';
+import { enginesByModel, latestByThreads } from './engines';
 import { fakeEngines } from './fake-engines';
 
-describe('enginesByModelsDir', () => {
-  it('loads the engines once per models folder and again only when the folder changes', () => {
-    const create = vi.fn((_modelsDir: string) => fakeEngines());
-    const enginesFor = enginesByModelsDir(create);
-    const first = enginesFor('M');
-    expect(enginesFor('M')).toBe(first);
+describe('enginesByModel', () => {
+  it('loads the engines once per models folder and model, and again only when one of them changes', () => {
+    const create = vi.fn((_modelsDir: string, _model: string) => fakeEngines());
+    const enginesFor = enginesByModel(create);
+    const first = enginesFor('M', 'gigaam-v3-e2e-rnnt');
+    expect(enginesFor('M', 'gigaam-v3-e2e-rnnt')).toBe(first);
     expect(create).toHaveBeenCalledTimes(1);
-    const other = enginesFor('N');
-    expect(other).not.toBe(first);
-    expect(enginesFor('N')).toBe(other);
-    expect(create.mock.calls.map(([dir]) => dir)).toEqual(['M', 'N']);
+    const otherDir = enginesFor('N', 'gigaam-v3-e2e-rnnt');
+    expect(otherDir).not.toBe(first);
+    const otherModel = enginesFor('N', 't-one');
+    expect(otherModel).not.toBe(otherDir);
+    expect(enginesFor('N', 't-one')).toBe(otherModel);
+    expect(create.mock.calls).toEqual([
+      ['M', 'gigaam-v3-e2e-rnnt'],
+      ['N', 'gigaam-v3-e2e-rnnt'],
+      ['N', 't-one'],
+    ]);
   });
 });
 

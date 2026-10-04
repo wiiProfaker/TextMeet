@@ -10,6 +10,7 @@ describe('SettingsSchema', () => {
       microphoneId: null,
       recordHotkey: null,
       recordSounds: true,
+      asrModel: 'gigaam-v3-e2e-rnnt',
     });
   });
 
@@ -21,6 +22,16 @@ describe('SettingsSchema', () => {
   it('keeps recording settings', () => {
     const parsed = SettingsSchema.parse({ microphoneId: 'abc', recordHotkey: 'Control+Alt+R', recordSounds: false });
     expect(parsed).toMatchObject({ microphoneId: 'abc', recordHotkey: 'Control+Alt+R', recordSounds: false });
+  });
+
+  it('keeps the chosen transcription model', () => {
+    expect(SettingsSchema.parse({ asrModel: 'parakeet-tdt-0.6b-v3' }).asrModel).toBe('parakeet-tdt-0.6b-v3');
+  });
+
+  it('reads an unknown or broken model as the default one without dropping the other settings', () => {
+    const parsed = SettingsSchema.parse({ asrModel: 'whisper-tiny', recordSounds: false });
+    expect(parsed).toMatchObject({ asrModel: 'gigaam-v3-e2e-rnnt', recordSounds: false });
+    expect(SettingsSchema.parse({ asrModel: 42 }).asrModel).toBe('gigaam-v3-e2e-rnnt');
   });
 
   it('rejects wrong types and empty values', () => {

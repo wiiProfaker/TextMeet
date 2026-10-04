@@ -6,7 +6,7 @@ import { writeJsonAtomic } from '../fs/atomic-write';
 import { readJsonFile } from '../fs/read-json';
 import type { Logger } from '../logger';
 import { DownloadError, downloadFile, sha256File } from './download';
-import { MODEL_FILES, MODEL_GROUPS, modelFilePath, type ModelFile, type ModelGroupId } from './registry';
+import { MODEL_FILES, MODEL_GROUP_IDS, modelFilePath, type ModelFile, type ModelGroupId } from './registry';
 
 /** Файл, куда запоминается, какие модели уже проверены по SHA-256 (проверка 320 МБ — пара секунд). */
 export const VERIFIED_FILE = 'verified.json';
@@ -23,6 +23,37 @@ export interface DownloadProgress {
   total: number;
 }
 
+export interface EnsureOptions {
+  onProgress?(progress: DownloadProgress): void;
+  /** Отмена скачивания (кнопка «Отменить» в карточке модели). */
+  signal?: AbortSignal;
+}
+
+/** Модели на диске глазами main: ModelManager, а в автотестах — FakeModelStore. */
+export interface ModelStore {
+  readonly root: string;
+  ensure(groups: readonly ModelGroupId[], options?: EnsureOptions): Promise<void>;
+  state(): Promise<(ModelGroupState & { id: ModelGroupId })[]>;
+  remove(group: ModelGroupId): Promise<void>;
+}
+
+const cancelled = (): DownloadError => new DownloadError('cancelled', 'скачивание отменено');
+
+/** Дождаться своей очереди; отмена прерывает ожидание. */
+function untilAborted(turn: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return turn;
+  if (signal.aborted) return Promise.reject(cancelled());
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => reject(cancelled());
+    signal.addEventListener('abort', onAbort, { once: true });
+    void turn.then(() => {
+      signal.removeEventListener('abort', onAbort);
+      if (signal.aborted) reject(cancelled());
+      else resolve();
+    });
+  });
+}
+
 export interface ModelManagerDeps {
   root: string;
   logger: Logger;
@@ -33,8 +64,10 @@ export interface ModelManagerDeps {
 }
 
 /** Модели на диске: проверка, скачивание недостающих, удаление по группам. */
-export class ModelManager {
-  private ensuring: Promise<void> | null = null;
+export class ModelManager implements ModelStore {
+  /** Проверки и скачивания идут по одной: две не качают один файл и не делят место на диске. */
+  private chain: Promise<void> = Promise.resolve();
+  private ensuring = 0;
   private removing: Promise<void> | null = null;
   private readonly files: readonly ModelFile[];
 
@@ -47,39 +80,50 @@ export class ModelManager {
   }
 
   /**
-   * Все модели на месте и целы; недостающие и испорченные скачиваются.
-   * Одновременные вызовы ждут одну и ту же проверку; идущее удаление проверка сначала дожидается.
+   * Файлы групп на месте и целы; недостающие и испорченные скачиваются. Вызовы идут по очереди: второй ждёт первого
+   * и находит уже скачанное. Идущее удаление проверка сначала дожидается. Отмена (options.signal) снимает и вызов,
+   * который ещё ждёт своей очереди, — сразу, не дожидаясь чужого скачивания. Уже проверенные группы отвечают сразу:
+   * расшифровка не ждёт, пока в настройках докачается другая модель.
    */
-  ensure(onProgress: (progress: DownloadProgress) => void = () => undefined): Promise<void> {
+  ensure(groups: readonly ModelGroupId[], options: EnsureOptions = {}): Promise<void> {
+    this.ensuring += 1;
+    const files = this.files.filter((f) => groups.includes(f.group));
     const removing = this.removing?.catch(() => undefined);
-    this.ensuring ??= (async () => {
+    // Пока идёт удаление, «проверено» могло устареть — тогда только через очередь.
+    const ready = removing ? Promise.resolve(false) : this.allVerified(files);
+    const turn = this.chain;
+    const queued = untilAborted(turn, options.signal).then(async () => {
+      if (await ready) return;
       await removing;
-      await this.runEnsure(onProgress);
-    })().finally(() => {
-      this.ensuring = null;
+      await this.runEnsure(files, options);
     });
-    return this.ensuring;
+    // Следующий вызов ждёт и этот, и предыдущий: снятый с очереди вызов не пропускает его вперёд чужого скачивания.
+    this.chain = Promise.all([turn, queued.catch(() => undefined)]).then(() => undefined);
+    const run = ready.then((ok) => (ok && !options.signal?.aborted ? undefined : queued));
+    return run.finally(() => {
+      this.ensuring -= 1;
+    });
   }
 
-  async state(): Promise<ModelGroupState[]> {
+  /** Группы, у которых есть файлы, в порядке каталога: размер и скачаны ли. */
+  async state(): Promise<(ModelGroupState & { id: ModelGroupId })[]> {
     const verified = await this.readVerified();
+    const groups = MODEL_GROUP_IDS.filter((id) => this.files.some((f) => f.group === id));
     return Promise.all(
-      MODEL_GROUPS.map(async (group) => {
-        const files = this.files.filter((f) => f.group === group.id);
+      groups.map(async (id) => {
+        const files = this.files.filter((f) => f.group === id);
         const present = await Promise.all(files.map((f) => this.isVerified(f, verified)));
-        return {
-          id: group.id,
-          title: group.title,
-          sizeBytes: files.reduce((sum, f) => sum + f.size, 0),
-          installed: present.every(Boolean),
-        };
+        return { id, sizeBytes: files.reduce((sum, f) => sum + f.size, 0), installed: present.every(Boolean) };
       }),
     );
   }
 
-  /** Удаляет группу моделей. Во время проверки или скачивания (ensure) отказывает: main удаляет только без очереди. */
+  /**
+   * Удаляет группу моделей вместе с недокачанными кусками. Во время проверки или скачивания (ensure) отказывает:
+   * main удаляет только без очереди и без скачивания из каталога.
+   */
   remove(group: ModelGroupId): Promise<void> {
-    if (this.ensuring) return Promise.reject(new Error(MODELS_ENSURING));
+    if (this.ensuring > 0) return Promise.reject(new Error(MODELS_ENSURING));
     const previous = this.removing?.catch(() => undefined);
     const removing = (async () => {
       await previous;
@@ -104,15 +148,18 @@ export class ModelManager {
     this.deps.logger.info(`Модели удалены: ${group}`);
   }
 
-  private async runEnsure(onProgress: (progress: DownloadProgress) => void): Promise<void> {
+  private async runEnsure(files: readonly ModelFile[], options: EnsureOptions): Promise<void> {
+    if (options.signal?.aborted) throw cancelled();
+    const onProgress = options.onProgress ?? (() => undefined);
     const verified = await this.readVerified();
     const missing: ModelFile[] = [];
-    for (const file of this.files) {
+    for (const file of files) {
       if (await this.isVerified(file, verified)) continue;
       if (await this.checkExisting(file, verified)) continue;
       missing.push(file);
     }
     if (missing.length === 0) return;
+    if (options.signal?.aborted) throw cancelled();
 
     const total = missing.reduce((sum, f) => sum + f.size, 0);
     await fsp.mkdir(this.deps.root, { recursive: true }).catch((err: unknown) => {
@@ -146,6 +193,7 @@ export class ModelManager {
         size: file.size,
         sha256: file.sha256,
         onProgress: (bytes) => onProgress({ done: finished + bytes, total }),
+        ...(options.signal && { signal: options.signal }),
       });
       finished += file.size;
       verified[file.path] = await this.fingerprint(dest, file.sha256);
@@ -167,6 +215,13 @@ export class ModelManager {
     verified[file.path] = { size: stats.size, mtimeMs: stats.mtimeMs, sha256: sha };
     await this.writeVerified(verified);
     return true;
+  }
+
+  /** Все файлы уже проверены и с тех пор не менялись. */
+  private async allVerified(files: readonly ModelFile[]): Promise<boolean> {
+    const verified = await this.readVerified();
+    const present = await Promise.all(files.map((f) => this.isVerified(f, verified)));
+    return present.every(Boolean);
   }
 
   private async isVerified(file: ModelFile, verified: Verified): Promise<boolean> {

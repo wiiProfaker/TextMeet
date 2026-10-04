@@ -2,7 +2,11 @@ import type { KeyboardEvent } from 'react';
 
 /** Tab и Shift+Tab ходят по кругу внутри окна: кнопки за ним (например, «Начать запись») недоступны. */
 export function keepFocusInside(dialog: HTMLElement, event: KeyboardEvent<HTMLElement>): void {
-  const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled])')];
+  const focusable = [
+    ...dialog.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])',
+    ),
+  ];
   const first = focusable[0];
   const last = focusable.at(-1);
   if (!first || !last) return;

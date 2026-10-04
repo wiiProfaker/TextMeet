@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatDurationShort } from './format';
+import { formatBytes, formatDownloaded, formatDurationShort, formatMegabytes } from './format';
 
 describe('formatDurationShort', () => {
   it.each([
@@ -18,6 +18,14 @@ describe('formatDurationShort', () => {
     expect(formatDurationShort(null)).toBe('—');
     expect(formatDurationShort(-1)).toBe('—');
     expect(formatDurationShort(Number.NaN)).toBe('—');
+  });
+});
+
+describe('formatDownloaded', () => {
+  it('counts in megabytes', () => {
+    expect(formatDownloaded(120.4 * 1024 * 1024, 464 * 1024 * 1024)).toBe('120 из 464 МБ');
+    expect(formatDownloaded(-1, 0)).toBe('0 из 0 МБ');
+    expect(formatMegabytes(670.6 * 1024 * 1024)).toBe('671 МБ');
   });
 });
 

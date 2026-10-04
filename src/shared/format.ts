@@ -14,6 +14,14 @@ export function formatDurationShort(seconds: number | null): string {
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
 
+const megabytes = (bytes: number): number => Math.round(Math.max(0, bytes) / MB);
+
+/** Размер модели: всегда в мегабайтах («671 МБ») — как и ход её скачивания. */
+export const formatMegabytes = (bytes: number): string => `${megabytes(bytes)} МБ`;
+
+/** Ход скачивания: «120 из 464 МБ» — мегабайты, чтобы число росло заметно и у больших моделей. */
+export const formatDownloaded = (done: number, total: number): string => `${megabytes(done)} из ${megabytes(total)} МБ`;
+
 /** Размер для людей: «50 МБ», «0,8 ГБ», «214 ГБ» (от 100 МБ — в гигабайтах). */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';

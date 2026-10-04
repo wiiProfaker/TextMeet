@@ -16,6 +16,8 @@ import {
   parseParticipants,
   participantsText,
   pluralize,
+  searchFoundText,
+  searchMeetingMeta,
 } from './format';
 
 const meeting = (id: string, createdAt: Date, patch: Partial<Meeting> = {}): Meeting => ({
@@ -250,5 +252,30 @@ describe('deleteAudioText', () => {
   it('leaves out what is not known yet', () => {
     expect(deleteAudioText(null, null)).toBe(`Запись ${tail}`);
     expect(deleteAudioText(120, null)).toBe(`Запись (2 мин) ${tail}`);
+  });
+});
+
+describe('search texts', () => {
+  const now = new Date(2026, 9, 4, 12, 0);
+
+  it('describes a found meeting by its day, time and number of matches', () => {
+    expect(searchMeetingMeta(new Date(2026, 9, 3, 16, 20).toISOString(), 2, now)).toBe('вчера, 16:20 · 2 совпадения');
+    expect(searchMeetingMeta(new Date(2026, 9, 4, 11, 0).toISOString(), 1, now)).toBe('сегодня, 11:00 · 1 совпадение');
+    expect(searchMeetingMeta(new Date(2026, 8, 22, 10, 0).toISOString(), 14, now)).toBe(
+      '22 сентября, 10:00 · 14 совпадений',
+    );
+  });
+
+  it('leaves out the number when only the title matched', () => {
+    expect(searchMeetingMeta(new Date(2026, 8, 22, 10, 0).toISOString(), 0, now)).toBe('22 сентября, 10:00');
+  });
+
+  it('says how many meetings were found', () => {
+    expect(searchFoundText(0, false)).toBe('Ничего не найдено');
+    expect(searchFoundText(1, false)).toBe('Найдено в 1 встрече');
+    expect(searchFoundText(3, false)).toBe('Найдено в 3 встречах');
+    expect(searchFoundText(11, false)).toBe('Найдено в 11 встречах');
+    expect(searchFoundText(21, false)).toBe('Найдено в 21 встрече');
+    expect(searchFoundText(200, true)).toBe('Найдено в первых 200 встречах');
   });
 });

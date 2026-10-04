@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react';
+import { createContext, useCallback, useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react';
 import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
+import type { SearchResult } from '../../shared/search';
+import { isSearchable } from '../../shared/search-text';
 import type { Transcript } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
@@ -301,3 +303,66 @@ export function usePlayback(meetingId: string, fallbackDuration: number | null):
     },
   };
 }
+
+/** Пауза набора перед поиском. */
+const SEARCH_DELAY_MS = 200;
+
+export type SearchState =
+  | { kind: 'idle' }
+  | { kind: 'searching'; result: SearchResult | null }
+  | { kind: 'ready'; result: SearchResult }
+  | { kind: 'error'; message: string };
+
+/**
+ * Поиск по всем встречам: после паузы набора; показывается только ответ на последний запрос. Повторяется, когда
+ * библиотека изменилась и при возврате в окно — найденное не устаревает.
+ */
+export function useSearch(query: string): SearchState {
+  const [state, setState] = useState<SearchState>({ kind: 'idle' });
+  const [again, setAgain] = useState(0);
+  const latest = useRef(0);
+  const active = isSearchable(query);
+
+  useEffect(() => {
+    if (!active) return;
+    const bump = () => setAgain((n) => n + 1);
+    window.addEventListener('focus', bump);
+    const unsubscribe = window.textmeet.onLibraryChanged(bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      unsubscribe();
+    };
+  }, [active]);
+
+  useEffect(() => {
+    const request = ++latest.current;
+    if (!active) {
+      setState({ kind: 'idle' });
+      return;
+    }
+    setState((current) => ({ kind: 'searching', result: current.kind === 'ready' ? current.result : null }));
+    const timer = setTimeout(() => {
+      window.textmeet
+        .search(query)
+        .then((result) => {
+          if (request === latest.current) setState({ kind: 'ready', result });
+        })
+        .catch((err: unknown) => {
+          if (request === latest.current) setState({ kind: 'error', message: errorText(err) });
+        });
+    }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [query, active, again]);
+
+  return state;
+}
+
+/** Поиск глазами открытой встречи: слова для подсветки и реплика, к которой перешли из найденного. */
+export interface SearchView {
+  /** Слова запроса; пусто — поиска нет. */
+  words: readonly string[];
+  /** nonce — каждый переход новый: повторный щелчок по той же реплике снова к ней прокручивает. */
+  focus: { meetingId: string; segmentId: string; nonce: number } | null;
+}
+
+export const SearchViewContext = createContext<SearchView>({ words: [], focus: null });

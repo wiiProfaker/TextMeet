@@ -24,6 +24,7 @@
   --sp4: #7a6420;
   --warn: #855700;
   --warn-soft: #f4e6c4;
+  --mark: #eacb62;
   --shade: rgba(38, 34, 27, 0.42);
   --f-ui: 'Golos Text', 'Segoe UI', -apple-system, sans-serif;
   --f-text: 'Literata', Georgia, serif;
@@ -57,6 +58,7 @@
     --sp4: #e0c477;
     --warn: #e8b04b;
     --warn-soft: #3b2f17;
+    --mark: #7a6420;
     --shade: rgba(0, 0, 0, 0.55);
   }
 }
@@ -1342,12 +1344,12 @@ button.chip:hover {
 .say-edit {
   display: block;
   width: calc(100% + 22px);
-  margin: -7px -11px 0;
+  margin: -3px -11px 0;
   border: 1px solid var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
   border-radius: var(--r);
   background: var(--surface);
-  padding: 6px 10px;
+  padding: 2px 10px;
   font-family: var(--f-text);
   font-size: 16.5px;
   line-height: 1.55;
@@ -1697,4 +1699,142 @@ button.chip:hover {
 .lnk:disabled {
   color: var(--muted);
   cursor: default;
+}
+
+/* ---- Поиск по всем встречам (лист 10 макета) ---- */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px 0 10px;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  flex: none;
+}
+
+.search:focus-within,
+.search.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+}
+
+.search input::placeholder {
+  color: var(--muted);
+}
+
+.search .clr {
+  display: flex;
+  border: 0;
+  background: none;
+  padding: 3px;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.search .clr:hover {
+  color: var(--text);
+}
+
+mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.found-n {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 10px 6px;
+}
+
+.rg {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: 8px;
+}
+
+.rg-h,
+.hit,
+.more {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.rg-h {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px 4px;
+}
+
+.rg-h b {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.rg-h span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hit {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.rg-h:hover,
+.hit:hover {
+  background: color-mix(in srgb, var(--sel) 55%, transparent);
+}
+
+.hit[aria-current='true'] {
+  background: var(--sel);
+}
+
+.hit .ht {
+  font-family: var(--f-text);
+  font-size: 11.5px;
+  color: var(--muted);
+  padding-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hit .hw {
+  font-weight: 600;
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.more {
+  padding: 2px 10px 2px 54px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+/* Реплика, к которой перешли из найденного. */
+.row.found {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }

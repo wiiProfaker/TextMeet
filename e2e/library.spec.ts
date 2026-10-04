@@ -285,3 +285,50 @@ test('«Расшифровать заново» warns that edits and names will 
     'ваши правки и имена собеседников пропадут',
   );
 });
+
+test('search finds segments and titles in all meetings and opens the meeting at the segment', async () => {
+  const OTHER = '2026-09-24_1000_d4e5f6';
+  launched = await launchApp({
+    meetings: [
+      doneMeeting(),
+      { id: OTHER, json: meetingJson(OTHER, { title: 'Бюджет 2027', createdAt: '2026-09-24T07:00:00.000Z' }) },
+    ],
+    transcripts: { [ID]: TRANSCRIPT },
+  });
+  const { page } = launched;
+  const box = page.getByRole('searchbox', { name: 'Поиск по всем встречам' });
+  const found = page.getByRole('navigation', { name: 'Найдено' });
+
+  await box.fill('БЮДЖЕТ');
+  await expect(found.getByRole('status')).toHaveText('Найдено в 2 встречах');
+  await expect(found.getByRole('group', { name: 'Бюджет 2027' })).toBeVisible();
+  await found.getByRole('button', { name: /По бюджету на октябрь/ }).click();
+
+  await expect(page.getByRole('heading', { name: 'Созвон с Ириной' })).toBeVisible();
+  const row = page.getByLabel('Текст встречи').locator('.row.found');
+  await expect(row).toContainText('По бюджету на октябрь');
+  await expect(row.locator('mark')).toHaveText('бюджет');
+  await expect(found.getByRole('button', { name: /По бюджету на октябрь/ })).toHaveAttribute('aria-current', 'true');
+
+  await box.fill('ёлка зима');
+  await expect(found.getByRole('status')).toHaveText('Ничего не найдено');
+
+  await box.press('Escape');
+  await expect(found).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Встречи' })).toContainText('Бюджет 2027');
+  await expect(page.getByLabel('Текст встречи').locator('mark')).toHaveCount(0);
+});
+
+test('search sees a segment right after it was edited', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page } = launched;
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  await text.getByRole('button', { name: 'Без подрядчиков.' }).click();
+  await text.getByRole('textbox', { name: 'Текст реплики' }).fill('Без подрядчиков из Самары.');
+  await text.getByRole('textbox', { name: 'Текст реплики' }).press('Enter');
+  await expect(text.getByRole('button', { name: 'Без подрядчиков из Самары.' })).toBeVisible();
+
+  await page.getByRole('searchbox', { name: 'Поиск по всем встречам' }).fill('самары');
+  await expect(page.getByRole('navigation', { name: 'Найдено' }).getByRole('status')).toHaveText('Найдено в 1 встрече');
+});

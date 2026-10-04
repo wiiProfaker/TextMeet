@@ -21,6 +21,10 @@ interface Props {
   onPlayAt: ((seconds: number) => void) | null;
   /** Сохранить правку; null — текст сейчас не правится (идёт расшифровка заново). */
   onEdit: ((edit: TranscriptEdit) => Promise<void>) | null;
+  /** Слова поиска — подсвечены в репликах. */
+  searchWords: readonly string[];
+  /** Реплика, к которой перешли из найденного: прокрутить к ней и обвести. */
+  focus: { segmentId: string; nonce: number } | null;
   /** Переименовать спикера во всей встрече; null — сейчас нельзя. */
   onRenameSpeaker: ((speakerId: SpeakerId, name: string | null) => Promise<void>) | null;
   onError(message: string): void;
@@ -36,6 +40,9 @@ interface RowProps {
   segment: TranscriptSegment;
   label: string;
   now: boolean;
+  /** Перешли к этой реплике из найденного. */
+  found: boolean;
+  words: readonly string[];
   onPlayAt: ((seconds: number) => void) | null;
   editing: boolean;
   /** null — реплику не править. */
@@ -56,6 +63,8 @@ const Row = memo(function Row({
   segment,
   label,
   now,
+  found,
+  words,
   onPlayAt,
   editing,
   setEditing,
@@ -69,7 +78,7 @@ const Row = memo(function Row({
   const tone = speakerTone(segment.speakerId);
   return (
     <div
-      className={['row', now && 'now', menuOpen && 'menu-open'].filter(Boolean).join(' ')}
+      className={['row', now && 'now', found && 'found', menuOpen && 'menu-open'].filter(Boolean).join(' ')}
       data-segment={segment.id}
       aria-current={now ? 'true' : undefined}
     >
@@ -117,6 +126,7 @@ const Row = memo(function Row({
         )}
         <SegmentText
           text={segment.text}
+          words={words}
           editable={setEditing !== null}
           editing={editing}
           onStartEditing={() => setEditing?.(segment.id)}
@@ -136,6 +146,8 @@ export function TranscriptView({
   playing,
   onPlayAt,
   onEdit,
+  searchWords,
+  focus,
   onRenameSpeaker,
   onError,
 }: Props) {
@@ -153,6 +165,15 @@ export function TranscriptView({
   );
   const nowId = nowIndex >= 0 ? (transcript.segments[nowIndex]?.id ?? null) : null;
   const editing = editingId !== null;
+  const foundId = focus?.segmentId ?? null;
+
+  // Перешли из найденного — показать реплику посередине.
+  useEffect(() => {
+    if (!focus) return;
+    const row = box.current?.querySelector(`[data-segment="${CSS.escape(focus.segmentId)}"]`);
+    row?.scrollIntoView({ block: 'center' });
+    lastManualScroll.current = Date.now();
+  }, [focus]);
 
   // Звучит следующая реплика — показать её, если человек не листает текст сам и не правит реплику.
   useEffect(() => {
@@ -250,6 +271,8 @@ export function TranscriptView({
             segment={segment}
             label={speakerLabel(segment.speakerId, names)}
             now={i === nowIndex}
+            found={segment.id === foundId}
+            words={searchWords}
             onPlayAt={onPlayAt}
             editing={segment.id === editingId}
             setEditing={onEdit ? setEditingId : null}

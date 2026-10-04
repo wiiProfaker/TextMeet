@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { findRanges, normalize } from '../../shared/search-text';
 import { errorText } from './errors';
+import { Marked } from './SearchResults';
 
 interface Props {
   text: string;
+  /** Слова поиска — подсветить в тексте. */
+  words: readonly string[];
   /** Можно править (не идёт расшифровка заново). */
   editable: boolean;
   editing: boolean;
@@ -24,7 +28,7 @@ function caretOffset(event: MouseEvent<HTMLElement>): number | null {
  * Текст реплики. Щелчок — поле правки того же шрифта: Enter — сохранить, Shift+Enter — новая строка, Esc —
  * отменить, уход из поля — сохранить. Выделение мышью (чтобы скопировать) правку не начинает.
  */
-export function SegmentText({ text, editable, editing, onStartEditing, onStopEditing, onSave }: Props) {
+export function SegmentText({ text, words, editable, editing, onStartEditing, onStopEditing, onSave }: Props) {
   const [draft, setDraft] = useState(text);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -47,7 +51,8 @@ export function SegmentText({ text, editable, editing, onStartEditing, onStopEdi
   }, [editing]);
 
   if (!editing) {
-    if (!editable) return <div className="say">{text}</div>;
+    const shown = words.length > 0 ? <Marked text={text} ranges={findRanges(normalize(text), words)} /> : text;
+    if (!editable) return <div className="say">{shown}</div>;
     return (
       <div
         className="say editable"
@@ -68,7 +73,7 @@ export function SegmentText({ text, editable, editing, onStartEditing, onStopEdi
           onStartEditing();
         }}
       >
-        {text}
+        {shown}
       </div>
     );
   }

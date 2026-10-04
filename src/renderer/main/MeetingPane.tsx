@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useContext, useMemo, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
@@ -7,7 +7,7 @@ import { hasManualChanges, type TranscriptEdit } from '../../shared/transcript-e
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { formatLongDate, participantsText } from './format';
-import { usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
+import { SearchViewContext, usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, TrashIcon, WarnIcon } from './icons';
 import { MeetingTitle } from './MeetingTitle';
 import { Player } from './Player';
@@ -127,6 +127,8 @@ function ReadyText({
 }) {
   const { transcript } = load;
   const starts = useMemo(() => transcript.segments.map((s) => s.start), [transcript]);
+  const search = useContext(SearchViewContext);
+  const focus = search.focus?.meetingId === meeting.id ? search.focus : null;
   const renameSpeaker = useCallback(
     async (speakerId: SpeakerId, name: string | null) => {
       await window.textmeet.renameSpeaker({ meetingId: meeting.id, speakerId, name });
@@ -143,6 +145,8 @@ function ReadyText({
       playing={playback.playing}
       onPlayAt={canPlay ? playback.seekAndPlay : null}
       onEdit={onEdit}
+      searchWords={search.words}
+      focus={focus}
       onRenameSpeaker={renameSpeaker}
       onError={onError}
     />

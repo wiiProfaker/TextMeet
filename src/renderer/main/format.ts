@@ -105,6 +105,22 @@ export function dayLabel(date: Date, now: Date): string {
   return date.getFullYear() === now.getFullYear() ? base : `${base} ${date.getFullYear()}`;
 }
 
+/** Встреча в найденном: «вчера, 16:20 · 2 совпадения»; совпало только название — без числа. */
+export function searchMeetingMeta(createdAt: string, total: number, now: Date): string {
+  const date = new Date(createdAt);
+  const day = dayLabel(date, now);
+  const when = `${day === 'Сегодня' || day === 'Вчера' ? day.toLowerCase() : day}, ${formatTimeOfDay(createdAt)}`;
+  if (total === 0) return when;
+  return `${when} · ${total} ${pluralize(total, 'совпадение', 'совпадения', 'совпадений')}`;
+}
+
+/** «Найдено в 1 встрече», «Найдено в 3 встречах»; truncated — показаны не все. */
+export function searchFoundText(meetings: number, truncated: boolean): string {
+  if (meetings === 0) return 'Ничего не найдено';
+  const place = meetings % 10 === 1 && meetings % 100 !== 11 ? 'встрече' : 'встречах';
+  return `Найдено в ${truncated ? 'первых ' : ''}${meetings} ${place}`;
+}
+
 export interface DayGroup {
   label: string;
   entries: MeetingListEntry[];

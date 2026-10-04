@@ -63,6 +63,15 @@ describe('transcript store', () => {
     expect(await readTranscript(lib, ID)).toEqual(saved);
   });
 
+  it('does not rewrite the file when nothing changed', async () => {
+    const lib = library();
+    await writeTranscript(lib, ID, transcript);
+    writeFileSync(transcriptPath(lib, ID), `${readFileSync(transcriptPath(lib, ID), 'utf8')}\n\n`);
+    const before = readFileSync(transcriptPath(lib, ID), 'utf8');
+    await updateTranscript(lib, ID, (t) => t);
+    expect(readFileSync(transcriptPath(lib, ID), 'utf8')).toBe(before);
+  });
+
   it('refuses to change a transcript that does not exist', async () => {
     await expect(updateTranscript(library(), ID, (t) => t)).rejects.toThrow('Текста встречи нет');
   });

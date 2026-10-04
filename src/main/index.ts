@@ -25,6 +25,7 @@ import { currentLaunchAtLoginNotice, startedAtLogin, syncLaunchAtLogin } from '.
 import { HotkeyManager } from './hotkey-manager';
 import { registerIpc } from './ipc';
 import { listMeetings } from './library/library';
+import { SearchIndex } from './library/search-index';
 import { createLogger, type Logger } from './logger';
 import { MEDIA_SCHEME, serveMedia } from './media-protocol';
 import { CatalogDownloads } from './models/catalog-downloads';
@@ -304,6 +305,7 @@ async function start(logger: Logger): Promise<void> {
     openWindow: () => openMainWindow(logger),
     isWindowActive: () => mainVisible() && !!mainWindow?.isFocused(),
   });
+  const searchIndex = new SearchIndex({ libraryDir, logger });
   const mixer = new Mixer({
     ffmpegPath: () => resolveFfmpegPath(),
     logger,
@@ -427,6 +429,8 @@ async function start(logger: Logger): Promise<void> {
       logger.info('Окно записи готово');
     },
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
+    libraryChanged: () => sendToMain(IPC.libraryChanged),
+    search: searchIndex,
     transcription: queue,
     models,
     downloads: catalogDownloads,
@@ -462,6 +466,7 @@ async function start(logger: Logger): Promise<void> {
   if (hotkeyManager.busy) notify(notificationTexts.hotkeyBusy(hotkeyManager.label));
   logger.info(`TextMeet ${app.getVersion()} запущен (${process.platform})`);
   void recoverAndMix(logger, libraryDir(), notify, mixer, controller, queue);
+  searchIndex.refresh().catch((err: unknown) => logger.warn('Поиск не построился при запуске', err));
 }
 
 /** Сбой запуска не должен быть молчаливым: пишем в журнал и показываем окно с путём к нему. */

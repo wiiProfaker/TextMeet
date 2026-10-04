@@ -27,7 +27,10 @@ export function writeTranscript(libraryDir: string, id: string, transcript: Tran
   return withFileLock(transcriptPath(libraryDir, id), () => save(libraryDir, id, transcript));
 }
 
-/** Прочитать → изменить → записать (правки); незнакомые поля сохраняются. Текста нет — ошибка. */
+/**
+ * Прочитать → изменить → записать (правки); незнакомые поля сохраняются. Текста нет — ошибка. change вернул тот же
+ * объект — ничего не изменилось, файл не перезаписывается.
+ */
 export function updateTranscript(
   libraryDir: string,
   id: string,
@@ -36,7 +39,9 @@ export function updateTranscript(
   return withFileLock(transcriptPath(libraryDir, id), async () => {
     const current = await readTranscript(libraryDir, id);
     if (!current) throw new Error(NO_TRANSCRIPT);
-    const next = TranscriptSchema.parse(change(current));
+    const changed = change(current);
+    if (changed === current) return current;
+    const next = TranscriptSchema.parse(changed);
     await save(libraryDir, id, next);
     return next;
   });

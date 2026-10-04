@@ -1,7 +1,7 @@
 import { asrModel, DEFAULT_ASR_MODEL, type AsrModelId } from '../../shared/asr-models';
 import { formatMegabytes } from '../../shared/format';
 import type { ModelGroupId, ModelsState } from '../../shared/transcription';
-import { downloadText, modelBars, modelState } from './model-catalog';
+import { downloadButton, downloadText, modelBars, modelState } from './model-catalog';
 import { percent } from './transcription-format';
 
 /** Пять делений: «точность» или «скорость». */
@@ -34,6 +34,7 @@ export function ModelCard({ id, state, actions }: { id: AsrModelId; state: Model
   const error = state.downloadError?.id === id ? state.downloadError.message : null;
   const bars = modelBars(id);
   const otherDownload = state.download !== null && !download;
+  const downloadBtn = downloadButton(info.title, error !== null);
 
   return (
     <article className={selected ? 'mcard on' : 'mcard'} aria-label={info.title}>
@@ -85,10 +86,10 @@ export function ModelCard({ id, state, actions }: { id: AsrModelId; state: Model
                   type="button"
                   className="btn"
                   disabled={otherDownload}
-                  aria-label={`Скачать: ${info.title}`}
+                  aria-label={downloadBtn.label}
                   onClick={() => actions.onDownload(id)}
                 >
-                  {error ? 'Повторить' : 'Скачать'}
+                  {downloadBtn.text}
                 </button>
               )}
               {installed && !selected && (

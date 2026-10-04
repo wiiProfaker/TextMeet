@@ -47,6 +47,12 @@ export function modelChoiceLabel(state: ModelsState, id: AsrModelId): string {
   return parts.join(' — ');
 }
 
+/** Кнопка скачивания: после сбоя — «Повторить»; имя для экранного диктора начинается с того же слова, что видно. */
+export function downloadButton(title: string, failed: boolean): { text: string; label: string } {
+  const text = failed ? 'Повторить' : 'Скачать';
+  return { text, label: `${text}: ${title}` };
+}
+
 /** Подпись скачивания в карточке. */
 export const downloadText = (done: number, total: number): string =>
   total > 0 ? `Скачиваем — ${formatDownloaded(done, total)}` : 'Скачиваем…';

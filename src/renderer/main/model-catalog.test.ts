@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ASR_MODEL_IDS, type AsrModelId } from '../../shared/asr-models';
 import type { ModelsState } from '../../shared/transcription';
-import { catalogSections, downloadText, modelBars, modelChoiceLabel } from './model-catalog';
+import { catalogSections, downloadButton, downloadText, modelBars, modelChoiceLabel } from './model-catalog';
 
 const MB = 1024 * 1024;
 
@@ -52,5 +52,10 @@ describe('model card texts', () => {
   it('shows the downloaded bytes', () => {
     expect(downloadText(120 * MB, 464 * MB)).toBe('Скачиваем — 120 из 464 МБ');
     expect(downloadText(0, 0)).toBe('Скачиваем…');
+  });
+
+  it('names the download button by its visible word, also after a failure', () => {
+    expect(downloadButton('T-one', false)).toEqual({ text: 'Скачать', label: 'Скачать: T-one' });
+    expect(downloadButton('T-one', true)).toEqual({ text: 'Повторить', label: 'Повторить: T-one' });
   });
 });

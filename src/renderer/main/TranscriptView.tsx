@@ -220,11 +220,14 @@ export function TranscriptView({
     if (!active || active === document.body) undoButton.current?.focus();
   }, [removed]);
 
-  // Правка стала невозможна (началась расшифровка заново) — поле правки и меню закрываются.
+  // Правка стала невозможна (началась расшифровка заново) — поле правки и меню закрываются, «Вернуть» пропадает:
+  // реплика старого текста не должна попасть в новый.
   useEffect(() => {
     if (onEdit) return;
     setEditingId(null);
     setMenuFor(null);
+    setRemoved([]);
+    setUndoError(null);
   }, [onEdit]);
 
   const pickSpeaker = useCallback(

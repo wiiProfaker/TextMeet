@@ -24,6 +24,8 @@ export interface LaunchOptions {
   executablePath?: string;
   /** Уже расшифрованные встречи: id → transcript.json. */
   transcripts?: Record<string, unknown>;
+  /** Сколько длится каждый из пяти шагов поддельного скачивания модели, мс (по умолчанию — мгновенно). */
+  downloadStepMs?: number;
 }
 
 export interface LaunchedApp {
@@ -188,6 +190,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         // Расшифровка — поддельными движками, без моделей; папка моделей — своя (настройки её показывают).
         TEXTMEET_TEST_ASR: 'fake',
         TEXTMEET_MODELS_DIR: join(root, 'models'),
+        TEXTMEET_TEST_DOWNLOAD_MS: String(options.downloadStepMs ?? 0),
       },
     });
     page = await mainWindow(app);

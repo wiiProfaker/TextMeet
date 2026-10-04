@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { asrModel, DEFAULT_ASR_MODEL } from '../../shared/asr-models';
-import { formatBytes } from '../../shared/format';
+import type { AsrModelId } from '../../shared/asr-models';
+import { formatMegabytes } from '../../shared/format';
 import type { ModelGroupId, ModelsState } from '../../shared/transcription';
 import { errorText } from './errors';
+import { catalogSections } from './model-catalog';
+import { ModelCard, type ModelCardActions } from './ModelCard';
 
-/** Настройки → «Расшифровка» (лист 6 макета; Whisper появится в Плане 7). */
+/** Настройки → «Расшифровка»: каталог моделей (решения Плана 7, §2) и общие модели голосов. */
 export function TranscriptionSettings() {
   const [models, setModels] = useState<ModelsState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,9 +26,11 @@ export function TranscriptionSettings() {
         });
     };
     void load();
+    // Скачивание из каталога продвинулось или закончилось — перечитать.
+    const unsubscribeModels = window.textmeet.onModelsChanged(() => void load());
     // Расшифровка началась или закончилась (и модели могли скачаться) — перечитать.
     let busy: boolean | null = null;
-    const unsubscribe = window.textmeet.onTranscriptionProgress((list) => {
+    const unsubscribeProgress = window.textmeet.onTranscriptionProgress((list) => {
       const nowBusy = list.length > 0;
       if (nowBusy !== busy) void load();
       busy = nowBusy;
@@ -34,90 +38,91 @@ export function TranscriptionSettings() {
     return () => {
       // Ответы после закрытия настроек не нужны.
       latestRequest.current += 1;
-      unsubscribe();
+      unsubscribeModels();
+      unsubscribeProgress();
     };
   }, []);
 
-  const remove = async (group: ModelGroupId) => {
+  /** Действие с ответом-состоянием; его ошибку показываем всегда — это ответ на нажатие. */
+  const run = async (action: () => Promise<ModelsState>) => {
     const request = ++latestRequest.current;
     try {
-      const state = await window.textmeet.deleteModels(group);
-      if (request !== latestRequest.current) return;
-      setModels(state);
+      const state = await action();
       setError(null);
+      if (request === latestRequest.current) setModels(state);
     } catch (err) {
-      // Ошибку удаления показываем всегда: это ответ на нажатие, перечитанный список её не отменяет.
       setError(errorText(err));
     }
   };
 
-  const gigaam = models?.models.find((m) => m.id === DEFAULT_ASR_MODEL);
-  // Скачанные модели расшифровки и общие модели голосов — одним списком, как в Плане 3.
-  const installed: { id: ModelGroupId; title: string; sizeBytes: number }[] = models
-    ? [
-        ...models.models.filter((m) => m.installed).map((m) => ({ id: m.id, title: asrModel(m.id).title, sizeBytes: m.sizeBytes })),
-        ...(models.voices.installed
-          ? [{ id: 'voices' as const, title: 'Разделение по голосам и поиск речи', sizeBytes: models.voices.sizeBytes }]
-          : []),
-      ]
-    : [];
+  const actions: ModelCardActions = {
+    onSelect: (id: AsrModelId) => void run(() => window.textmeet.selectModel(id)),
+    onDownload: (id: AsrModelId) => void run(() => window.textmeet.downloadModel(id)),
+    onCancel: (id: AsrModelId) => void run(() => window.textmeet.cancelModelDownload(id)),
+    onDelete: (id: ModelGroupId) => void run(() => window.textmeet.deleteModels(id)),
+  };
+
+  const sections = models && catalogSections(models);
+  const group = (title: string, ids: AsrModelId[]) =>
+    models &&
+    ids.length > 0 && (
+      <div className="mgroup" role="group" aria-label={title}>
+        <h3>{title}</h3>
+        {ids.map((id) => (
+          <ModelCard key={id} id={id} state={models} actions={actions} />
+        ))}
+      </div>
+    );
+
   return (
     <section className="sec">
       <h2>Расшифровка</h2>
       <div className="fld">
         <div className="lb">Модель</div>
         <div className="ctl">
-          <div className="opts">
-            <div className="opt on">
-              <span className="radio">
-                <i />
-              </span>
-              <span className="opt-text">
-                <b>GigaAM v3</b>
-                <small>Русский язык, с пунктуацией. Быстро работает на процессоре. Английские слова пишет русскими буквами.</small>
-                {gigaam && !gigaam.installed && <small>Скачается при первой расшифровке.</small>}
-              </span>
-              {gigaam?.installed && <span className="side-note">скачана · {formatBytes(gigaam.sizeBytes)}</span>}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="fld">
-        <div className="lb">Скачанные модели</div>
-        <div className="ctl">
-          {installed.length === 0 ? (
-            <small>Пока ничего не скачано.</small>
-          ) : (
-            <div className="mlist" role="list" aria-label="Скачанные модели">
-              {installed.map((group) => (
-                <div key={group.id} role="listitem">
-                  {group.title}
-                  <span>{formatBytes(group.sizeBytes)}</span>
-                  <button
-                    type="button"
-                    className="lnk"
-                    disabled={models?.busy}
-                    aria-label={`Удалить: ${group.title}`}
-                    onClick={() => void remove(group.id)}
-                  >
-                    Удалить
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <small>
-            {models?.busy
-              ? 'Пока идёт расшифровка, модели удалить нельзя.'
-              : 'Удалённая модель скачается заново при следующей расшифровке.'}
-          </small>
           {error && (
             <p role="alert" className="err">
               {error}
             </p>
           )}
+          {models && sections && (
+            <div className="catalog">
+              {group('Выбрана', [sections.selected])}
+              {group('Скачанные', sections.downloaded)}
+              {group('Понимают русский', sections.russian)}
+              {group('Только английский', sections.english)}
+            </div>
+          )}
+          <small>
+            {models?.busy
+              ? 'Пока идёт расшифровка, модели удалить нельзя.'
+              : 'Скачанные модели работают без интернета. Удалённую модель можно скачать снова.'}
+          </small>
         </div>
       </div>
+      {models?.voices.installed && (
+        <div className="fld">
+          <div className="lb">Общие модели</div>
+          <div className="ctl">
+            <div className="mlist" role="list" aria-label="Общие модели">
+              <div role="listitem">
+                Разделение по голосам и поиск речи
+                <span>{formatMegabytes(models.voices.sizeBytes)}</span>
+                <button
+                  type="button"
+                  className="lnk"
+                  disabled={models.busy || models.download !== null}
+                  aria-label="Удалить: Разделение по голосам и поиск речи"
+                  onClick={() => actions.onDelete('voices')}
+                >
+                  Удалить
+                </button>
+              </div>
+            </div>
+            <small>Нужны любой модели расшифровки; удалённые скачаются заново при следующей расшифровке.</small>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

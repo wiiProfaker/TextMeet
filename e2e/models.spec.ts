@@ -78,6 +78,10 @@ test('a meeting is transcribed with the model chosen in the window and shows it'
   const select = dialog.getByRole('combobox', { name: 'Модель расшифровки' });
   await expect(select).toHaveValue('gigaam-v3-e2e-rnnt');
   await expect(select.locator('option[value="canary-180m-flash"]')).toHaveText(/только английский — скачается, \d+ МБ/);
+  // Список моделей — первое поле окна: Shift+Tab с него ведёт по кругу на последнюю кнопку, а не за окно.
+  await select.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('button', { name: 'Расшифровать' })).toBeFocused();
   await select.selectOption('t-one');
   await dialog.getByRole('button', { name: 'Расшифровать' }).click();
 

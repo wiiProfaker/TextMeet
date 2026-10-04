@@ -38,11 +38,12 @@ describe('queryWords', () => {
 });
 
 describe('isSearchable', () => {
-  it('needs at least two letters', () => {
+  it('needs a word of at least two letters', () => {
     expect(isSearchable('б')).toBe(false);
     expect(isSearchable(' б, ')).toBe(false);
+    expect(isSearchable('а б')).toBe(false);
     expect(isSearchable('бю')).toBe(true);
-    expect(isSearchable('а б')).toBe(true);
+    expect(isSearchable('в бюджет')).toBe(true);
   });
 });
 

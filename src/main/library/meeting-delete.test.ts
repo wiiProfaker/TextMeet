@@ -28,13 +28,20 @@ async function setup(patch: Partial<Meeting> = {}) {
       cancel: vi.fn(async (_lib: string, id: string) => {
         calls.push(`transcription ${id}`);
       }),
+      enqueue: vi.fn(async (_lib: string, id: string) => {
+        calls.push(`requeue ${id}`);
+      }),
     },
     mixer: {
       cancel: vi.fn(async (_lib: string, id: string) => {
         calls.push(`mixer ${id}`);
       }),
       isPending: vi.fn(() => false),
+      enqueue: vi.fn((_lib: string, id: string) => {
+        calls.push(`remix ${id}`);
+      }),
     },
+    logger: { warn: vi.fn() },
     dropStopDialog: vi.fn((id: string) => {
       calls.push(`dialog ${id}`);
     }),
@@ -83,12 +90,37 @@ describe('deleteAudio', () => {
 });
 
 describe('deleteMeeting', () => {
-  it('stops its transcription and mixing, drops its stop dialog, then moves the folder to the trash', async () => {
+  it('stops its transcription and mixing, moves the folder to the trash, then drops its stop dialog', async () => {
     const { lib, meeting, deps, calls, bin } = await setup({ status: 'transcribing' });
     await deleteMeeting(deps, meeting.id);
     expect(calls).toEqual([`transcription ${meeting.id}`, `mixer ${meeting.id}`, `dialog ${meeting.id}`]);
     expect(existsSync(meetingDir(lib, meeting.id))).toBe(false);
     expect(existsSync(join(bin, `1-${meeting.id}`, 'meeting.json'))).toBe(true);
+  });
+
+  it('puts its transcription and mixing back and keeps its stop dialog when the trash fails', async () => {
+    const { lib, meeting, deps, calls } = await setup({ status: 'queued' });
+    vi.mocked(deps.mixer.isPending).mockReturnValue(true);
+    deps.trash = async () => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    };
+    await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
+    expect(calls).toEqual([
+      `transcription ${meeting.id}`,
+      `mixer ${meeting.id}`,
+      `requeue ${meeting.id}`,
+      `remix ${meeting.id}`,
+    ]);
+    expect(existsSync(meetingDir(lib, meeting.id))).toBe(true);
+  });
+
+  it('does not requeue a meeting that was not waiting for transcription or mixing', async () => {
+    const { meeting, deps, calls } = await setup();
+    deps.trash = async () => {
+      throw new Error('нет Корзины');
+    };
+    await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
+    expect(calls).toEqual([`transcription ${meeting.id}`, `mixer ${meeting.id}`]);
   });
 
   it('refuses the meeting being recorded', async () => {

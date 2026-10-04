@@ -2,6 +2,7 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import type { Meeting } from '../../shared/meeting';
+import type { Logger } from '../logger';
 import { audioDir, meetingDir, readMeeting, updateMeeting } from './library';
 import { moveToTrash, type Trash } from './trash';
 
@@ -17,11 +18,16 @@ export interface DeleteDeps {
   trash: Trash;
   /** Эта встреча сейчас записывается. */
   isRecording(meetingId: string): boolean;
-  transcription: { cancel(libraryDir: string, meetingId: string): Promise<void> };
+  transcription: {
+    cancel(libraryDir: string, meetingId: string): Promise<void>;
+    enqueue(libraryDir: string, meetingId: string): Promise<void>;
+  };
   mixer: {
     cancel(libraryDir: string, meetingId: string): Promise<void>;
     isPending(libraryDir: string, meetingId: string): boolean;
+    enqueue(libraryDir: string, meetingId: string): void;
   };
+  logger: Pick<Logger, 'warn'>;
   /** Убрать окно «Запись остановлена» этой встречи (открытое или ждущее). */
   dropStopDialog(meetingId: string): void;
   /** Пауза между попытками переноса в Корзину (в тестах — 0). */
@@ -68,15 +74,31 @@ export async function deleteAudio(deps: DeleteDeps, meetingId: string): Promise<
 }
 
 /**
- * Папку встречи — в Корзину. Сначала отменяются её расшифровка и сведение (они держат файлы) и убирается её окно
- * «Запись остановлена». Работает и для папки, которую не удалось прочитать.
+ * Папку встречи — в Корзину. Сначала отменяются её расшифровка и сведение (они держат файлы); после переноса
+ * убирается её окно «Запись остановлена». Перенос не удался — отменённое ставится обратно, иначе встреча так и висела
+ * бы «в очереди» без задачи, а запись — «готовится». Работает и для папки, которую не удалось прочитать.
  */
 export async function deleteMeeting(deps: DeleteDeps, meetingId: string): Promise<void> {
   const libraryDir = deps.libraryDir();
   const dir = meetingDir(libraryDir, meetingId);
   if (deps.isRecording(meetingId)) throw new Error(deleteTexts.recording);
+  const status = await readMeeting(libraryDir, meetingId).then(
+    (meeting) => meeting.status,
+    () => null,
+  );
+  const wasMixing = deps.mixer.isPending(libraryDir, meetingId);
   await deps.transcription.cancel(libraryDir, meetingId);
   await deps.mixer.cancel(libraryDir, meetingId);
+  try {
+    await moveToTrash(dir, deps.trash, deps.trashRetryMs);
+  } catch (err) {
+    if (status === 'queued' || status === 'transcribing') {
+      await deps.transcription
+        .enqueue(libraryDir, meetingId)
+        .catch((requeueErr: unknown) => deps.logger.warn(`Встреча ${meetingId} не вернулась в очередь`, requeueErr));
+    }
+    if (wasMixing) deps.mixer.enqueue(libraryDir, meetingId);
+    throw err;
+  }
   deps.dropStopDialog(meetingId);
-  await moveToTrash(dir, deps.trash, deps.trashRetryMs);
 }

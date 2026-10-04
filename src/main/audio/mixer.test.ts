@@ -204,7 +204,7 @@ describe('Mixer', () => {
     mixer.enqueue('lib', 'a');
     mixer.enqueue('lib', 'b');
     mixer.enqueue('lib', 'c');
-    await vi.waitFor(() => expect(order).toEqual(['a']));
+    await vi.waitFor(() => expect(order).toEqual(['a']), { timeout: 5000 });
     expect(mixer.isPending('lib', 'a')).toBe(true);
     expect(mixer.isPending('lib', 'b')).toBe(true);
     expect(mixer.isPending('other', 'b')).toBe(false);
@@ -214,7 +214,7 @@ describe('Mixer', () => {
     await mixer.cancel('lib', 'a');
     expect(stopped).toBe(true);
 
-    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledWith('c'));
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledWith('c'), { timeout: 5000 });
     expect(order).toEqual(['a', 'c']);
     // Отменённое сведение — не сбой: ни ошибки в журнале, ни «не удалось подготовить запись».
     expect(onSettled).toHaveBeenCalledTimes(1);

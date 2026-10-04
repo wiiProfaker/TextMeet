@@ -132,6 +132,7 @@ export class TranscriptionQueue {
     try {
       await updateMeeting(libraryDir, meetingId, (m) => {
         if (m.status === 'recording') throw new Error(transcriptionTexts.stillRecording);
+        if (m.audioDeleted) throw new Error(transcriptionTexts.audioDeleted);
         return {
           ...m,
           status: 'queued',
@@ -394,6 +395,8 @@ export class TranscriptionQueue {
           ? { ...m, status: 'done', model, errorMessage: null, speakerNames: ownNameOnly(m.speakerNames) }
           : m,
       );
+      // Встречу удаляют: результат записан в папку, которая уходит в Корзину, — сообщать не о чем.
+      if (current.cancelled) return null;
       if (done.status !== 'done') {
         // Встречу поставили заново, пока результат сохранялся: её расшифруют ещё раз — сообщать о готовности рано.
         this.deps.logger.info(`Расшифровка ${meetingId} сохранена, но встреча уже снова в очереди`);

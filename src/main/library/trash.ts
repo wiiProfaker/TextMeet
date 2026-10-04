@@ -21,7 +21,8 @@ export async function moveToTrash(path: string, trash: Trash, retryMs = TRASH_RE
       return;
     } catch (err) {
       if (attempt >= TRASH_ATTEMPTS) {
-        const reason = knownFsReason(err) ?? (err instanceof Error ? err.message : String(err));
+        // Текст системы может содержать путь — он остаётся в журнале (cause), человеку — понятная причина.
+        const reason = knownFsReason(err) ?? 'файл занят другой программой или Корзина недоступна';
         throw new Error(`Не удалось переместить в Корзину: ${reason}`, { cause: err });
       }
       await wait(retryMs);

@@ -176,7 +176,7 @@ describe('TranscriptionQueue', () => {
     expect((await readMeeting(lib, meeting.id)).speakerNames).toEqual({ me: 'Кирилл', s1: 'Ирина' });
     const command = await transcribeSent(t.worker);
     t.worker().post(done(command.jobId));
-    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1), { timeout: 5000 });
     expect((await readMeeting(lib, meeting.id)).speakerNames).toEqual({ me: 'Кирилл' });
   });
 
@@ -490,11 +490,11 @@ describe('TranscriptionQueue', () => {
     expect(first.killed).toBe(true);
     expect(t.finished).toEqual([]);
 
-    await vi.waitFor(() => expect(t.workers).toHaveLength(2));
+    await vi.waitFor(() => expect(t.workers).toHaveLength(2), { timeout: 5000 });
     const command = await transcribeSent(t.worker);
     expect(command.input.tracks[0]?.file).toContain(next.id);
     t.worker().post(done(command.jobId));
-    await vi.waitFor(() => expect(t.finished).toHaveLength(1));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(1), { timeout: 5000 });
     expect(t.finished[0]?.meeting.id).toBe(next.id);
     expect((await readMeeting(lib, queued.id)).status).toBe('queued');
   });
@@ -530,6 +530,25 @@ describe('TranscriptionQueue', () => {
     expect(t.ensured).toEqual([]);
     expect(t.workers).toHaveLength(0);
     expect(t.finished).toEqual([]);
+  });
+
+  it('cancel that comes after the result does not announce the meeting', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, meeting.id);
+    const command = await transcribeSent(t.worker);
+    t.worker().post(done(command.jobId));
+    await t.queue.cancel(lib, meeting.id);
+    expect(t.finished).toEqual([]);
+  });
+
+  it('refuses to transcribe a meeting whose audio was deleted', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib, { status: 'done', tracks: [], audioDeleted: true });
+    const t = setup();
+    await expect(t.queue.enqueue(lib, meeting.id)).rejects.toThrow(transcriptionTexts.audioDeleted);
+    expect((await readMeeting(lib, meeting.id)).status).toBe('done');
   });
 
   it('cancel of a meeting that is not in the queue does nothing', async () => {

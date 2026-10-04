@@ -10,6 +10,9 @@ import type { Logger } from '../logger';
 import { MEETING_FILE } from './library';
 import { readTranscript, TRANSCRIPT_FILE } from './transcript-store';
 
+/** Сколько встреч поиск читает одновременно: тысячи открытых файлов разом упёрлись бы в предел системы. */
+const READ_BATCH = 32;
+
 /** Длина отрывка реплики в найденном. */
 const SNIPPET_CHARS = 80;
 
@@ -124,7 +127,9 @@ export class SearchIndex {
     }
     const present = new Set(ids);
     for (const id of this.entries.keys()) if (!present.has(id)) this.entries.delete(id);
-    await Promise.all(ids.map((id) => this.update(dir, id)));
+    for (let at = 0; at < ids.length; at += READ_BATCH) {
+      await Promise.all(ids.slice(at, at + READ_BATCH).map((id) => this.update(dir, id)));
+    }
   }
 
   private async update(dir: string, id: string): Promise<void> {

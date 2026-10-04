@@ -68,12 +68,11 @@ if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 // их скачивания; TEXTMEET_TEST_DOWNLOAD_MS — сколько длится шаг «скачивания» из каталога (по умолчанию мгновенно).
 const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
 const fakeDownloadStepMs = Number(process.env.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
-/** Только для автотестов: «Корзина» — обычная папка (на машинах CI настоящей Корзины может не быть). */
-const trash: Trash = process.env.TEXTMEET_TEST_TRASH
-  ? folderTrash(process.env.TEXTMEET_TEST_TRASH)
-  : (path) => shell.trashItem(path);
 /** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
 const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
+/** Только для автотестов: «Корзина» — обычная папка (на машинах CI настоящей Корзины может не быть). */
+const testTrash = testRun ? process.env.TEXTMEET_TEST_TRASH : undefined;
+const trash: Trash = testTrash ? folderTrash(testTrash) : (path) => shell.trashItem(path);
 
 /** Потоков для расшифровки: все ядра, кроме одного (не больше 8); во время записи — 2 (§5.3 решений Плана 3). */
 const FULL_THREADS = Math.max(1, Math.min(8, availableParallelism() - 1));
@@ -446,6 +445,7 @@ async function start(logger: Logger): Promise<void> {
       },
       transcription: queue,
       mixer,
+      logger,
       dropStopDialog: (id) => controller.dropStopDialog(id),
     },
     transcription: queue,

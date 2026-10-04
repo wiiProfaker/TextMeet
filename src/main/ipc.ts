@@ -259,6 +259,16 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.openMeetingDir, (arg) => openMeetingFolder(meetingDir(deps.libraryDir(), MeetingIdSchema.parse(arg))));
 
+  /** Системная ошибка файла (EACCES, ENOSPC…) — понятной причиной, без путей; остальные тексты уже для людей. */
+  const forPeople = (action: string, err: unknown): Error =>
+    (err as NodeJS.ErrnoException | null)?.code ? humanFsError(action, err) : (err as Error);
+  const shown =
+    <T>(action: string, work: () => Promise<T>) =>
+    (): Promise<T> =>
+      work().catch((err: unknown) => {
+        throw forPeople(action, err);
+      });
+
   /** Встречу поменяла программа: поиск перечитает её, даже если время изменения файла то же. */
   const searchChanged = (meetingId: string): void => {
     deps.search.invalidate(meetingId);
@@ -275,7 +285,9 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.renameMeeting, async (arg) => {
     const request = RenameMeetingSchema.parse(arg);
-    const meeting = await renameMeeting(deps.libraryDir(), request.meetingId, request.title);
+    const meeting = await shown('Не удалось переименовать встречу', () =>
+      renameMeeting(deps.libraryDir(), request.meetingId, request.title),
+    )();
     searchChanged(request.meetingId);
     deps.libraryChanged();
     return meeting;
@@ -283,7 +295,9 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.renameSpeaker, async (arg) => {
     const request = RenameSpeakerSchema.parse(arg);
-    const meeting = await renameSpeaker(deps.libraryDir(), request.meetingId, request.speakerId, request.name);
+    const meeting = await shown('Не удалось переименовать спикера', () =>
+      renameSpeaker(deps.libraryDir(), request.meetingId, request.speakerId, request.name),
+    )();
     searchChanged(request.meetingId);
     deps.libraryChanged();
     return meeting;
@@ -291,7 +305,9 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.editTranscript, async (arg) => {
     const request = EditTranscriptSchema.parse(arg);
-    const result = await editTranscript(deps.libraryDir(), request.meetingId, request.edit, new Date());
+    const result = await shown('Не удалось сохранить правку', () =>
+      editTranscript(deps.libraryDir(), request.meetingId, request.edit, new Date()),
+    )();
     searchChanged(request.meetingId);
     if (result.meetingChanged) deps.libraryChanged();
     return { meeting: result.meeting, transcript: result.transcript };
@@ -302,14 +318,15 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.audioSize, (arg) => audioSize(deps.libraryDir(), MeetingIdSchema.parse(arg)));
 
   handle(IPC.deleteAudio, async (arg) => {
-    await deleteAudio(deps.deletion, MeetingIdSchema.parse(arg));
+    const id = MeetingIdSchema.parse(arg);
+    await shown('Не удалось удалить аудио', () => deleteAudio(deps.deletion, id))();
     deps.libraryChanged();
   });
 
   // Имя папки, а не только прочитанная встреча: удалить можно и папку, которую не удалось прочитать.
   handle(IPC.deleteMeeting, async (arg) => {
     const id = MeetingIdSchema.parse(arg);
-    await deleteMeeting(deps.deletion, id);
+    await shown('Не удалось удалить встречу', () => deleteMeeting(deps.deletion, id))();
     deps.search.remove(id);
     deps.libraryChanged();
   });

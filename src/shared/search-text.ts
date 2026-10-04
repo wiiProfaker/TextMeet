@@ -11,7 +11,7 @@ export interface TextPiece {
   mark: boolean;
 }
 
-/** Меньше букв в запросе — не ищем: на одну букву нашлось бы почти всё. */
+/** Нет слова хотя бы из стольких букв — не ищем: на одну букву нашлось бы почти всё. */
 export const MIN_QUERY_LETTERS = 2;
 
 /**
@@ -43,7 +43,7 @@ export function queryWords(query: string): string[] {
 }
 
 export function isSearchable(query: string): boolean {
-  return queryWords(query).join('').length >= MIN_QUERY_LETTERS;
+  return queryWords(query).some((word) => word.length >= MIN_QUERY_LETTERS);
 }
 
 /** В нормализованном тексте есть каждое слово (как часть слова: «бюджет» находит «бюджета»). */

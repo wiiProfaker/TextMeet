@@ -32,10 +32,14 @@ describe('moveToTrash', () => {
     expect(trash).toHaveBeenCalledTimes(TRASH_ATTEMPTS);
   });
 
-  it('shows the message of an error without a known code', async () => {
-    await expect(
-      moveToTrash('/lib/x', async () => Promise.reject(new Error('Корзина отключена')), 0),
-    ).rejects.toThrow('Не удалось переместить в Корзину: Корзина отключена');
+  it('does not show the system text of an unknown error (it may contain a path)', async () => {
+    const run = moveToTrash('/lib/x', async () => Promise.reject(new Error("Failed to move 'C:\\lib\\x'")), 0);
+    await expect(run).rejects.toThrow(
+      'Не удалось переместить в Корзину: файл занят другой программой или Корзина недоступна',
+    );
+    await expect(run).rejects.toMatchObject({
+      cause: expect.objectContaining({ message: expect.stringContaining('C:') }),
+    });
   });
 });
 

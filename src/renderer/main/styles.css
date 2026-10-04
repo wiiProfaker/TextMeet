@@ -1049,6 +1049,43 @@ kbd.k {
   font-size: 12.5px;
 }
 
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:hover {
+  border-color: var(--muted);
+}
+
+/* Безымянный собеседник — пунктиром: его стоит назвать. */
+.chip.un {
+  border-style: dashed;
+}
+
+.chip .ic {
+  width: 13px;
+  height: 13px;
+  color: var(--muted);
+}
+
+.chip.edit {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  padding-right: 4px;
+}
+
+.chip.edit input {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  width: 110px;
+  outline: none;
+}
+
+.chip.edit input::placeholder {
+  color: var(--muted);
+}
+
 .pip {
   width: 8px;
   height: 8px;
@@ -1132,12 +1169,122 @@ kbd.k {
   opacity: 1;
 }
 
+/* Реплика с открытым меню «Кто говорит»: без экономии отрисовки (она обрезает всё, что выходит за реплику) и
+   поверх следующих реплик. */
+.row.menu-open {
+  content-visibility: visible;
+  position: relative;
+  z-index: 3;
+}
+
 /* Звучащая реплика — «маркер», как на листе 9 макета. */
 .row.now {
   background: var(--now);
 }
 
 .row.now .tbtn {
+  color: var(--text);
+}
+
+/* Имя над репликой — кнопка меню «Кто говорит в этой реплике?». */
+.who-wrap {
+  position: relative;
+}
+
+.whob {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.whob .ic {
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+}
+
+.whob:hover .ic,
+.whob:focus-visible .ic,
+.whob[aria-expanded='true'] .ic {
+  opacity: 0.8;
+}
+
+.menu {
+  position: absolute;
+  z-index: 4;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+
+.mhead {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mi {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mi:hover,
+.mi:focus-visible {
+  background: var(--sel);
+  outline: none;
+}
+
+.mi[aria-checked='true'] {
+  font-weight: 600;
+}
+
+.mi-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mi .ic {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.mi.danger {
+  color: var(--rec);
+}
+
+.sep {
+  height: 1px;
+  background: var(--line);
+  margin: 5px 4px;
+}
+
+.dlg .note.body {
+  font-size: 13.5px;
   color: var(--text);
 }
 

@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
-import { transcriptModelTitle, type Transcript } from '../../shared/transcript';
+import { transcriptModelTitle, type SpeakerId } from '../../shared/transcript';
 import type { TranscriptEdit } from '../../shared/transcript-edit';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
@@ -83,15 +83,23 @@ function ReadyText({
   playback,
   canPlay,
   onEdit,
+  onError,
 }: {
   load: Extract<TranscriptLoad, { kind: 'ready' }>;
   meeting: Meeting;
   playback: Playback;
   canPlay: boolean;
   onEdit: ((edit: TranscriptEdit) => Promise<void>) | null;
+  onError(message: string): void;
 }) {
   const { transcript } = load;
   const starts = useMemo(() => transcript.segments.map((s) => s.start), [transcript]);
+  const renameSpeaker = useCallback(
+    async (speakerId: SpeakerId, name: string | null) => {
+      await window.textmeet.renameSpeaker({ meetingId: meeting.id, speakerId, name });
+    },
+    [meeting.id],
+  );
   // До первого «Слушать» ничего не подсвечено.
   const nowIndex = canPlay && (playback.playing || playback.position > 0) ? segmentAt(starts, playback.position) : -1;
   return (
@@ -102,6 +110,8 @@ function ReadyText({
       playing={playback.playing}
       onPlayAt={canPlay ? playback.seekAndPlay : null}
       onEdit={onEdit}
+      onRenameSpeaker={renameSpeaker}
+      onError={onError}
     />
   );
 }
@@ -115,6 +125,7 @@ function Body({
   playback,
   canPlay,
   onEdit,
+  onError,
   onTranscribe,
 }: {
   meeting: Meeting;
@@ -125,6 +136,7 @@ function Body({
   /** Запись готова к прослушиванию. */
   canPlay: boolean;
   onEdit(edit: TranscriptEdit): Promise<void>;
+  onError(message: string): void;
   /** Кнопка «Расшифровать» под «Текста пока нет»; null — её нет (например, она уже в заголовке). */
   onTranscribe: (() => void) | null;
 }) {
@@ -134,7 +146,14 @@ function Body({
       <>
         {busy && <ProgressStrip view={progressView(busy, progress)} />}
         {/* Пока встреча ждёт расшифровки заново или расшифровывается, прежний текст не правится: правки пропали бы. */}
-        <ReadyText load={load} meeting={meeting} playback={playback} canPlay={canPlay} onEdit={busy ? null : onEdit} />
+        <ReadyText
+          load={load}
+          meeting={meeting}
+          playback={playback}
+          canPlay={canPlay}
+          onEdit={busy ? null : onEdit}
+          onError={onError}
+        />
       </>
     );
   }
@@ -241,6 +260,7 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
         playback={playback}
         canPlay={canPlay}
         onEdit={edit}
+        onError={onError}
         onTranscribe={actions.body ? () => setDialog(true) : null}
       />
       {mixReady ? (

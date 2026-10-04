@@ -1,10 +1,12 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { speakerLabel, type Transcript, type TranscriptSegment } from '../../shared/transcript';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { speakerLabel, type SpeakerId, type Transcript, type TranscriptSegment } from '../../shared/transcript';
 import type { TranscriptEdit } from '../../shared/transcript-edit';
 import { errorText } from './errors';
-import { PlayIcon } from './icons';
+import { ChevronIcon, PlayIcon } from './icons';
 import { shouldFollow } from './playback';
 import { SegmentText } from './SegmentText';
+import { SpeakerChips } from './SpeakerChips';
+import { SpeakerMenu, type SpeakerOption } from './SpeakerMenu';
 import { formatTimestamp, speakerTone } from './transcription-format';
 
 interface Props {
@@ -19,6 +21,9 @@ interface Props {
   onPlayAt: ((seconds: number) => void) | null;
   /** Сохранить правку; null — текст сейчас не правится (идёт расшифровка заново). */
   onEdit: ((edit: TranscriptEdit) => Promise<void>) | null;
+  /** Переименовать спикера во всей встрече; null — сейчас нельзя. */
+  onRenameSpeaker: ((speakerId: SpeakerId, name: string | null) => Promise<void>) | null;
+  onError(message: string): void;
 }
 
 /** Сколько висит «Реплика удалена · Вернуть». */
@@ -36,18 +41,45 @@ interface RowProps {
   /** null — реплику не править. */
   setEditing: ((segmentId: string | null) => void) | null;
   onSaveText(segment: TranscriptSegment, text: string): Promise<void>;
+  /** Спикеры встречи для меню «Кто говорит». */
+  speakers: readonly SpeakerOption[];
+  menuOpen: boolean;
+  setMenuFor(segmentId: string | null): void;
+  onPickSpeaker(segment: TranscriptSegment, speakerId: SpeakerId | 'new'): void;
 }
 
 /**
  * Реплика: время (щелчок — слушать с этого места), спикер, текст (щелчок — править). memo: при игре и правке
  * перерисовываются только затронутые реплики — поэтому все обработчики постоянные.
  */
-const Row = memo(function Row({ segment, label, now, onPlayAt, editing, setEditing, onSaveText }: RowProps) {
+const Row = memo(function Row({
+  segment,
+  label,
+  now,
+  onPlayAt,
+  editing,
+  setEditing,
+  onSaveText,
+  speakers,
+  menuOpen,
+  setMenuFor,
+  onPickSpeaker,
+}: RowProps) {
   const time = formatTimestamp(segment.start);
+  const tone = speakerTone(segment.speakerId);
   return (
-    <div className={now ? 'row now' : 'row'} data-segment={segment.id} aria-current={now ? 'true' : undefined}>
+    <div
+      className={['row', now && 'now', menuOpen && 'menu-open'].filter(Boolean).join(' ')}
+      data-segment={segment.id}
+      aria-current={now ? 'true' : undefined}
+    >
       {onPlayAt ? (
-        <button type="button" className="t tbtn" aria-label={`Слушать с ${time}`} onClick={() => onPlayAt(segment.start)}>
+        <button
+          type="button"
+          className="t tbtn"
+          aria-label={`Слушать с ${time}`}
+          onClick={() => onPlayAt(segment.start)}
+        >
           <PlayIcon />
           {time}
         </button>
@@ -55,7 +87,34 @@ const Row = memo(function Row({ segment, label, now, onPlayAt, editing, setEditi
         <span className="t">{time}</span>
       )}
       <div>
-        <div className={`who ${speakerTone(segment.speakerId)}`}>{label}</div>
+        {setEditing ? (
+          <div className="who-wrap">
+            <button
+              type="button"
+              className={`who whob ${tone}`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-description="Сменить спикера этой реплики"
+              onClick={() => setMenuFor(menuOpen ? null : segment.id)}
+            >
+              {label}
+              <ChevronIcon />
+            </button>
+            {menuOpen && (
+              <SpeakerMenu
+                options={speakers}
+                current={segment.speakerId}
+                onClose={() => setMenuFor(null)}
+                onPick={(speakerId) => {
+                  setMenuFor(null);
+                  onPickSpeaker(segment, speakerId);
+                }}
+              />
+            )}
+          </div>
+        ) : (
+          <div className={`who ${tone}`}>{label}</div>
+        )}
         <SegmentText
           text={segment.text}
           editable={setEditing !== null}
@@ -70,13 +129,28 @@ const Row = memo(function Row({ segment, label, now, onPlayAt, editing, setEditi
 });
 
 /** Текст встречи, как на листах 1 и 9 макета: спикеры сверху, реплики «время · кто · что». */
-export function TranscriptView({ transcript, names, nowIndex, playing, onPlayAt, onEdit }: Props) {
+export function TranscriptView({
+  transcript,
+  names,
+  nowIndex,
+  playing,
+  onPlayAt,
+  onEdit,
+  onRenameSpeaker,
+  onError,
+}: Props) {
   const box = useRef<HTMLDivElement>(null);
   const lastManualScroll = useRef(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   /** Удалённая реплика, которую ещё можно вернуть. */
   const [removed, setRemoved] = useState<TranscriptSegment | null>(null);
   const [undoError, setUndoError] = useState<string | null>(null);
+  /** Реплика, у которой открыто меню «Кто говорит». */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const speakers = useMemo(
+    () => transcript.speakers.map((s) => ({ id: s.id, label: speakerLabel(s.id, names) })),
+    [transcript.speakers, names],
+  );
   const nowId = nowIndex >= 0 ? (transcript.segments[nowIndex]?.id ?? null) : null;
   const editing = editingId !== null;
 
@@ -94,10 +168,24 @@ export function TranscriptView({ transcript, names, nowIndex, playing, onPlayAt,
     return () => clearTimeout(timer);
   }, [removed]);
 
-  // Правка стала невозможна (началась расшифровка заново) — поле правки закрывается.
+  // Правка стала невозможна (началась расшифровка заново) — поле правки и меню закрываются.
   useEffect(() => {
-    if (!onEdit) setEditingId(null);
+    if (onEdit) return;
+    setEditingId(null);
+    setMenuFor(null);
   }, [onEdit]);
+
+  const pickSpeaker = useCallback(
+    (segment: TranscriptSegment, speakerId: SpeakerId | 'new') => {
+      if (!onEdit || speakerId === segment.speakerId) return;
+      onEdit({ kind: 'speaker', segmentId: segment.id, speakerId }).catch((err: unknown) => onError(errorText(err)));
+    },
+    [onEdit, onError],
+  );
+
+  const mergeSpeakers = async (from: SpeakerId, into: SpeakerId) => {
+    if (onEdit) await onEdit({ kind: 'merge', from, into });
+  };
 
   const saveText = useCallback(
     async (segment: TranscriptSegment, text: string) => {
@@ -134,15 +222,13 @@ export function TranscriptView({ transcript, names, nowIndex, playing, onPlayAt,
   };
   return (
     <>
-      <div className="spk" role="list" aria-label="Спикеры">
-        <span aria-hidden="true">Спикеры</span>
-        {transcript.speakers.map((s) => (
-          <span key={s.id} className="chip" role="listitem">
-            <span className={`pip ${speakerTone(s.id)}`} />
-            {speakerLabel(s.id, names)}
-          </span>
-        ))}
-      </div>
+      <SpeakerChips
+        speakers={transcript.speakers}
+        names={names}
+        onRename={onEdit ? onRenameSpeaker : null}
+        onMerge={mergeSpeakers}
+        onError={onError}
+      />
       <div
         ref={box}
         className="tx"
@@ -168,6 +254,10 @@ export function TranscriptView({ transcript, names, nowIndex, playing, onPlayAt,
             editing={segment.id === editingId}
             setEditing={onEdit ? setEditingId : null}
             onSaveText={saveText}
+            speakers={speakers}
+            menuOpen={segment.id === menuFor}
+            setMenuFor={setMenuFor}
+            onPickSpeaker={pickSpeaker}
           />
         ))}
         {removed && (

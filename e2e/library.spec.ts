@@ -157,3 +157,58 @@ test('a click on the title renames the meeting', async () => {
   await field.press('Enter');
   await expect(page.getByRole('heading', { name: 'Бюджет на октябрь' })).toBeVisible();
 });
+
+test('a speaker is renamed in the whole meeting, and the same name merges two speakers', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page, libraryDir } = launched;
+  await openMeeting(page);
+  const speakers = page.getByLabel('Спикеры');
+  const text = page.getByLabel('Текст встречи');
+
+  await speakers.getByRole('button', { name: 'Спикер 1' }).click();
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).fill('Ирина');
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).press('Enter');
+  await expect(speakers.getByRole('button', { name: 'Ирина' })).toBeVisible();
+  await expect(text.locator('.row').first()).toContainText('Ирина');
+  await expect.poll(async () => (await pollMeetingJson(libraryDir, ID))?.speakerNames).toEqual({ s1: 'Ирина' });
+
+  await speakers.getByRole('button', { name: 'Спикер 2' }).click();
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).fill('ирина');
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Объединить «Спикер 2» и «Ирина»?' });
+  await dialog.getByRole('button', { name: 'Объединить' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(speakers.getByRole('listitem')).toHaveText(['Я', 'Ирина']);
+  await expect(text.locator('.row').nth(2)).toContainText('Ирина');
+  await expect
+    .poll(async () => (await pollTranscript(libraryDir))?.segments.map((s) => s.speakerId))
+    .toEqual(['s1', 'me', 's1']);
+});
+
+test('the speaker of one segment is changed from the menu, also to a new speaker', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page, libraryDir } = launched;
+  await openMeeting(page);
+  const rows = page.getByLabel('Текст встречи').locator('.row');
+
+  await rows.nth(1).getByRole('button', { name: 'Я', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Кто говорит в этой реплике' });
+  await expect(menu.getByRole('menuitemradio', { name: 'Я' })).toHaveAttribute('aria-checked', 'true');
+  await menu.getByRole('menuitemradio', { name: 'Спикер 2' }).click();
+  await expect(menu).toBeHidden();
+  await expect(rows.nth(1)).toContainText('Спикер 2');
+  // У «Я» не осталось реплик — его нет в строке «Спикеры».
+  await expect(page.getByLabel('Спикеры').getByRole('listitem')).toHaveText(['Спикер 1', 'Спикер 2']);
+
+  await rows.nth(0).getByRole('button', { name: 'Спикер 1', exact: true }).click();
+  await menu.getByRole('menuitem', { name: 'Новый собеседник' }).click();
+  await expect(rows.nth(0)).toContainText('Спикер 3');
+  await expect
+    .poll(async () => (await pollTranscript(libraryDir))?.segments.map((s) => s.speakerId))
+    .toEqual(['s3', 's2', 's2']);
+
+  // Esc закрывает меню без изменений.
+  await rows.nth(2).getByRole('button', { name: 'Спикер 2', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+});

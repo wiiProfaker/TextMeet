@@ -66,6 +66,12 @@ export const PencilIcon = () => (
   </Icon>
 );
 
+export const PlusIcon = () => (
+  <Icon>
+    <path d="M12 5v14M5 12h14" />
+  </Icon>
+);
+
 export const PlayIcon = () => (
   <Icon filled>
     <path d="M8 5l11 7-11 7z" />

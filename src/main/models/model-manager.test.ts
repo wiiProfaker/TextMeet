@@ -207,6 +207,28 @@ describe('ModelManager.ensure', () => {
     expect((await m.state()).every((g) => g.installed)).toBe(true);
   });
 
+  it('does not keep an installed group waiting for another group download', async () => {
+    const root = makeTempDir();
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const m = manager(root);
+    await m.ensure(['voices']);
+    const slow = manager(root, {
+      download: async (options) => {
+        await gate;
+        await fakeDownload(options);
+      },
+    });
+    const downloading = slow.ensure([G]);
+    // Голоса уже скачаны: их проверка отвечает, не дожидаясь чужого скачивания.
+    await expect(slow.ensure(['voices'])).resolves.toBeUndefined();
+    release();
+    await downloading;
+    expect((await slow.state()).every((g) => g.installed)).toBe(true);
+  });
+
   it('survives a damaged verified.json', async () => {
     const root = makeTempDir();
     writeFileSync(join(root, VERIFIED_FILE), '{broken');

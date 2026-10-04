@@ -82,18 +82,24 @@ export class ModelManager implements ModelStore {
   /**
    * Файлы групп на месте и целы; недостающие и испорченные скачиваются. Вызовы идут по очереди: второй ждёт первого
    * и находит уже скачанное. Идущее удаление проверка сначала дожидается. Отмена (options.signal) снимает и вызов,
-   * который ещё ждёт своей очереди, — сразу, не дожидаясь чужого скачивания.
+   * который ещё ждёт своей очереди, — сразу, не дожидаясь чужого скачивания. Уже проверенные группы отвечают сразу:
+   * расшифровка не ждёт, пока в настройках докачается другая модель.
    */
   ensure(groups: readonly ModelGroupId[], options: EnsureOptions = {}): Promise<void> {
     this.ensuring += 1;
+    const files = this.files.filter((f) => groups.includes(f.group));
     const removing = this.removing?.catch(() => undefined);
+    // Пока идёт удаление, «проверено» могло устареть — тогда только через очередь.
+    const ready = removing ? Promise.resolve(false) : this.allVerified(files);
     const turn = this.chain;
-    const run = untilAborted(turn, options.signal).then(async () => {
+    const queued = untilAborted(turn, options.signal).then(async () => {
+      if (await ready) return;
       await removing;
-      await this.runEnsure(this.files.filter((f) => groups.includes(f.group)), options);
+      await this.runEnsure(files, options);
     });
     // Следующий вызов ждёт и этот, и предыдущий: снятый с очереди вызов не пропускает его вперёд чужого скачивания.
-    this.chain = Promise.all([turn, run.catch(() => undefined)]).then(() => undefined);
+    this.chain = Promise.all([turn, queued.catch(() => undefined)]).then(() => undefined);
+    const run = ready.then((ok) => (ok && !options.signal?.aborted ? undefined : queued));
     return run.finally(() => {
       this.ensuring -= 1;
     });
@@ -209,6 +215,13 @@ export class ModelManager implements ModelStore {
     verified[file.path] = { size: stats.size, mtimeMs: stats.mtimeMs, sha256: sha };
     await this.writeVerified(verified);
     return true;
+  }
+
+  /** Все файлы уже проверены и с тех пор не менялись. */
+  private async allVerified(files: readonly ModelFile[]): Promise<boolean> {
+    const verified = await this.readVerified();
+    const present = await Promise.all(files.map((f) => this.isVerified(f, verified)));
+    return present.every(Boolean);
   }
 
   private async isVerified(file: ModelFile, verified: Verified): Promise<boolean> {

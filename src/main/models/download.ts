@@ -205,5 +205,28 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
     await fsp.rm(part, { force: true });
     throw new DownloadError('corrupt', `файл модели повреждён (${size} байт, ожидалось ${options.size})`);
   }
-  await fsp.rename(part, options.dest);
+  await renameLocked(part, options.dest);
+}
+
+/** Свежий большой файл ненадолго держат антивирус и индексатор Windows: переименование повторяется. */
+const LOCK_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+export const RENAME_ATTEMPTS = 5;
+export const RENAME_DELAY_MS = 200;
+
+async function renameLocked(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await fsp.rename(from, to);
+      return;
+    } catch (err) {
+      const locked = LOCK_CODES.has((err as NodeJS.ErrnoException | null)?.code ?? '');
+      if (locked && attempt < RENAME_ATTEMPTS) {
+        // Без отмены: файл уже скачан и проверен, осталось только переименовать.
+        await pause(RENAME_DELAY_MS, undefined);
+        continue;
+      }
+      if (locked || isDiskError(err)) throw new DownloadError('disk', 'не удалось сохранить файл модели', { cause: err });
+      throw err;
+    }
+  }
 }

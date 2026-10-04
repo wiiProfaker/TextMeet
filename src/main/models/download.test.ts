@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fsp, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { DownloadError, downloadFile, sha256File } from './download';
 
@@ -277,6 +277,39 @@ describe('downloadFile', () => {
     writeFileSync(blocker, 'not a folder');
     await expect(downloadFile(options(url, join(blocker, 'model.onnx')))).rejects.toMatchObject({ kind: 'disk' });
     expect(ranges).toEqual([]);
+  });
+
+  it('retries the final rename while the fresh file is locked', async () => {
+    const { url } = await serve(sendBody);
+    const dest = join(makeTempDir(), 'model.onnx');
+    const rename = fsp.rename.bind(fsp);
+    let calls = 0;
+    // Антивирус или индексатор ненадолго держат свежий большой файл.
+    const locked = vi.spyOn(fsp, 'rename').mockImplementation(async (from, to) => {
+      calls += 1;
+      if (calls <= 2) throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+      await rename(from, to);
+    });
+    try {
+      await downloadFile(options(url, dest));
+    } finally {
+      locked.mockRestore();
+    }
+    expect(calls).toBe(3);
+    expect(readFileSync(dest)).toEqual(BODY);
+  });
+
+  it('reports a disk problem when the file stays locked', async () => {
+    const { url } = await serve(sendBody);
+    const dest = join(makeTempDir(), 'model.onnx');
+    const locked = vi.spyOn(fsp, 'rename').mockRejectedValue(Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }));
+    try {
+      await expect(downloadFile(options(url, dest))).rejects.toMatchObject({ kind: 'disk' });
+      expect(locked.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      locked.mockRestore();
+    }
+    expect(existsSync(`${dest}.part`)).toBe(true);
   });
 
   it('stops a running download when cancelled and keeps the part', async () => {

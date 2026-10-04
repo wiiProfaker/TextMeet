@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppInfo, SettingsState } from '../../shared/ipc';
 import { entryId } from '../../shared/meeting';
 import { IDLE_RECORDING_STATE } from '../../shared/recording';
@@ -40,18 +40,24 @@ export function App() {
   const [query, setQuery] = useState('');
   const [focus, setFocus] = useState<SearchView['focus']>(null);
   const searching = isSearchable(query);
-  const search = useSearch(query);
+  const [searchStamp, setSearchStamp] = useState(0);
+  const refreshSearch = useCallback(() => setSearchStamp((n) => n + 1), []);
+  const search = useSearch(query, searchStamp);
   // Подсветка — по запросу, ответ на который уже пришёл (после паузы набора), а не на каждую нажатую букву.
   const searched =
     searching && (search.kind === 'ready' || search.kind === 'searching') ? (search.result?.query ?? '') : '';
   const searchView = useMemo<SearchView>(
-    () => ({ words: searched ? queryWords(searched) : NO_WORDS, focus: searching ? focus : null }),
-    [searched, searching, focus],
+    () => ({
+      words: searched ? queryWords(searched) : NO_WORDS,
+      focus: searching ? focus : null,
+      refresh: refreshSearch,
+    }),
+    [searched, searching, focus, refreshSearch],
   );
   const changeQuery = (next: string) => {
     setQuery(next);
-    // Поиск закончен — забыть реплику, к которой переходили: у нового поиска её нет.
-    if (!isSearchable(next)) setFocus(null);
+    // Запрос изменился — забыть реплику, к которой переходили: у нового поиска её нет.
+    setFocus(null);
   };
 
   useEffect(() => {

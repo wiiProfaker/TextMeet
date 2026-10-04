@@ -373,3 +373,28 @@ test('search sees a segment right after it was edited', async () => {
   await page.getByRole('searchbox', { name: 'Поиск по всем встречам' }).fill('самары');
   await expect(page.getByRole('navigation', { name: 'Найдено' }).getByRole('status')).toHaveText('Найдено в 1 встрече');
 });
+
+test('search results follow a text edit and a deleted segment', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page } = launched;
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  const found = page.getByRole('navigation', { name: 'Найдено' });
+  await page.getByRole('searchbox', { name: 'Поиск по всем встречам' }).fill('октябрь');
+  await expect(found.getByRole('status')).toHaveText('Найдено в 1 встрече');
+
+  await text.getByRole('button', { name: /По бюджету на октябрь/ }).click();
+  await text.getByRole('textbox', { name: 'Текст реплики' }).fill('По бюджету осталась половина.');
+  await text.getByRole('textbox', { name: 'Текст реплики' }).press('Enter');
+  await expect(text.getByRole('button', { name: 'По бюджету осталась половина.' })).toBeVisible();
+  await expect(found.getByRole('status')).toHaveText('Ничего не найдено');
+
+  // Удалённая реплика тоже пропадает из найденного.
+  await page.getByRole('searchbox', { name: 'Поиск по всем встречам' }).fill('половина');
+  await expect(found.getByRole('status')).toHaveText('Найдено в 1 встрече');
+  await text.getByRole('button', { name: 'По бюджету осталась половина.' }).click();
+  await text.getByRole('textbox', { name: 'Текст реплики' }).fill('');
+  await text.getByRole('textbox', { name: 'Текст реплики' }).press('Enter');
+  await expect(text.locator('.row')).toHaveCount(2);
+  await expect(found.getByRole('status')).toHaveText('Ничего не найдено');
+});

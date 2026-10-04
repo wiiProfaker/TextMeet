@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react';
+import { createContext, useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
 import type { SearchResult } from '../../shared/search';
@@ -189,8 +189,9 @@ export function useTranscript(
       if (request !== latest.current) return;
       setState((current) => {
         // Перечитать не вышло (OneDrive ещё пишет файл) — показанный текст и открытая правка остаются.
+        // Файла нет совсем (ответ «нет текста») — это не сбой: показывать прежний текст нельзя.
         const shown = current?.meetingId === meetingId && current.load.kind === 'ready';
-        return shown && load.kind !== 'ready' ? current : { meetingId, load };
+        return shown && load.kind === 'error' ? current : { meetingId, load };
       });
     };
     window.textmeet
@@ -203,7 +204,8 @@ export function useTranscript(
 
 /** Плеер встречи: элемент <audio> — у Player, управление — у всей встречи (щелчок по времени реплики). */
 export interface Playback {
-  ref: RefObject<HTMLAudioElement | null>;
+  /** Ref элемента <audio>: когда элемента нет (запись не готова, не открылась), плеер сбрасывается. */
+  ref(element: HTMLAudioElement | null): void;
   playing: boolean;
   /** Место в записи, секунды. */
   position: number;
@@ -232,7 +234,7 @@ export interface Playback {
 }
 
 export function usePlayback(meetingId: string, fallbackDuration: number | null): Playback {
-  const ref = useRef<HTMLAudioElement>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState<number | null>(fallbackDuration);
@@ -247,9 +249,21 @@ export function usePlayback(meetingId: string, fallbackDuration: number | null):
     setFailed(false);
   }, [meetingId]);
 
+  // Длительность из meeting.json могла прийти после появления плеера, а сам файл её не сообщил.
   useEffect(() => {
-    if (ref.current) ref.current.playbackRate = speed;
+    setDuration((current) => current ?? fallbackDuration);
+  }, [fallbackDuration]);
+
+  useEffect(() => {
+    if (audio.current) audio.current.playbackRate = speed;
   }, [speed]);
+
+  // Элемент появился или исчез (Player не показывается, пока запись не готова или не открылась) — играть нечему.
+  const ref = useCallback((element: HTMLAudioElement | null) => {
+    audio.current = element;
+    setPlaying(false);
+    setPosition(0);
+  }, []);
 
   // AbortError — воспроизведение прервали (пауза, перемотка, удаление аудио): это не поломка записи.
   const play = useCallback((el: HTMLAudioElement) => {
@@ -260,7 +274,7 @@ export function usePlayback(meetingId: string, fallbackDuration: number | null):
   // Постоянная функция: её получает каждая реплика, и новая функция перерисовывала бы весь текст при игре.
   const seekAndPlay = useCallback(
     (seconds: number) => {
-      const el = ref.current;
+      const el = audio.current;
       if (!el) return;
       el.currentTime = seconds;
       setPosition(seconds);
@@ -277,20 +291,20 @@ export function usePlayback(meetingId: string, fallbackDuration: number | null):
     speed,
     failed,
     toggle: () => {
-      const el = ref.current;
+      const el = audio.current;
       if (!el) return;
       if (el.paused) play(el);
       else el.pause();
     },
     seek: (seconds) => {
-      const el = ref.current;
+      const el = audio.current;
       if (el) el.currentTime = seconds;
       setPosition(seconds);
     },
     seekAndPlay,
     nextSpeed: () => setSpeed((s) => nextSpeed(s)),
     release: () => {
-      const el = ref.current;
+      const el = audio.current;
       const src = el?.getAttribute('src');
       if (!el || !src) return () => undefined;
       el.pause();
@@ -299,6 +313,9 @@ export function usePlayback(meetingId: string, fallbackDuration: number | null):
       return () => {
         el.setAttribute('src', src);
         el.load();
+        // Файл загружен заново — с начала.
+        setPlaying(false);
+        setPosition(0);
       };
     },
     events: {
@@ -326,9 +343,10 @@ export type SearchState =
 
 /**
  * Поиск по всем встречам: после паузы набора; показывается только ответ на последний запрос. Повторяется, когда
- * библиотека изменилась и при возврате в окно — найденное не устаревает.
+ * библиотека изменилась, при возврате в окно и когда изменился refreshKey (правка текста: main о ней не
+ * сообщает, если meeting.json не менялся) — найденное не устаревает.
  */
-export function useSearch(query: string): SearchState {
+export function useSearch(query: string, refreshKey: number): SearchState {
   const [state, setState] = useState<SearchState>({ kind: 'idle' });
   const [again, setAgain] = useState(0);
   const latest = useRef(0);
@@ -351,7 +369,11 @@ export function useSearch(query: string): SearchState {
       setState({ kind: 'idle' });
       return;
     }
-    setState((current) => ({ kind: 'searching', result: current.kind === 'ready' ? current.result : null }));
+    // Прежний ответ виден, пока идёт новый поиск: без мелькания «Ищем…» и подсветки при каждой набранной букве.
+    setState((current) => ({
+      kind: 'searching',
+      result: current.kind === 'ready' || current.kind === 'searching' ? current.result : null,
+    }));
     const timer = setTimeout(() => {
       window.textmeet
         .search(query)
@@ -363,7 +385,7 @@ export function useSearch(query: string): SearchState {
         });
     }, SEARCH_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [query, active, again]);
+  }, [query, active, again, refreshKey]);
 
   return state;
 }
@@ -374,6 +396,8 @@ export interface SearchView {
   words: readonly string[];
   /** nonce — каждый переход новый: повторный щелчок по той же реплике снова к ней прокручивает. */
   focus: { meetingId: string; segmentId: string; nonce: number } | null;
+  /** Текст встречи правили — повторить поиск. */
+  refresh(): void;
 }
 
-export const SearchViewContext = createContext<SearchView>({ words: [], focus: null });
+export const SearchViewContext = createContext<SearchView>({ words: [], focus: null, refresh: () => undefined });

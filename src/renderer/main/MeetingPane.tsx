@@ -129,6 +129,18 @@ function ReadyText({
   const starts = useMemo(() => transcript.segments.map((s) => s.start), [transcript]);
   const search = useContext(SearchViewContext);
   const focus = search.focus?.meetingId === meeting.id ? search.focus : null;
+  const { refresh } = search;
+  // После правки поиск повторяется: main о ней не сообщает, если meeting.json не менялся.
+  const editAndRefresh = useMemo(
+    () =>
+      onEdit
+        ? async (change: TranscriptEdit) => {
+            await onEdit(change);
+            refresh();
+          }
+        : null,
+    [onEdit, refresh],
+  );
   const renameSpeaker = useCallback(
     async (speakerId: SpeakerId, name: string | null) => {
       await window.textmeet.renameSpeaker({ meetingId: meeting.id, speakerId, name });
@@ -144,7 +156,7 @@ function ReadyText({
       nowIndex={nowIndex}
       playing={playback.playing}
       onPlayAt={canPlay ? playback.seekAndPlay : null}
-      onEdit={onEdit}
+      onEdit={editAndRefresh}
       searchWords={search.words}
       focus={focus}
       onRenameSpeaker={renameSpeaker}

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { findRanges, normalize } from '../../shared/search-text';
 import { errorText } from './errors';
 import { Marked } from './SearchResults';
@@ -56,6 +56,8 @@ export function SegmentText({
   const refocus = useRef(false);
   const editingNow = useRef(editing);
   editingNow.current = editing;
+  // Подсветка поиска считается один раз на текст и слова, а не на каждую перерисовку.
+  const ranges = useMemo(() => (words.length > 0 ? findRanges(normalize(text), words) : null), [text, words]);
 
   // До отрисовки поля: без мелькания прежнего черновика и с курсором там, где щёлкнули.
   useLayoutEffect(() => {
@@ -83,7 +85,7 @@ export function SegmentText({
   }, [editing]);
 
   if (!editing) {
-    const shown = words.length > 0 ? <Marked text={text} ranges={findRanges(normalize(text), words)} /> : text;
+    const shown = ranges ? <Marked text={text} ranges={ranges} /> : text;
     if (!editable) return <div className="say">{shown}</div>;
     return (
       <div

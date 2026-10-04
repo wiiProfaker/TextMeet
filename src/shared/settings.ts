@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL } from './asr-models';
 
 // Новые поля добавляются с .default(...) — старый settings.json читается без миграции.
 export const SettingsSchema = z.object({
@@ -12,6 +13,11 @@ export const SettingsSchema = z.object({
   recordHotkey: z.string().min(1).max(100).nullable().default(null),
   /** Короткий звук при начале и остановке записи. */
   recordSounds: z.boolean().default(true),
+  /**
+   * Модель расшифровки для новых встреч. Неизвестная (из более новой версии программы) — модель по умолчанию:
+   * из-за одного поля остальные настройки не сбрасываются.
+   */
+  asrModel: z.enum(ASR_MODEL_IDS).default(DEFAULT_ASR_MODEL).catch(DEFAULT_ASR_MODEL),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

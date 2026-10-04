@@ -18,7 +18,8 @@ const settingsFile = async (userDataDir: string) =>
   JSON.parse(await readFile(join(userDataDir, 'settings.json'), 'utf8')) as Record<string, unknown>;
 
 test('the catalog downloads, cancels, selects and deletes models', async () => {
-  launched = await launchApp({ downloadStepMs: 600 });
+  // Шаг «скачивания» долгий: проверки «ждут» и «Отменить» успевают и на медленной машине.
+  launched = await launchApp({ downloadStepMs: 1500 });
   const { page, userDataDir } = launched;
   await page.getByRole('button', { name: 'Настройки' }).click();
 
@@ -32,7 +33,10 @@ test('the catalog downloads, cancels, selects and deletes models', async () => {
   // Скачивание идёт: прогресс в карточке, остальные «Скачать» ждут; «Отменить» возвращает всё как было.
   const qwen = page.getByRole('article', { name: 'Qwen3-ASR 0.6B' });
   await qwen.getByRole('button', { name: 'Скачать: Qwen3-ASR 0.6B' }).click();
-  await expect(qwen.getByRole('status')).toContainText('Скачиваем');
+  await expect(qwen.getByRole('progressbar', { name: 'Скачивание: Qwen3-ASR 0.6B' })).toBeVisible();
+  await expect(qwen).toContainText('Скачиваем');
+  // Счётчик байт меняется дважды в секунду — экранному диктору хватает полоски, вслух он его не зачитывает.
+  await expect(qwen.getByRole('status')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Скачать: T-one' })).toBeDisabled();
   await qwen.getByRole('button', { name: 'Отменить' }).click();
   await expect(qwen.getByRole('button', { name: 'Скачать: Qwen3-ASR 0.6B' })).toBeEnabled();
@@ -41,7 +45,7 @@ test('the catalog downloads, cancels, selects and deletes models', async () => {
   // Скачанная модель переезжает в «Скачанные», её можно выбрать.
   await page.getByRole('button', { name: 'Скачать: T-one' }).click();
   const downloaded = page.getByRole('group', { name: 'Скачанные' });
-  await expect(downloaded.getByRole('article', { name: 'T-one' })).toBeVisible({ timeout: 15_000 });
+  await expect(downloaded.getByRole('article', { name: 'T-one' })).toBeVisible({ timeout: 20_000 });
   await downloaded.getByRole('button', { name: 'Выбрать: T-one' }).click();
   await expect(selected.getByRole('article', { name: 'T-one' })).toBeVisible();
   await expect.poll(async () => (await settingsFile(userDataDir)).asrModel).toBe('t-one');

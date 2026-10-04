@@ -53,7 +53,8 @@ export function ModelCard({ id, state, actions }: { id: AsrModelId; state: Model
       {info.group === 'en' && <p className="mcard-warn">Только английский — русская речь распознаётся неверно.</p>}
       {download && (
         <div className="mcard-progress">
-          <span role="status">{downloadText(download.done, download.total)}</span>
+          {/* Без role="status": счётчик меняется дважды в секунду, диктору хватает полоски ниже. */}
+          <span>{downloadText(download.done, download.total)}</span>
           <span
             className="prog"
             role="progressbar"

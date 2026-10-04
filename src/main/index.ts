@@ -27,6 +27,7 @@ import { registerIpc } from './ipc';
 import { listMeetings } from './library/library';
 import { createLogger, type Logger } from './logger';
 import { MEDIA_SCHEME, serveMedia } from './media-protocol';
+import { CatalogDownloads } from './models/catalog-downloads';
 import { FakeModelStore } from './models/fake-model-store';
 import { ModelManager, type ModelStore } from './models/model-manager';
 import { modelsRoot } from './models/models-dir';
@@ -318,6 +319,12 @@ async function start(logger: Logger): Promise<void> {
   const models: ModelStore = fakeAsr
     ? new FakeModelStore(modelsDir, fakeDownloadStepMs)
     : new ModelManager({ root: modelsDir, logger, freeBytes: freeDiskBytes });
+  const catalogDownloads = new CatalogDownloads({
+    models,
+    logger,
+    changed: () => sendToMain(IPC.modelsChanged),
+    now: () => Date.now(),
+  });
   const queue = new TranscriptionQueue({
     spawn: () => spawnTranscriptionWorker(logger),
     models,
@@ -422,6 +429,7 @@ async function start(logger: Logger): Promise<void> {
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
     transcription: queue,
     models,
+    downloads: catalogDownloads,
   });
 
   app.on('before-quit', (event) => {

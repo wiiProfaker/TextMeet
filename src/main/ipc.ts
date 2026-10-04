@@ -27,7 +27,7 @@ import { listMeetings, meetingDir } from './library/library';
 import { readTranscript } from './library/transcript-store';
 import type { Logger } from './logger';
 import type { ModelStore } from './models/model-manager';
-import { buildModelsState } from './models/models-state';
+import { buildModelsState, type CatalogDownloadsSnapshot } from './models/models-state';
 import { MODEL_GROUP_IDS } from './models/registry';
 import type { RecordingController } from './recording/controller';
 import type { SettingsStore } from './settings/settings-store';
@@ -57,6 +57,12 @@ export interface IpcDeps {
     stopIdleWorker(): void;
   };
   models: Pick<ModelStore, 'state' | 'remove'>;
+  downloads: {
+    start(id: AsrModelId): void;
+    cancel(id: AsrModelId): Promise<void>;
+    snapshot(): CatalogDownloadsSnapshot;
+    isBusy(): boolean;
+  };
 }
 
 const StopDialogAnswerSchema = z.object({
@@ -75,6 +81,7 @@ const LIBRARY_LOCKED = 'Во время записи папку библиоте
 const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запись остановлена».';
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
+const MODELS_DOWNLOADING = 'Модели нельзя удалить, пока скачивается модель.';
 
 const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
 const TranscribeRequestSchema = z.object({
@@ -279,7 +286,7 @@ export function registerIpc(deps: IpcDeps): void {
     buildModelsState(
       await deps.models.state(),
       deps.settings.get().asrModel,
-      { download: null, downloadError: null },
+      deps.downloads.snapshot(),
       deps.transcription.isBusy(),
     );
 
@@ -288,6 +295,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.deleteModels, async (arg) => {
     const group = z.enum(MODEL_GROUP_IDS).parse(arg);
     if (deps.transcription.isBusy()) throw new Error(MODELS_BUSY);
+    if (deps.downloads.isBusy()) throw new Error(MODELS_DOWNLOADING);
     deps.transcription.stopIdleWorker();
     try {
       await deps.models.remove(group);
@@ -296,6 +304,21 @@ export function registerIpc(deps: IpcDeps): void {
     }
     // Удалили выбранную модель — новые встречи пойдут на модель по умолчанию (она скачается при расшифровке).
     if (group === deps.settings.get().asrModel) await deps.settings.update({ asrModel: DEFAULT_ASR_MODEL });
+    return modelsState();
+  });
+
+  handle(IPC.downloadModel, async (arg) => {
+    deps.downloads.start(AsrModelIdSchema.parse(arg));
+    return modelsState();
+  });
+
+  handle(IPC.cancelModelDownload, async (arg) => {
+    await deps.downloads.cancel(AsrModelIdSchema.parse(arg));
+    return modelsState();
+  });
+
+  handle(IPC.selectModel, async (arg) => {
+    await deps.settings.update({ asrModel: AsrModelIdSchema.parse(arg) });
     return modelsState();
   });
 

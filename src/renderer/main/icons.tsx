@@ -66,6 +66,27 @@ export const PencilIcon = () => (
   </Icon>
 );
 
+export const MoreIcon = () => (
+  <Icon filled>
+    <circle cx="5" cy="12" r="1.7" />
+    <circle cx="12" cy="12" r="1.7" />
+    <circle cx="19" cy="12" r="1.7" />
+  </Icon>
+);
+
+export const MuteIcon = () => (
+  <Icon>
+    <path d="M4 9v6h4l5 4V5L8 9z" />
+    <path d="M17 9l4 6M21 9l-4 6" />
+  </Icon>
+);
+
+export const TrashIcon = () => (
+  <Icon>
+    <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+  </Icon>
+);
+
 export const PlusIcon = () => (
   <Icon>
     <path d="M12 5v14M5 12h14" />

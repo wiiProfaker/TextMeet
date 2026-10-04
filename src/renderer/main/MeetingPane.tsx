@@ -3,15 +3,17 @@ import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import { transcriptModelTitle, type SpeakerId } from '../../shared/transcript';
-import type { TranscriptEdit } from '../../shared/transcript-edit';
+import { hasManualChanges, type TranscriptEdit } from '../../shared/transcript-edit';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { formatLongDate, participantsText } from './format';
 import { usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
-import { FolderIcon, WarnIcon } from './icons';
+import { FolderIcon, TrashIcon, WarnIcon } from './icons';
 import { MeetingTitle } from './MeetingTitle';
 import { Player } from './Player';
 import { segmentAt } from './playback';
+import { ConfirmDialog } from './ConfirmDialog';
+import { MeetingMenu } from './MeetingMenu';
 import { TranscribeDialog } from './TranscribeDialog';
 import { progressView, transcribeActions, type ProgressView } from './transcription-format';
 import { TranscriptView } from './TranscriptView';
@@ -21,7 +23,12 @@ interface Props {
   /** Ход расшифровки этой встречи, если она в очереди или расшифровывается. */
   progress: TranscriptionProgress | null;
   onError(message: string): void;
+  /** Встречу удалили — выбрать соседнюю. */
+  onDeleted(): void;
 }
+
+const AUDIO_BUSY = 'Аудио нельзя удалить, пока встреча ждёт расшифровки или расшифровывается.';
+const AUDIO_MIXING = 'Запись ещё готовится к прослушиванию — удалите аудио чуть позже.';
 
 function OpenFolder({ id, onError }: { id: string; onError(message: string): void }) {
   return (
@@ -33,6 +40,32 @@ function OpenFolder({ id, onError }: { id: string; onError(message: string): voi
       <FolderIcon />
       Открыть папку встречи
     </button>
+  );
+}
+
+/** Папку встречи, которая создаётся слишком долго или не читается, тоже можно убрать — в Корзину. */
+function DeleteFolder({ id, onDeleted }: { id: string; onDeleted(): void }) {
+  const [confirm, setConfirm] = useState(false);
+  return (
+    <>
+      <button type="button" className="btn ghost" onClick={() => setConfirm(true)}>
+        <TrashIcon />
+        Удалить папку…
+      </button>
+      {confirm && (
+        <ConfirmDialog
+          title="Удалить папку встречи?"
+          confirmLabel="Удалить папку"
+          onCancel={() => setConfirm(false)}
+          onConfirm={async () => {
+            await window.textmeet.deleteMeeting(id);
+            onDeleted();
+          }}
+        >
+          Папка {id} переместится в Корзину. Вернуть её можно оттуда.
+        </ConfirmDialog>
+      )}
+    </>
   );
 }
 
@@ -181,7 +214,12 @@ function Body({
 }
 
 /** Прочитанная встреча: заголовок, пометки, текст или ход расшифровки, плеер. */
-function MeetingView({ entry, progress, onError }: Props & { entry: Extract<MeetingListEntry, { kind: 'ok' }> }) {
+function MeetingView({
+  entry,
+  progress,
+  onError,
+  onDeleted,
+}: Props & { entry: Extract<MeetingListEntry, { kind: 'ok' }> }) {
   const [dialog, setDialog] = useState(false);
   const { meeting, mixReady, mixFailed } = entry;
   const busy = meeting.status === 'queued' || meeting.status === 'transcribing' ? meeting.status : null;
@@ -198,7 +236,9 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
   if (meeting.participantsHint !== null) meta.push(participantsText(meeting.participantsHint));
   if (load.kind === 'ready') meta.push(`Текст: ${transcriptModelTitle(load.transcript)}`);
+  if (meeting.audioDeleted) meta.push('аудио удалено');
   const hasAudio = meeting.tracks.length > 0;
+  const audioBlocked = busy ? AUDIO_BUSY : hasAudio && !mixReady && !mixFailed ? AUDIO_MIXING : null;
   // Текст уже есть (он виден, пока новый не готов) — в окне предупреждаем, что он заменится.
   const hasText = load.kind === 'ready';
   const transcribeError = meeting.status === 'error' && hasAudio;
@@ -224,7 +264,13 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
               {actions.header}
             </button>
           )}
-          <OpenFolder id={meeting.id} onError={onError} />
+          <MeetingMenu
+            meeting={meeting}
+            audioBlocked={audioBlocked}
+            releaseAudio={playback.release}
+            onDeleted={onDeleted}
+            onError={onError}
+          />
         </div>
       </header>
       {meeting.recovered && meeting.status !== 'error' && (
@@ -279,6 +325,7 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
           meetingId={meeting.id}
           again={actions.header === 'Расшифровать заново'}
           replacesText={hasText}
+          losesEdits={hasManualChanges(load.kind === 'ready' ? load.transcript : null, meeting.speakerNames)}
           participantsHint={meeting.participantsHint}
           onClose={() => setDialog(false)}
         />
@@ -288,14 +335,17 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
 }
 
 /** Выбранная встреча: создаётся, не прочиталась или прочитана. */
-export function MeetingPane({ entry, progress, onError }: Props) {
+export function MeetingPane({ entry, progress, onError, onDeleted }: Props) {
   if (entry.kind === 'creating') {
     return (
       <main className="pane" aria-label="Встреча">
         <div className="empty-note">
           <b>Встреча создаётся…</b>
           <span>Если это сообщение не исчезает, встреча не успела создаться — папку можно удалить.</span>
-          <OpenFolder id={entry.id} onError={onError} />
+          <div className="acts">
+            <OpenFolder id={entry.id} onError={onError} />
+            <DeleteFolder id={entry.id} onDeleted={onDeleted} />
+          </div>
         </div>
       </main>
     );
@@ -307,10 +357,13 @@ export function MeetingPane({ entry, progress, onError }: Props) {
           <b>Не удалось прочитать встречу</b>
           <span>Папка: {entry.id}</span>
           <pre className="reason">{entry.reason}</pre>
-          <OpenFolder id={entry.id} onError={onError} />
+          <div className="acts">
+            <OpenFolder id={entry.id} onError={onError} />
+            <DeleteFolder id={entry.id} onDeleted={onDeleted} />
+          </div>
         </div>
       </main>
     );
   }
-  return <MeetingView entry={entry} progress={progress} onError={onError} />;
+  return <MeetingView entry={entry} progress={progress} onError={onError} onDeleted={onDeleted} />;
 }

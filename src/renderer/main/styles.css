@@ -1277,6 +1277,26 @@ button.chip:hover {
   color: var(--rec);
 }
 
+.mi.danger .ic {
+  color: var(--rec);
+}
+
+.mi:disabled {
+  opacity: 0.5;
+  cursor: default;
+  background: transparent;
+}
+
+/* Меню «…» в заголовке встречи — справа под кнопкой. */
+.more-wrap {
+  position: relative;
+}
+
+.menu.right {
+  left: auto;
+  right: 0;
+}
+
 .sep {
   height: 1px;
   background: var(--line);

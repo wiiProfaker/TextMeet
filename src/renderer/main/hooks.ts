@@ -205,8 +205,11 @@ export interface Playback {
   /** Слушать с этого места. */
   seekAndPlay(seconds: number): void;
   nextSpeed(): void;
-  /** Остановить и отпустить файл записи (перед «Удалить аудио»: иначе Windows не даст перенести папку). */
-  release(): void;
+  /**
+   * Остановить и отпустить файл записи (перед удалением: иначе Windows не даст перенести папку в Корзину).
+   * Возвращает «вернуть как было» — если удалить не вышло.
+   */
+  release(): () => void;
   /** Обработчики событий <audio>. */
   events: {
     onPlay(): void;
@@ -275,10 +278,15 @@ export function usePlayback(meetingId: string, fallbackDuration: number | null):
     nextSpeed: () => setSpeed((s) => nextSpeed(s)),
     release: () => {
       const el = ref.current;
-      if (!el) return;
+      const src = el?.getAttribute('src');
+      if (!el || !src) return () => undefined;
       el.pause();
       el.removeAttribute('src');
       el.load();
+      return () => {
+        el.setAttribute('src', src);
+        el.load();
+      };
     },
     events: {
       onPlay: () => setPlaying(true),

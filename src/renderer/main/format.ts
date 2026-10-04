@@ -1,5 +1,6 @@
 import type { LaunchAtLoginNotice } from '../../shared/ipc';
 import { entryId, type Meeting, type MeetingListEntry } from '../../shared/meeting';
+import { formatBytes, formatDurationShort } from '../../shared/format';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { percent } from './transcription-format';
 
@@ -157,6 +158,15 @@ export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress):
     case 'done':
       return null;
   }
+}
+
+/** Текст окна «Удалить аудио?»: «Запись (32 мин, 15 МБ) переместится в Корзину…»; размер — когда узнали. */
+export function deleteAudioText(durationSec: number | null, bytes: number | null): string {
+  const parts: string[] = [];
+  if (durationSec !== null && durationSec >= 0) parts.push(formatDurationShort(durationSec));
+  if (bytes !== null) parts.push(bytes < 1024 * 1024 ? 'меньше 1 МБ' : formatBytes(bytes));
+  const what = parts.length > 0 ? `Запись (${parts.join(', ')})` : 'Запись';
+  return `${what} переместится в Корзину. Текст встречи останется, но слушать запись и расшифровывать её заново будет нельзя.`;
 }
 
 /** Убирает приставку «По умолчанию — » / «Default - » из названия устройства. */

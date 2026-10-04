@@ -3,6 +3,7 @@ import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import {
   cleanDeviceLabel,
   dayLabel,
+  deleteAudioText,
   formatClock,
   formatDuration,
   formatDurationWithSeconds,
@@ -232,5 +233,22 @@ describe('launchAtLoginNoticeText', () => {
     expect(launchAtLoginNoticeText('needs-approval')).toContain('Объекты входа');
     expect(launchAtLoginNoticeText('blocked-by-system')).toContain('Диспетчер задач');
     expect(launchAtLoginNoticeText('unsupported')).toContain('не поддерживается');
+  });
+});
+
+describe('deleteAudioText', () => {
+  const tail = 'переместится в Корзину. Текст встречи останется, но слушать запись и расшифровывать её заново будет нельзя.';
+
+  it('names the length and the size of the recording', () => {
+    expect(deleteAudioText(32 * 60, 15 * 1024 * 1024)).toBe(`Запись (32 мин, 15 МБ) ${tail}`);
+  });
+
+  it('says «меньше 1 МБ» for a tiny recording', () => {
+    expect(deleteAudioText(30, 200_000)).toBe(`Запись (меньше минуты, меньше 1 МБ) ${tail}`);
+  });
+
+  it('leaves out what is not known yet', () => {
+    expect(deleteAudioText(null, null)).toBe(`Запись ${tail}`);
+    expect(deleteAudioText(120, null)).toBe(`Запись (2 мин) ${tail}`);
   });
 });

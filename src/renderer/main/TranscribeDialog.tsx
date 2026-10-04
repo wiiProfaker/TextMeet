@@ -3,7 +3,7 @@ import { ASR_MODEL_IDS, isAsrModelId, type AsrModelId } from '../../shared/asr-m
 import type { ModelsState } from '../../shared/transcription';
 import { errorText } from './errors';
 import { keepFocusInside } from './focus';
-import { ChevronIcon } from './icons';
+import { ChevronIcon, WarnIcon } from './icons';
 import { modelChoiceLabel } from './model-catalog';
 import { choiceFor, readChoice } from './participants';
 import { ParticipantsPicker } from './ParticipantsPicker';
@@ -14,13 +14,15 @@ interface Props {
   again: boolean;
   /** Текст уже есть: он заменится, когда новая расшифровка закончится. */
   replacesText: boolean;
+  /** Текст правили руками или собеседникам дали имена — это пропадёт. */
+  losesEdits: boolean;
   /** Число участников, указанное раньше (выбрано заранее). */
   participantsHint: number | null;
   onClose(): void;
 }
 
 /** «Расшифровать» / «Расшифровать заново»: модель (по умолчанию — из настроек), число участников и запуск. */
-export function TranscribeDialog({ meetingId, again, replacesText, participantsHint, onClose }: Props) {
+export function TranscribeDialog({ meetingId, again, replacesText, losesEdits, participantsHint, onClose }: Props) {
   const [participants, setParticipants] = useState(() => choiceFor(participantsHint));
   const [models, setModels] = useState<ModelsState | null>(null);
   /** null — пока не выбрали сами: модель из настроек. */
@@ -84,6 +86,12 @@ export function TranscribeDialog({ meetingId, again, replacesText, participantsH
       >
         <h2 id={titleId}>{title}</h2>
         {replacesText && <div className="meta">Текст заменится, когда новая расшифровка закончится.</div>}
+        {losesEdits && (
+          <p className="wrn">
+            <WarnIcon />
+            <span>Текст расшифруется с нуля: ваши правки и имена собеседников пропадут.</span>
+          </p>
+        )}
         {models && (
           <div className="dlg-field">
             <div className="q">Модель</div>

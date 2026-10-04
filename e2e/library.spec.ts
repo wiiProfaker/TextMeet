@@ -1,5 +1,6 @@
 // Библиотека: прослушивание с места реплики, правка, спикеры, поиск, удаление (План 4).
-import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { launchApp, meetingJson, pollMeetingJson, type LaunchedApp } from './helpers';
@@ -211,4 +212,76 @@ test('the speaker of one segment is changed from the menu, also to a new speaker
   await rows.nth(2).getByRole('button', { name: 'Спикер 2', exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
+});
+
+test('«Удалить аудио» moves the audio to the trash and keeps the text', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page, libraryDir, trashDir } = launched;
+  await openMeeting(page);
+  // Аудио удаляется, когда запись готова к прослушиванию.
+  await expect(page.getByRole('button', { name: 'Слушать', exact: true })).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole('button', { name: 'Ещё' }).click();
+  await page.getByRole('menuitem', { name: 'Удалить аудио…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Удалить аудио?' });
+  await expect(dialog).toContainText('Запись (меньше минуты, меньше 1 МБ) переместится в Корзину.');
+  await dialog.getByRole('button', { name: 'Удалить аудио' }).click();
+  await expect(dialog).toBeHidden();
+
+  await expect(page.locator('.meta')).toContainText('аудио удалено');
+  await expect(page.getByRole('button', { name: 'Слушать', exact: true })).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Расшифровать заново' })).toBeHidden();
+  await expect(page.getByLabel('Текст встречи')).toContainText('Без подрядчиков.');
+  expect(existsSync(join(libraryDir, ID, 'audio'))).toBe(false);
+  expect(await readdir(trashDir)).toEqual(['1-audio']);
+  expect(await pollMeetingJson(libraryDir, ID)).toMatchObject({ audioDeleted: true, tracks: [] });
+
+  await page.getByRole('button', { name: 'Ещё' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Удалить аудио…' })).toHaveCount(0);
+});
+
+test('«Удалить встречу» moves the meeting folder to the trash and selects the next meeting', async () => {
+  const OTHER = '2026-09-24_1000_d4e5f6';
+  launched = await launchApp({
+    meetings: [
+      doneMeeting(),
+      { id: OTHER, json: meetingJson(OTHER, { title: 'Планёрка', createdAt: '2026-09-24T07:00:00.000Z' }) },
+    ],
+    transcripts: { [ID]: TRANSCRIPT },
+  });
+  const { page, libraryDir, trashDir } = launched;
+  await openMeeting(page);
+
+  await page.getByRole('button', { name: 'Ещё' }).click();
+  await page.getByRole('menuitem', { name: 'Удалить встречу…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Удалить встречу «Созвон с Ириной»?' });
+  await dialog.getByRole('button', { name: 'Удалить встречу' }).click();
+
+  await expect(page.getByRole('heading', { name: 'Планёрка' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Встречи' })).not.toContainText('Созвон с Ириной');
+  expect(existsSync(join(libraryDir, ID))).toBe(false);
+  expect(await readdir(trashDir)).toEqual([`1-${ID}`]);
+});
+
+test('a folder that cannot be read can be deleted too', async () => {
+  launched = await launchApp({ meetings: [{ id: ID, json: '{ сломано' }] });
+  const { page, libraryDir } = launched;
+  await page.getByRole('button', { name: /Не удалось прочитать встречу/ }).click();
+  await page.getByRole('button', { name: 'Удалить папку…' }).click();
+  await page.getByRole('dialog', { name: 'Удалить папку встречи?' }).getByRole('button', { name: 'Удалить папку' }).click();
+  await expect(page.getByText('Пока нет встреч.')).toBeVisible();
+  expect(existsSync(join(libraryDir, ID))).toBe(false);
+});
+
+test('«Расшифровать заново» warns that edits and names will be lost', async () => {
+  launched = await launchApp({
+    meetings: [doneMeeting({ speakerNames: { s1: 'Ирина' } })],
+    transcripts: { [ID]: TRANSCRIPT },
+  });
+  const { page } = launched;
+  await openMeeting(page);
+  await page.getByRole('button', { name: 'Расшифровать заново' }).click();
+  await expect(page.getByRole('dialog', { name: 'Расшифровать заново' })).toContainText(
+    'ваши правки и имена собеседников пропадут',
+  );
 });

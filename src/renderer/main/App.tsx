@@ -53,6 +53,14 @@ export function App() {
   const selectedId = selection?.kind === 'meeting' ? selection.id : null;
   const selectedEntry = entries?.find((e) => entryId(e) === selectedId) ?? null;
 
+  /** Встречу удалили — выбрать соседнюю: ниже по списку, а если её нет — выше. */
+  const selectNeighbor = (id: string) => {
+    const list = entries ?? [];
+    const at = list.findIndex((e) => entryId(e) === id);
+    const next = list[at + 1] ?? list[at - 1];
+    setSelection(next && at !== -1 ? { kind: 'meeting', id: entryId(next) } : null);
+  };
+
   let pane;
   if (selection?.kind === 'settings') {
     pane = settings ? <SettingsPane state={settings} info={info} onChange={setSettings} /> : null;
@@ -67,6 +75,7 @@ export function App() {
         entry={selectedEntry}
         progress={progress.get(entryId(selectedEntry)) ?? null}
         onError={setError}
+        onDeleted={() => selectNeighbor(entryId(selectedEntry))}
       />
     );
   } else {

@@ -17,6 +17,10 @@ describe('normalize', () => {
     expect(normalize(text)).toHaveLength(text.length);
     expect(normalize(text)).toBe('İstanbul еж 🙂 ok');
   });
+
+  it('gives the same result on a text without length-changing letters', () => {
+    expect(normalize('ПРИВЕТ Ёж 🙂 OK')).toBe('привет еж 🙂 ok');
+  });
 });
 
 describe('queryWords', () => {
@@ -56,6 +60,10 @@ describe('matchesAll', () => {
 });
 
 describe('findRanges', () => {
+  it('skips an empty word instead of looping forever', () => {
+    expect(findRanges('абв', ['', 'б'])).toEqual([{ start: 1, end: 2 }]);
+  });
+
   it('finds every occurrence of every word in the original positions', () => {
     const text = 'Бюджет и ещё раз бюджет. Ёлки!';
     const ranges = findRanges(normalize(text), queryWords('бюджет елки'));

@@ -19,6 +19,9 @@ export const MIN_QUERY_LETTERS = 2;
  * поэтому позиции в нормализованной строке совпадают с позициями в исходной.
  */
 export function normalize(text: string): string {
+  // Быстрый путь: длина не изменилась — каждый символ остался на своём месте.
+  const lower = text.toLowerCase();
+  if (lower.length === text.length) return lower.replaceAll('ё', 'е');
   let out = '';
   for (const ch of text) {
     const lower = ch.toLowerCase();
@@ -52,6 +55,8 @@ export function matchesAll(normalized: string, words: readonly string[]): boolea
 export function findRanges(normalized: string, words: readonly string[]): TextRange[] {
   const found: TextRange[] = [];
   for (const word of words) {
+    // Пустое слово нашлось бы в каждой позиции бесконечно.
+    if (!word) continue;
     for (let at = normalized.indexOf(word); at !== -1; at = normalized.indexOf(word, at + 1)) {
       found.push({ start: at, end: at + word.length });
     }

@@ -56,6 +56,14 @@ export function SegmentText({
   const refocus = useRef(false);
   const editingNow = useRef(editing);
   editingNow.current = editing;
+  /** Окно ушло к другой встрече: уход из поля запустил сохранение, а реплика исчезла, не дождавшись ответа. */
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   // Подсветка поиска считается один раз на текст и слова, а не на каждую перерисовку.
   const ranges = useMemo(() => (words.length > 0 ? findRanges(normalize(text), words) : null), [text, words]);
 
@@ -126,10 +134,14 @@ export function SegmentText({
       await onSave(draft);
       onStopEditing();
     } catch (err) {
+      // Реплики уже нет на экране или человек ушёл править другую — ошибку показываем в боковой панели.
+      if (!mounted.current) {
+        onLostError(errorText(err));
+        return;
+      }
       done.current = false;
       refocus.current = false;
       setSaving(false);
-      // Пока сохранялось, человек ушёл править другую реплику — показываем ошибку в боковой панели.
       if (!editingNow.current) {
         onLostError(errorText(err));
         return;

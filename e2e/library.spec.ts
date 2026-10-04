@@ -203,6 +203,33 @@ test('a click on the title of a found meeting that is already open shows it from
   await expect.poll(scrollTop).toBe(0);
 });
 
+test('a failed save that finishes after another meeting was opened is still shown', async () => {
+  const OTHER = '2026-09-24_1000_d4e5f6';
+  launched = await launchApp({
+    meetings: [
+      doneMeeting(),
+      { id: OTHER, json: meetingJson(OTHER, { title: 'Планёрка', createdAt: '2026-09-24T07:00:00.000Z' }) },
+    ],
+    transcripts: { [ID]: TRANSCRIPT },
+  });
+  const { page, libraryDir } = launched;
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  await expect(text.getByRole('button', { name: 'Без подрядчиков.' })).toBeVisible();
+  // Текст заменили снаружи — сохранение откажет.
+  await writeFile(
+    join(libraryDir, ID, 'transcript.json'),
+    JSON.stringify({ ...TRANSCRIPT, createdAt: '2026-09-26T09:00:00.000Z' }),
+  );
+
+  await text.getByRole('button', { name: 'Без подрядчиков.' }).click();
+  await text.getByRole('textbox', { name: 'Текст реплики' }).fill('Правка, которая не сохранится');
+  // Щелчок по другой встрече: уход из поля запускает сохранение, а окно встречи закрывается, не дождавшись ответа.
+  await page.getByRole('button', { name: /Планёрка/ }).click();
+  await expect(page.getByRole('heading', { name: 'Планёрка' })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'Текст встречи изменился' })).toBeVisible();
+});
+
 test('two deleted segments are brought back one by one, the latest first', async () => {
   launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
   const { page, libraryDir } = launched;

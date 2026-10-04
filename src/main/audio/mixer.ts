@@ -79,15 +79,14 @@ export async function mixMeeting(libraryDir: string, meetingId: string, ffmpegPa
 }
 
 /**
- * Встречи, которым нужно сведение: есть дорожки, нет mix.opus, запись закончена.
- * «Ошибку» не сводим: запись без звука (у такой встречи и дорожек нет).
+ * Встречи, которым нужно сведение: есть дорожки, нет mix.opus, запись закончена. Встречи с ошибкой (например,
+ * расшифровки) тоже: иначе плеер вечно «готовит запись». У записи, прервавшейся без звука, дорожек нет.
  */
 export function meetingsNeedingMix(entries: readonly MeetingListEntry[]): string[] {
   return entries.flatMap((entry) =>
     entry.kind === 'ok' &&
     !entry.mixReady &&
     entry.meeting.status !== 'recording' &&
-    entry.meeting.status !== 'error' &&
     entry.meeting.tracks.length > 0
       ? [entry.meeting.id]
       : [],

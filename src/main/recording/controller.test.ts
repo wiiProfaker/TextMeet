@@ -819,7 +819,7 @@ describe('RecordingController — stop dialog', () => {
     expect(h.deps.enqueueTranscription).toHaveBeenCalledWith(h.lib, command.meetingId);
   });
 
-  it('keeps the dialog of the current recording when an older one is answered', async () => {
+  it('shows the dialog of a newer recording after the older one is answered, not instead of it', async () => {
     const h = harness();
     const first = await h.startRecording();
     await h.stopRecording(first.meetingId);
@@ -828,9 +828,33 @@ describe('RecordingController — stop dialog', () => {
     const second = await h.startRecording();
     await h.stopRecording(second.meetingId);
 
+    expect(h.state().stopDialog?.meetingId).toBe(first.meetingId);
     await h.controller.finishStopDialog({ meetingId: first.meetingId, title: 'Первая', participantsHint: 2 });
-
     expect(h.state().stopDialog?.meetingId).toBe(second.meetingId);
+    await h.controller.finishStopDialog({ meetingId: second.meetingId, title: 'Вторая', participantsHint: null });
+    expect(h.state().stopDialog).toBeNull();
+  });
+
+  it('drops the dialog of a deleted meeting, open or waiting', async () => {
+    const h = harness();
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      h.recorder.start.mockClear();
+      h.recorder.stop.mockClear();
+      const command = await h.startRecording();
+      await h.stopRecording(command.meetingId);
+      ids.push(command.meetingId);
+    }
+    const [first, second, third] = ids as [string, string, string];
+
+    h.controller.dropStopDialog(second);
+    expect(h.state().stopDialog?.meetingId).toBe(first);
+    h.controller.dropStopDialog(first);
+    expect(h.state().stopDialog?.meetingId).toBe(third);
+    h.controller.dropStopDialog('2026-01-01_0000_ffffff');
+    expect(h.state().stopDialog?.meetingId).toBe(third);
+    h.controller.dropStopDialog(third);
+    expect(h.state().stopDialog).toBeNull();
   });
 
   it('keeps the dialog of the last recording when the next start fails', async () => {

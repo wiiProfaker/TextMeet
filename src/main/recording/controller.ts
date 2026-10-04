@@ -14,6 +14,7 @@ import {
   type SoundKind,
   type StartProblem,
   type StopDialogAnswer,
+  type StopDialogData,
 } from '../../shared/recording';
 import type { Settings } from '../../shared/settings';
 import { fsErrorReason, humanFsError } from '../fs/fs-errors';
@@ -139,6 +140,8 @@ export class RecordingController {
   private state: RecordingState = { ...IDLE_RECORDING_STATE };
   private session: Session | null = null;
   private busy: Promise<void> = Promise.resolve();
+  /** Окна «Запись остановлена», ждущие, пока ответят на открытое (state.stopDialog). */
+  private waitingDialogs: StopDialogData[] = [];
   /** Выход решён: новые записи не начинаются, кнопки и клавиша ничего не делают. */
   private quitting = false;
 
@@ -186,7 +189,7 @@ export class RecordingController {
     } catch (err) {
       throw humanFsError('Не удалось сохранить ответ в окне «Запись остановлена»', err);
     } finally {
-      if ((saved || skipped) && this.state.stopDialog?.meetingId === answer.meetingId) this.update({ stopDialog: null });
+      if ((saved || skipped) && this.state.stopDialog?.meetingId === answer.meetingId) this.showNextStopDialog();
     }
     this.deps.libraryChanged();
     this.deps.enqueueTranscription(libraryDir, answer.meetingId);
@@ -543,15 +546,28 @@ export class RecordingController {
     this.deps.notify(notificationTexts.startFailed(problem), true);
   }
 
+  /** Встречу удалили: её окно «Запись остановлена» больше не нужно — ни открытое, ни ждущее. */
+  dropStopDialog(meetingId: string): void {
+    this.waitingDialogs = this.waitingDialogs.filter((dialog) => dialog.meetingId !== meetingId);
+    if (this.state.stopDialog?.meetingId === meetingId) this.showNextStopDialog();
+  }
+
+  private showNextStopDialog(): void {
+    this.update({ stopDialog: this.waitingDialogs.shift() ?? null });
+  }
+
   /**
    * После каждой записи переключатель «Звук компьютера» снова включён.
    * session — запись, которую завершаем: запоздавшая остановка старой записи не должна сбросить новую.
+   * Окно «Запись остановлена» прошлой записи ещё открыто — новое ждёт своей очереди, а не заменяет его.
    */
   private resetToIdle(session: Session | null, stopDialog: RecordingState['stopDialog']): void {
     if (this.session !== session) return;
     if (this.session) this.clearTimers(this.session);
     this.session = null;
-    this.update({ ...IDLE_RECORDING_STATE, stopDialog: stopDialog ?? this.state.stopDialog });
+    const current = this.state.stopDialog;
+    if (stopDialog && current) this.waitingDialogs.push(stopDialog);
+    this.update({ ...IDLE_RECORDING_STATE, stopDialog: current ?? stopDialog });
   }
 
   private clearTimers(session: Session): void {

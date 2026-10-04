@@ -113,7 +113,7 @@ describe('meetingsNeedingMix', () => {
   const meeting = (id: string, patch: Partial<Meeting>): Meeting =>
     ({ id, status: 'recorded', tracks: [{ kind: 'mic', file: 'mic.webm', startOffsetMs: 0 }], ...patch }) as Meeting;
 
-  it('picks finished recordings with tracks and without a mix, skipping recordings that ended in an error', () => {
+  it('picks finished recordings with tracks and without a mix, including meetings with an error', () => {
     const entries: MeetingListEntry[] = [
       { kind: 'ok', meeting: meeting('a', {}), mixReady: false, mixFailed: false },
       { kind: 'ok', meeting: meeting('b', {}), mixReady: true, mixFailed: false },
@@ -123,7 +123,7 @@ describe('meetingsNeedingMix', () => {
       { kind: 'broken', id: 'f', reason: 'x' },
       { kind: 'creating', id: 'g' },
     ];
-    expect(meetingsNeedingMix(entries)).toEqual(['a']);
+    expect(meetingsNeedingMix(entries)).toEqual(['a', 'e']);
   });
 });
 

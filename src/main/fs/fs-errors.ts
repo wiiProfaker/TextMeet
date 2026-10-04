@@ -22,7 +22,10 @@ export function fsErrorReason(err: unknown): string {
   return knownFsReason(err) ?? (err instanceof Error ? err.message : String(err));
 }
 
-/** Ошибка для показа человеку: «Не удалось открыть папку: нет прав на эту папку». */
+/**
+ * Ошибка для показа человеку: «Не удалось открыть папку: нет прав на эту папку». Незнакомый код — без текста системы
+ * и путей: они остаются в cause (и в журнале).
+ */
 export function humanFsError(action: string, err: unknown): Error {
-  return new Error(`${action}: ${fsErrorReason(err)}`, { cause: err });
+  return new Error(`${action}: ${knownFsReason(err) ?? 'файл занят или недоступен'}`, { cause: err });
 }

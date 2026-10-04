@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, promises as fsp, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SEARCH_HITS_PER_MEETING, SEARCH_MAX_MEETINGS } from '../../shared/search';
@@ -9,6 +9,7 @@ import { SearchIndex } from './search-index';
 const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), flush: async () => undefined };
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
@@ -244,6 +245,62 @@ describe('SearchIndex', () => {
     await t.index.refresh();
     t.setLibrary(join(makeTempDir('textmeet-search-'), 'missing'));
     expect((await t.index.search('бюджет')).meetings).toHaveLength(0);
+  });
+
+  it('retries a meeting after a transient read error instead of caching it', async () => {
+    const t = setup();
+    writeMeeting(t.lib(), 1, 'Бюджет', [{ text: 'бюджет на октябрь' }]);
+    const realReadFile = fsp.readFile.bind(fsp);
+    let failed = false;
+    vi.spyOn(fsp, 'readFile').mockImplementation(((file: Parameters<typeof fsp.readFile>[0], ...rest: unknown[]) => {
+      if (!failed && String(file).endsWith('meeting.json')) {
+        failed = true;
+        return Promise.reject(Object.assign(new Error('EBUSY'), { code: 'EBUSY' }));
+      }
+      return (realReadFile as (...args: unknown[]) => Promise<unknown>)(file, ...rest);
+    }) as unknown as typeof fsp.readFile);
+    await t.index.refresh();
+    expect(failed).toBe(true);
+    expect((await t.index.search('бюджет')).meetings).toHaveLength(0);
+
+    await t.index.refresh();
+    expect((await t.index.search('бюджет')).meetings).toHaveLength(1);
+  });
+
+  it('retries the text of a meeting after a transient error instead of keeping only the title', async () => {
+    const t = setup();
+    writeMeeting(t.lib(), 1, 'Встреча', [{ text: 'бюджет на октябрь' }]);
+    const realReadFile = fsp.readFile.bind(fsp);
+    let failed = false;
+    vi.spyOn(fsp, 'readFile').mockImplementation(((file: Parameters<typeof fsp.readFile>[0], ...rest: unknown[]) => {
+      if (!failed && String(file).endsWith('transcript.json')) {
+        failed = true;
+        return Promise.reject(Object.assign(new Error('EMFILE'), { code: 'EMFILE' }));
+      }
+      return (realReadFile as (...args: unknown[]) => Promise<unknown>)(file, ...rest);
+    }) as unknown as typeof fsp.readFile);
+    await t.index.refresh();
+    expect((await t.index.search('бюджет')).meetings).toHaveLength(0);
+
+    await t.index.refresh();
+    expect((await t.index.search('бюджет')).meetings).toHaveLength(1);
+  });
+
+  it('scans again on the next search when reading the library folder failed', async () => {
+    const t = setup();
+    writeMeeting(t.lib(), 1, 'Бюджет', null);
+    const realReaddir = fsp.readdir.bind(fsp);
+    let failed = false;
+    vi.spyOn(fsp, 'readdir').mockImplementation(((dir: Parameters<typeof fsp.readdir>[0], ...rest: unknown[]) => {
+      if (!failed) {
+        failed = true;
+        return Promise.reject(Object.assign(new Error('EPERM'), { code: 'EPERM' }));
+      }
+      return (realReaddir as (...args: unknown[]) => Promise<unknown>)(dir, ...rest);
+    }) as unknown as typeof fsp.readdir);
+    await expect(t.index.refresh()).rejects.toThrow('Не удалось прочитать библиотеку');
+
+    expect((await t.index.search('бюджет')).meetings).toHaveLength(1);
   });
 
   it('reports a library folder it cannot read', async () => {

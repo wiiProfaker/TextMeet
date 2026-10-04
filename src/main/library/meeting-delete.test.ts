@@ -1,11 +1,15 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fsp, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Meeting } from '../../shared/meeting';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { audioDir, createMeeting, meetingDir, readMeeting, updateMeeting } from './library';
 import { audioSize, deleteAudio, deleteMeeting, deleteTexts, type DeleteDeps } from './meeting-delete';
 import { folderTrash } from './trash';
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 async function setup(patch: Partial<Meeting> = {}) {
   const lib = makeTempDir('textmeet-delete-');
@@ -74,6 +78,27 @@ describe('deleteAudio', () => {
     expect((await deleteAudio(deps, meeting.id)).audioDeleted).toBe(true);
   });
 
+  it('keeps the meeting as it was when its record cannot be updated, and a retry finishes the job', async () => {
+    const { lib, meeting, deps } = await setup();
+    const realRename = fsp.rename.bind(fsp);
+    const rename = vi.spyOn(fsp, 'rename').mockImplementation((from, to) =>
+      String(to).endsWith('meeting.json')
+        ? Promise.reject(Object.assign(new Error(`ENOSPC: ${String(to)}`), { code: 'ENOSPC' }))
+        : realRename(from, to),
+    );
+    const failure = await deleteAudio(deps, meeting.id).catch((err: unknown) => err as Error);
+    expect(failure.message).toBe(
+      'Аудио перенесено в Корзину, но запись о встрече не обновилась: на диске закончилось место. Повторите удаление.',
+    );
+    expect(failure.message).not.toContain(lib);
+    expect(existsSync(audioDir(lib, meeting.id))).toBe(false);
+    expect(await readMeeting(lib, meeting.id)).toMatchObject({ audioDeleted: false });
+
+    rename.mockRestore();
+    expect(await deleteAudio(deps, meeting.id)).toMatchObject({ tracks: [], audioDeleted: true });
+    expect(await readMeeting(lib, meeting.id)).toMatchObject({ tracks: [], audioDeleted: true });
+  });
+
   it.each([
     ['being recorded', {}, { recording: true }, deleteTexts.recording],
     ['queued', { status: 'queued' }, {}, deleteTexts.transcribing],
@@ -121,6 +146,45 @@ describe('deleteMeeting', () => {
     };
     await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
     expect(calls).toEqual([`transcription ${meeting.id}`, `mixer ${meeting.id}`]);
+  });
+
+  it('does not requeue a transcription that finished while it was being cancelled', async () => {
+    const { lib, meeting, deps, calls } = await setup({ status: 'transcribing' });
+    vi.mocked(deps.transcription.cancel).mockImplementation(async (_lib, id) => {
+      calls.push(`transcription ${id}`);
+      await updateMeeting(lib, id, (m) => ({ ...m, status: 'done' }));
+    });
+    deps.trash = async () => {
+      throw new Error('нет Корзины');
+    };
+    await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
+    expect(calls).toEqual([`transcription ${meeting.id}`, `mixer ${meeting.id}`]);
+  });
+
+  it('asks whether the mixing runs right before cancelling it, not before the transcription cancel', async () => {
+    const { meeting, deps, calls } = await setup();
+    // Сведение началось, пока отменялась расшифровка: до её отмены его ещё не было.
+    let mixing = false;
+    vi.mocked(deps.mixer.isPending).mockImplementation(() => mixing);
+    vi.mocked(deps.transcription.cancel).mockImplementation(async (_lib, id) => {
+      calls.push(`transcription ${id}`);
+      mixing = true;
+    });
+    deps.trash = async () => {
+      throw new Error('нет Корзины');
+    };
+    await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
+    expect(calls).toEqual([`transcription ${meeting.id}`, `mixer ${meeting.id}`, `remix ${meeting.id}`]);
+  });
+
+  it('counts a folder that is already gone as deleted', async () => {
+    const { lib, meeting, deps, calls } = await setup();
+    rmSync(meetingDir(lib, meeting.id), { recursive: true });
+    const trash = vi.fn(deps.trash);
+    deps.trash = trash;
+    await deleteMeeting(deps, meeting.id);
+    expect(trash).not.toHaveBeenCalled();
+    expect(calls).toEqual([`transcription ${meeting.id}`, `mixer ${meeting.id}`, `dialog ${meeting.id}`]);
   });
 
   it('refuses the meeting being recorded', async () => {

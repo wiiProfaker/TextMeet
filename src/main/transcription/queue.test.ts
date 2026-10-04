@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Meeting } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { makeTempDir } from '../../test-support/temp-dir';
+import { withFileLock } from '../library/file-lock';
 import { audioDir, createMeeting, readMeeting, updateMeeting } from '../library/library';
 import { readTranscript } from '../library/transcript-store';
 import { describeError, type Logger } from '../logger';
@@ -532,14 +533,24 @@ describe('TranscriptionQueue', () => {
     expect(t.finished).toEqual([]);
   });
 
-  it('cancel that comes after the result does not announce the meeting', async () => {
+  it('cancel that lands while the result is being saved does not announce the meeting', async () => {
     const lib = makeTempDir();
     const meeting = await recordedMeeting(lib);
     const t = setup();
     await t.queue.enqueue(lib, meeting.id);
     const command = await transcribeSent(t.worker);
+    // Запись статуса встаёт в очередь за чужим изменением meeting.json: текст уже сохранён, статус — ещё нет.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = withFileLock(join(lib, meeting.id, 'meeting.json'), () => gate);
     t.worker().post(done(command.jobId));
-    await t.queue.cancel(lib, meeting.id);
+    await vi.waitFor(() => expect(existsSync(join(lib, meeting.id, 'transcript.json'))).toBe(true));
+    const cancelled = t.queue.cancel(lib, meeting.id);
+    release();
+    await Promise.all([held, cancelled]);
+    expect((await readMeeting(lib, meeting.id)).status).toBe('done');
     expect(t.finished).toEqual([]);
   });
 

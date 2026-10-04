@@ -2,6 +2,7 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import type { Meeting } from '../../shared/meeting';
+import { fsErrorReason } from '../fs/fs-errors';
 import type { Logger } from '../logger';
 import { audioDir, meetingDir, readMeeting, updateMeeting } from './library';
 import { moveToTrash, type Trash } from './trash';
@@ -69,36 +70,61 @@ export async function deleteAudio(deps: DeleteDeps, meetingId: string): Promise<
   if (deps.mixer.isPending(libraryDir, meetingId)) throw new Error(deleteTexts.mixing);
   if (meeting.audioDeleted) throw new Error(deleteTexts.noAudio);
   const dir = audioDir(libraryDir, meetingId);
-  if (await exists(dir)) await moveToTrash(dir, deps.trash, deps.trashRetryMs);
-  return updateMeeting(libraryDir, meetingId, (m) => ({ ...m, tracks: [], audioDeleted: true }));
+  const moved = await exists(dir);
+  if (moved) await moveToTrash(dir, deps.trash, deps.trashRetryMs);
+  try {
+    return await updateMeeting(libraryDir, meetingId, (m) => ({ ...m, tracks: [], audioDeleted: true }));
+  } catch (err) {
+    // Папки уже нет, а meeting.json ещё с дорожками: повтор найдёт папку пустой и только обновит запись.
+    deps.logger.warn(`Аудио встречи ${meetingId} убрано, но запись не обновилась`, err);
+    const reason = fsErrorReason(err);
+    throw new Error(
+      moved
+        ? `Аудио перенесено в Корзину, но запись о встрече не обновилась: ${reason}. Повторите удаление.`
+        : `Не удалось обновить запись о встрече: ${reason}`,
+      { cause: err },
+    );
+  }
+}
+
+/** Вернуть в работу то, что отменили перед удалением, раз папка осталась на месте. */
+async function restoreJobs(deps: DeleteDeps, libraryDir: string, meetingId: string, wasMixing: boolean): Promise<void> {
+  // Расшифровка могла дописаться, пока её отменяли: «готово» заново не ставим — потеряются правки человека.
+  const status = await readMeeting(libraryDir, meetingId).then(
+    (meeting) => meeting.status,
+    () => null,
+  );
+  if (status === 'queued' || status === 'transcribing') {
+    await deps.transcription
+      .enqueue(libraryDir, meetingId)
+      .catch((requeueErr: unknown) => deps.logger.warn(`Встреча ${meetingId} не вернулась в очередь`, requeueErr));
+  }
+  if (wasMixing) deps.mixer.enqueue(libraryDir, meetingId);
 }
 
 /**
  * Папку встречи — в Корзину. Сначала отменяются её расшифровка и сведение (они держат файлы); после переноса
  * убирается её окно «Запись остановлена». Перенос не удался — отменённое ставится обратно, иначе встреча так и висела
- * бы «в очереди» без задачи, а запись — «готовится». Работает и для папки, которую не удалось прочитать.
+ * бы «в очереди» без задачи, а запись — «готовится». Работает и для папки, которую не удалось прочитать. Папки уже нет
+ * (убрали в Проводнике, повторный вызов) — встреча считается удалённой.
  */
 export async function deleteMeeting(deps: DeleteDeps, meetingId: string): Promise<void> {
   const libraryDir = deps.libraryDir();
   const dir = meetingDir(libraryDir, meetingId);
   if (deps.isRecording(meetingId)) throw new Error(deleteTexts.recording);
-  const status = await readMeeting(libraryDir, meetingId).then(
-    (meeting) => meeting.status,
-    () => null,
-  );
-  const wasMixing = deps.mixer.isPending(libraryDir, meetingId);
   await deps.transcription.cancel(libraryDir, meetingId);
+  const wasMixing = deps.mixer.isPending(libraryDir, meetingId);
   await deps.mixer.cancel(libraryDir, meetingId);
-  try {
-    await moveToTrash(dir, deps.trash, deps.trashRetryMs);
-  } catch (err) {
-    if (status === 'queued' || status === 'transcribing') {
-      await deps.transcription
-        .enqueue(libraryDir, meetingId)
-        .catch((requeueErr: unknown) => deps.logger.warn(`Встреча ${meetingId} не вернулась в очередь`, requeueErr));
+  if (await exists(dir)) {
+    try {
+      await moveToTrash(dir, deps.trash, deps.trashRetryMs);
+    } catch (err) {
+      // Папка исчезла за время попыток — удалять нечего.
+      if (await exists(dir)) {
+        await restoreJobs(deps, libraryDir, meetingId, wasMixing);
+        throw err;
+      }
     }
-    if (wasMixing) deps.mixer.enqueue(libraryDir, meetingId);
-    throw err;
   }
   deps.dropStopDialog(meetingId);
 }

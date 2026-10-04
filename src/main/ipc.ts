@@ -326,7 +326,13 @@ export function registerIpc(deps: IpcDeps): void {
   // Имя папки, а не только прочитанная встреча: удалить можно и папку, которую не удалось прочитать.
   handle(IPC.deleteMeeting, async (arg) => {
     const id = MeetingIdSchema.parse(arg);
-    await shown('Не удалось удалить встречу', () => deleteMeeting(deps.deletion, id))();
+    try {
+      await shown('Не удалось удалить встречу', () => deleteMeeting(deps.deletion, id))();
+    } catch (err) {
+      // Не вышло — отменённая расшифровка и сведение поставлены обратно: состояние встречи изменилось.
+      deps.libraryChanged();
+      throw err;
+    }
     deps.search.remove(id);
     deps.libraryChanged();
   });

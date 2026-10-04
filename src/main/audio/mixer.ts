@@ -4,7 +4,7 @@ import type { MeetingListEntry, Track } from '../../shared/meeting';
 import { MIX_FILE } from '../../shared/recording';
 import { audioDir, readMeeting, updateMeeting } from '../library/library';
 import type { Logger } from '../logger';
-import { FFMPEG_CANCELLED, runFfmpeg } from './ffmpeg';
+import { runFfmpeg } from './ffmpeg';
 
 export interface MixInput {
   file: string;

@@ -113,10 +113,6 @@ export class SearchIndex {
 
   private async scan(): Promise<void> {
     const dir = this.deps.libraryDir();
-    if (dir !== this.dir) {
-      this.entries.clear();
-      this.dir = dir;
-    }
     let ids: string[];
     try {
       const dirents = await fsp.readdir(dir, { withFileTypes: true });
@@ -124,6 +120,11 @@ export class SearchIndex {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw humanFsError('Не удалось прочитать библиотеку', err);
       ids = [];
+    }
+    // Папку запоминаем только после удачного чтения: не вышло — следующий поиск просмотрит библиотеку заново.
+    if (dir !== this.dir) {
+      this.entries.clear();
+      this.dir = dir;
     }
     const present = new Set(ids);
     for (const id of this.entries.keys()) if (!present.has(id)) this.entries.delete(id);
@@ -136,20 +137,22 @@ export class SearchIndex {
     const folder = join(dir, id);
     const stamp = `${await fileStamp(join(folder, MEETING_FILE))}|${await fileStamp(join(folder, TRANSCRIPT_FILE))}`;
     if (this.entries.get(id)?.stamp === stamp) return;
-    const meeting = await this.read(dir, id);
+    const { meeting, retry } = await this.read(dir, id);
     // Пока читали, папку библиотеки сменили — эта встреча уже не наша.
-    if (this.dir === dir) this.entries.set(id, { stamp, meeting });
+    // Сбой чтения (файл занят) — отпечаток не запоминаем: следующее обновление прочитает встречу снова.
+    if (this.dir === dir) this.entries.set(id, { stamp: retry ? '' : stamp, meeting });
   }
 
-  private async read(dir: string, id: string): Promise<IndexedMeeting | null> {
+  private async read(dir: string, id: string): Promise<{ meeting: IndexedMeeting | null; retry: boolean }> {
     try {
       const result = await readJsonFile(join(dir, id, MEETING_FILE), MeetingSchema);
       if (!result.ok) {
         if (result.reason !== 'missing') this.deps.logger.warn(`Поиск: встреча ${id} не прочитана — ${result.message}`);
-        return null;
+        return { meeting: null, retry: false };
       }
       const meeting = result.value;
       let segments: IndexedSegment[] = [];
+      let retry = false;
       try {
         const transcript = await readTranscript(dir, id);
         segments = (transcript?.segments ?? []).map((s) => ({
@@ -160,20 +163,25 @@ export class SearchIndex {
           norm: normalize(s.text),
         }));
       } catch (err) {
-        // Повреждённый текст: встреча ищется хотя бы по названию.
+        // Повреждённый текст: встреча ищется хотя бы по названию. Ошибка системы (есть code) — файл занят, перечитаем.
+        retry = typeof (err as NodeJS.ErrnoException).code === 'string';
         this.deps.logger.warn(`Поиск: текст встречи ${id} не прочитан`, err);
       }
       return {
-        id,
-        title: meeting.title,
-        titleNorm: normalize(meeting.title),
-        createdAt: meeting.createdAt,
-        speakerNames: meeting.speakerNames,
-        segments,
+        meeting: {
+          id,
+          title: meeting.title,
+          titleNorm: normalize(meeting.title),
+          createdAt: meeting.createdAt,
+          speakerNames: meeting.speakerNames,
+          segments,
+        },
+        retry,
       };
     } catch (err) {
+      // readJsonFile бросает только ошибки системы (занят, нет доступа) — не кэшируем, перечитаем.
       this.deps.logger.warn(`Поиск: встреча ${id} не прочитана`, err);
-      return null;
+      return { meeting: null, retry: true };
     }
   }
 }

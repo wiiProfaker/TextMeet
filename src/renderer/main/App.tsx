@@ -25,6 +25,9 @@ import { StopDialog } from './StopDialog';
 
 type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
 
+/** Один и тот же пустой список: новый [] перерисовывал бы каждую реплику открытой встречи. */
+const NO_WORDS: readonly string[] = [];
+
 export function App() {
   const recording = useRecordingState() ?? IDLE_RECORDING_STATE;
   const { entries, error: listError } = useMeetings();
@@ -38,10 +41,18 @@ export function App() {
   const [focus, setFocus] = useState<SearchView['focus']>(null);
   const searching = isSearchable(query);
   const search = useSearch(query);
+  // Подсветка — по запросу, ответ на который уже пришёл (после паузы набора), а не на каждую нажатую букву.
+  const searched =
+    searching && (search.kind === 'ready' || search.kind === 'searching') ? (search.result?.query ?? '') : '';
   const searchView = useMemo<SearchView>(
-    () => ({ words: searching ? queryWords(query) : [], focus: searching ? focus : null }),
-    [query, searching, focus],
+    () => ({ words: searched ? queryWords(searched) : NO_WORDS, focus: searching ? focus : null }),
+    [searched, searching, focus],
   );
+  const changeQuery = (next: string) => {
+    setQuery(next);
+    // Поиск закончен — забыть реплику, к которой переходили: у нового поиска её нет.
+    if (!isSearchable(next)) setFocus(null);
+  };
 
   useEffect(() => {
     Promise.all([window.textmeet.getSettings(), window.textmeet.getAppInfo()])
@@ -118,7 +129,7 @@ export function App() {
               {error}
             </p>
           )}
-          <SearchBox value={query} onChange={setQuery} />
+          <SearchBox value={query} onChange={changeQuery} />
           {searching ? (
             <SearchResults
               state={search}

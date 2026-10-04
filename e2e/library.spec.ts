@@ -43,7 +43,8 @@ const doneMeeting = (overrides: Record<string, unknown> = {}) => ({
     tracks: [{ kind: 'mic', file: 'mic.webm', startOffsetMs: 0 }],
     ...overrides,
   }),
-  audio: { 'mic.webm': 6 },
+  // 10 с: после перехода к 0:04 запись успеет поиграть, пока тест проверяет её.
+  audio: { 'mic.webm': 10 },
 });
 
 async function openMeeting(page: Page, title = 'Созвон с Ириной'): Promise<void> {
@@ -126,7 +127,7 @@ test('an emptied segment is deleted and «Вернуть» brings it back', asyn
   await expect(text.locator('.row')).toHaveCount(2);
   // Спикер 2 остался без реплик — из строки «Спикеры» он исчез.
   await expect(page.getByLabel('Спикеры')).not.toContainText('Спикер 2');
-  await expect(page.getByRole('status')).toContainText('Реплика 0:04 удалена');
+  await expect(text.getByRole('status')).toContainText('Реплика 0:04 удалена');
   await expect.poll(async () => (await pollTranscript(libraryDir))?.segments.length).toBe(2);
 
   await page.getByRole('button', { name: 'Вернуть' }).click();
@@ -157,6 +158,7 @@ test('a click on the title renames the meeting', async () => {
   await field.fill('   ');
   await field.press('Enter');
   await expect(page.getByRole('heading', { name: 'Бюджет на октябрь' })).toBeVisible();
+  expect((await pollMeetingJson(libraryDir, ID))?.title).toBe('Бюджет на октябрь');
 });
 
 test('a speaker is renamed in the whole meeting, and the same name merges two speakers', async () => {
@@ -208,9 +210,15 @@ test('the speaker of one segment is changed from the menu, also to a new speaker
     .poll(async () => (await pollTranscript(libraryDir))?.segments.map((s) => s.speakerId))
     .toEqual(['s3', 's2', 's2']);
 
-  // Esc закрывает меню без изменений.
-  await rows.nth(2).getByRole('button', { name: 'Спикер 2', exact: true }).click();
+  // Esc закрывает меню без изменений, повторный щелчок по имени — тоже.
+  const who = rows.nth(2).getByRole('button', { name: 'Спикер 2', exact: true });
+  await who.click();
   await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+  await expect(who).toBeFocused();
+  await who.click();
+  await expect(menu).toBeVisible();
+  await who.click();
   await expect(menu).toBeHidden();
 });
 

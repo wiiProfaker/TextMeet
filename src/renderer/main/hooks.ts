@@ -173,22 +173,30 @@ export function useTranscript(
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, []);
+  // Номер последнего запроса: ответ на более ранний (например, перечитывание при возврате в окно, начатое до
+  // правки) не затирает более свежий текст.
+  const latest = useRef(0);
   const set = useCallback(
-    (transcript: Transcript) => setState({ meetingId, load: { kind: 'ready', transcript } }),
+    (transcript: Transcript) => {
+      latest.current += 1;
+      setState({ meetingId, load: { kind: 'ready', transcript } });
+    },
     [meetingId],
   );
   useEffect(() => {
-    let active = true;
+    const request = ++latest.current;
     const done = (load: TranscriptLoad) => {
-      if (active) setState({ meetingId, load });
+      if (request !== latest.current) return;
+      setState((current) => {
+        // Перечитать не вышло (OneDrive ещё пишет файл) — показанный текст и открытая правка остаются.
+        const shown = current?.meetingId === meetingId && current.load.kind === 'ready';
+        return shown && load.kind !== 'ready' ? current : { meetingId, load };
+      });
     };
     window.textmeet
       .getTranscript(meetingId)
       .then((transcript) => done(transcript ? { kind: 'ready', transcript } : { kind: 'none' }))
       .catch((err: unknown) => done({ kind: 'error', message: errorText(err) }));
-    return () => {
-      active = false;
-    };
   }, [meetingId, status, running, focusCount]);
   return [state?.meetingId === meetingId ? state.load : { kind: 'loading' }, set];
 }
@@ -231,20 +239,23 @@ export function usePlayback(meetingId: string, fallbackDuration: number | null):
   const [speed, setSpeed] = useState(1);
   const [failed, setFailed] = useState(false);
 
-  // Другая встреча — плеер с нуля.
+  // Другая встреча — плеер с нуля (длительность из meeting.json может уточниться во время игры — это не повод).
   useEffect(() => {
     setPlaying(false);
     setPosition(0);
     setDuration(fallbackDuration);
     setFailed(false);
-  }, [meetingId, fallbackDuration]);
+  }, [meetingId]);
 
   useEffect(() => {
     if (ref.current) ref.current.playbackRate = speed;
   }, [speed]);
 
+  // AbortError — воспроизведение прервали (пауза, перемотка, удаление аудио): это не поломка записи.
   const play = useCallback((el: HTMLAudioElement) => {
-    void el.play().catch(() => setFailed(true));
+    void el.play().catch((err: unknown) => {
+      if ((err as Error | null)?.name !== 'AbortError') setFailed(true);
+    });
   }, []);
   // Постоянная функция: её получает каждая реплика, и новая функция перерисовывала бы весь текст при игре.
   const seekAndPlay = useCallback(

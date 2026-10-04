@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { speakerLabel, type SpeakerId, type Transcript, type TranscriptSegment } from '../../shared/transcript';
 import type { TranscriptEdit } from '../../shared/transcript-edit';
 import { errorText } from './errors';
@@ -46,7 +46,8 @@ interface RowProps {
   onPlayAt: ((seconds: number) => void) | null;
   editing: boolean;
   /** null — реплику не править. */
-  setEditing: ((segmentId: string | null) => void) | null;
+  setEditing: Dispatch<SetStateAction<string | null>> | null;
+  onError(message: string): void;
   onSaveText(segment: TranscriptSegment, text: string): Promise<void>;
   /** Спикеры встречи для меню «Кто говорит». */
   speakers: readonly SpeakerOption[];
@@ -73,7 +74,9 @@ const Row = memo(function Row({
   menuOpen,
   setMenuFor,
   onPickSpeaker,
+  onError,
 }: RowProps) {
+  const who = useRef<HTMLButtonElement>(null);
   const time = formatTimestamp(segment.start);
   const tone = speakerTone(segment.speakerId);
   return (
@@ -99,6 +102,7 @@ const Row = memo(function Row({
         {setEditing ? (
           <div className="who-wrap">
             <button
+              ref={who}
               type="button"
               className={`who whob ${tone}`}
               aria-haspopup="menu"
@@ -113,9 +117,13 @@ const Row = memo(function Row({
               <SpeakerMenu
                 options={speakers}
                 current={segment.speakerId}
-                onClose={() => setMenuFor(null)}
+                onClose={(returnFocus) => {
+                  setMenuFor(null);
+                  if (returnFocus) who.current?.focus();
+                }}
                 onPick={(speakerId) => {
                   setMenuFor(null);
+                  who.current?.focus();
                   onPickSpeaker(segment, speakerId);
                 }}
               />
@@ -130,8 +138,10 @@ const Row = memo(function Row({
           editable={setEditing !== null}
           editing={editing}
           onStartEditing={() => setEditing?.(segment.id)}
-          onStopEditing={() => setEditing?.(null)}
+          // Только свою правку: пока эта сохранялась, могли начать править другую реплику.
+          onStopEditing={() => setEditing?.((current) => (current === segment.id ? null : current))}
           onSave={(text) => onSaveText(segment, text)}
+          onLostError={onError}
         />
       </div>
     </div>
@@ -167,12 +177,18 @@ export function TranscriptView({
   const editing = editingId !== null;
   const foundId = focus?.segmentId ?? null;
 
-  // Перешли из найденного — показать реплику посередине.
+  // Перешли из найденного — показать реплику посередине. Реплики выше раскладываются только при прокрутке
+  // (content-visibility) и сдвигают её — поэтому ещё раз в следующем кадре.
   useEffect(() => {
     if (!focus) return;
-    const row = box.current?.querySelector(`[data-segment="${CSS.escape(focus.segmentId)}"]`);
-    row?.scrollIntoView({ block: 'center' });
+    const show = () => {
+      const row = box.current?.querySelector(`[data-segment="${CSS.escape(focus.segmentId)}"]`);
+      row?.scrollIntoView({ block: 'center' });
+    };
+    show();
+    const frame = requestAnimationFrame(show);
     lastManualScroll.current = Date.now();
+    return () => cancelAnimationFrame(frame);
   }, [focus]);
 
   // Звучит следующая реплика — показать её, если человек не листает текст сам и не правит реплику.
@@ -281,6 +297,7 @@ export function TranscriptView({
             menuOpen={segment.id === menuFor}
             setMenuFor={setMenuFor}
             onPickSpeaker={pickSpeaker}
+            onError={onError}
           />
         ))}
         {removed && (

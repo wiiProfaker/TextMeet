@@ -1,6 +1,7 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
 import type { SpeakerId } from '../../shared/transcript';
 import { PlusIcon } from './icons';
+import { menuFocusStep } from './menu-keys';
 import { speakerTone } from './transcription-format';
 
 export interface SpeakerOption {
@@ -12,34 +13,38 @@ interface Props {
   options: readonly SpeakerOption[];
   current: SpeakerId;
   onPick(speakerId: SpeakerId | 'new'): void;
-  onClose(): void;
+  /** returnFocus — закрыли с клавиатуры: фокус вернуть на имя спикера. */
+  onClose(returnFocus: boolean): void;
 }
 
 /** «Кто говорит в этой реплике?» — меню под именем спикера (лист 11 макета). Стрелки, Enter, Esc. */
 export function SpeakerMenu({ options, current, onPick, onClose }: Props) {
   const menu = useRef<HTMLDivElement>(null);
+  // Последний onClose: подписка ставится один раз, при открытии (иначе каждая перерисовка реплики сбрасывала бы
+  // фокус на текущего спикера).
+  const close = useRef(onClose);
+  close.current = onClose;
 
   useEffect(() => {
     menu.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
-    // Щелчок мимо меню закрывает его.
+    // Щелчок мимо меню закрывает его; по имени спикера — нет: имя само закрывает меню.
     const onDown = (event: PointerEvent) => {
-      if (!menu.current?.contains(event.target as Node)) onClose();
+      if (!menu.current?.parentElement?.contains(event.target as Node)) close.current(false);
     };
     document.addEventListener('pointerdown', onDown);
     return () => document.removeEventListener('pointerdown', onDown);
-  }, [onClose]);
+  }, []);
 
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = [...(menu.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]') ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      const step = event.key === 'ArrowDown' ? 1 : -1;
-      items[(at + step + items.length) % items.length]?.focus();
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      items[menuFocusStep(at, items.length, event.key === 'ArrowDown' ? 1 : -1)]?.focus();
     } else if (event.key === 'Escape' || event.key === 'Tab') {
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      onClose(true);
     }
   };
 

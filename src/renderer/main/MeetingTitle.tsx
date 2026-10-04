@@ -13,20 +13,33 @@ export function MeetingTitle({ meetingId, title, onError }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const field = useRef<HTMLInputElement>(null);
+  const shown = useRef<HTMLButtonElement>(null);
   const done = useRef(false);
+  /** Закончили клавишей — фокус возвращается на название. */
+  const refocus = useRef(false);
 
   useEffect(() => {
-    if (!editing) return;
+    if (!editing) {
+      if (refocus.current) shown.current?.focus();
+      refocus.current = false;
+      return;
+    }
     done.current = false;
     setDraft(title);
     field.current?.select();
-    // Только при входе в правку.
+    // Только при входе в правку и выходе из неё.
   }, [editing]);
 
   if (!editing) {
     return (
       <h1>
-        <button type="button" className="title-btn" aria-description="Переименовать встречу" onClick={() => setEditing(true)}>
+        <button
+          ref={shown}
+          type="button"
+          className="title-btn"
+          aria-description="Переименовать встречу"
+          onClick={() => setEditing(true)}
+        >
           {title}
           <PencilIcon />
         </button>
@@ -59,12 +72,14 @@ export function MeetingTitle({ meetingId, title, onError }: Props) {
         onChange={(e) => setDraft(e.currentTarget.value)}
         onBlur={() => void save()}
         onKeyDown={(e) => {
-          if (e.key === 'Enter') {
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
             e.preventDefault();
+            refocus.current = true;
             void save();
           } else if (e.key === 'Escape') {
             e.preventDefault();
             done.current = true;
+            refocus.current = true;
             setEditing(false);
           }
         }}

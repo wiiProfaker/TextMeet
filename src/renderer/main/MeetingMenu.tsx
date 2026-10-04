@@ -4,6 +4,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { errorText } from './errors';
 import { deleteAudioText } from './format';
 import { FolderIcon, MoreIcon, MuteIcon, TrashIcon } from './icons';
+import { menuFocusStep } from './menu-keys';
 
 interface Props {
   meeting: Meeting;
@@ -24,6 +25,7 @@ export function MeetingMenu({ meeting, audioBlocked, releaseAudio, onDeleted, on
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [audioBytes, setAudioBytes] = useState<number | null>(null);
   const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -59,20 +61,23 @@ export function MeetingMenu({ meeting, audioBlocked, releaseAudio, onDeleted, on
     }
   };
 
+  /** Окно подтверждения запоминает, откуда его открыли: фокус — на «Ещё», а не на исчезающий пункт меню. */
   const pick = (next: Confirm) => {
+    button.current?.focus();
     setOpen(false);
+    setAudioBytes(null);
     setConfirm(next);
   };
 
   const keys = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = [...(wrap.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
-      const step = event.key === 'ArrowDown' ? 1 : -1;
-      items[(at + step + items.length) % items.length]?.focus();
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      items[menuFocusStep(at, items.length, event.key === 'ArrowDown' ? 1 : -1)]?.focus();
     } else if (event.key === 'Escape' || event.key === 'Tab') {
       event.preventDefault();
+      button.current?.focus();
       setOpen(false);
     }
   };
@@ -80,6 +85,7 @@ export function MeetingMenu({ meeting, audioBlocked, releaseAudio, onDeleted, on
   return (
     <div ref={wrap} className="more-wrap">
       <button
+        ref={button}
         type="button"
         className="btn sq-btn"
         aria-label="Ещё"
@@ -96,6 +102,7 @@ export function MeetingMenu({ meeting, audioBlocked, releaseAudio, onDeleted, on
             className="mi"
             role="menuitem"
             onClick={() => {
+              button.current?.focus();
               setOpen(false);
               window.textmeet.openMeetingDir(meeting.id).catch((err: unknown) => onError(errorText(err)));
             }}

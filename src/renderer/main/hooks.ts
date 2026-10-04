@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject, type SyntheticEvent } from 'react';
 import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
 import type { Transcript } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { cleanDeviceLabel } from './format';
+import { nextSpeed } from './playback';
 
 /** Состояние записи из main: сначала запрос, дальше — события. */
 export function useRecordingState(): RecordingState | null {
@@ -153,11 +154,27 @@ export type TranscriptLoad =
 /**
  * Текст встречи; перечитывается, когда меняется статус или расшифровка начинается и заканчивается (running — есть
  * ход от main). Одного статуса мало: быстрая расшифровка заново может пройти между перечитываниями списка встреч,
- * и окно увидит «готово → готово». Пока текст перечитывается, показывается прежний (старый текст виден до конца
- * расшифровки заново); пока грузится текст другой встречи, прежний не показывается.
+ * и окно увидит «готово → готово». Ещё текст перечитывается при возврате в окно — его могли заменить снаружи
+ * (другой компьютер через OneDrive). Пока текст перечитывается, показывается прежний (старый текст виден до конца
+ * расшифровки заново); пока грузится текст другой встречи, прежний не показывается. set — показать текст, который
+ * вернула правка, не перечитывая файл.
  */
-export function useTranscript(meetingId: string, status: MeetingStatus, running: boolean): TranscriptLoad {
+export function useTranscript(
+  meetingId: string,
+  status: MeetingStatus,
+  running: boolean,
+): [TranscriptLoad, (transcript: Transcript) => void] {
   const [state, setState] = useState<{ meetingId: string; load: TranscriptLoad } | null>(null);
+  const [focusCount, setFocusCount] = useState(0);
+  useEffect(() => {
+    const onFocus = () => setFocusCount((n) => n + 1);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+  const set = useCallback(
+    (transcript: Transcript) => setState({ meetingId, load: { kind: 'ready', transcript } }),
+    [meetingId],
+  );
   useEffect(() => {
     let active = true;
     const done = (load: TranscriptLoad) => {
@@ -170,6 +187,109 @@ export function useTranscript(meetingId: string, status: MeetingStatus, running:
     return () => {
       active = false;
     };
-  }, [meetingId, status, running]);
-  return state?.meetingId === meetingId ? state.load : { kind: 'loading' };
+  }, [meetingId, status, running, focusCount]);
+  return [state?.meetingId === meetingId ? state.load : { kind: 'loading' }, set];
+}
+
+/** Плеер встречи: элемент <audio> — у Player, управление — у всей встречи (щелчок по времени реплики). */
+export interface Playback {
+  ref: RefObject<HTMLAudioElement | null>;
+  playing: boolean;
+  /** Место в записи, секунды. */
+  position: number;
+  duration: number | null;
+  speed: number;
+  failed: boolean;
+  toggle(): void;
+  seek(seconds: number): void;
+  /** Слушать с этого места. */
+  seekAndPlay(seconds: number): void;
+  nextSpeed(): void;
+  /** Остановить и отпустить файл записи (перед «Удалить аудио»: иначе Windows не даст перенести папку). */
+  release(): void;
+  /** Обработчики событий <audio>. */
+  events: {
+    onPlay(): void;
+    onPause(): void;
+    onEnded(): void;
+    onTimeUpdate(event: SyntheticEvent<HTMLAudioElement>): void;
+    onLoadedMetadata(event: SyntheticEvent<HTMLAudioElement>): void;
+    onError(): void;
+  };
+}
+
+export function usePlayback(meetingId: string, fallbackDuration: number | null): Playback {
+  const ref = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState<number | null>(fallbackDuration);
+  const [speed, setSpeed] = useState(1);
+  const [failed, setFailed] = useState(false);
+
+  // Другая встреча — плеер с нуля.
+  useEffect(() => {
+    setPlaying(false);
+    setPosition(0);
+    setDuration(fallbackDuration);
+    setFailed(false);
+  }, [meetingId, fallbackDuration]);
+
+  useEffect(() => {
+    if (ref.current) ref.current.playbackRate = speed;
+  }, [speed]);
+
+  const play = useCallback((el: HTMLAudioElement) => {
+    void el.play().catch(() => setFailed(true));
+  }, []);
+  // Постоянная функция: её получает каждая реплика, и новая функция перерисовывала бы весь текст при игре.
+  const seekAndPlay = useCallback(
+    (seconds: number) => {
+      const el = ref.current;
+      if (!el) return;
+      el.currentTime = seconds;
+      setPosition(seconds);
+      if (el.paused) play(el);
+    },
+    [play],
+  );
+
+  return {
+    ref,
+    playing,
+    position,
+    duration,
+    speed,
+    failed,
+    toggle: () => {
+      const el = ref.current;
+      if (!el) return;
+      if (el.paused) play(el);
+      else el.pause();
+    },
+    seek: (seconds) => {
+      const el = ref.current;
+      if (el) el.currentTime = seconds;
+      setPosition(seconds);
+    },
+    seekAndPlay,
+    nextSpeed: () => setSpeed((s) => nextSpeed(s)),
+    release: () => {
+      const el = ref.current;
+      if (!el) return;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+    },
+    events: {
+      onPlay: () => setPlaying(true),
+      onPause: () => setPlaying(false),
+      onEnded: () => setPlaying(false),
+      onTimeUpdate: (event) => setPosition(event.currentTarget.currentTime),
+      onLoadedMetadata: (event) => {
+        if (Number.isFinite(event.currentTarget.duration)) setDuration(event.currentTarget.duration);
+        event.currentTarget.playbackRate = speed;
+      },
+      onError: () => setFailed(true),
+    },
+  };
 }

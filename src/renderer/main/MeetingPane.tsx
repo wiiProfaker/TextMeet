@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
@@ -6,9 +6,10 @@ import { transcriptModelTitle } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { formatLongDate, participantsText } from './format';
-import { useTranscript, type TranscriptLoad } from './hooks';
+import { usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, WarnIcon } from './icons';
 import { Player } from './Player';
+import { segmentAt } from './playback';
 import { TranscribeDialog } from './TranscribeDialog';
 import { progressView, transcribeActions, type ProgressView } from './transcription-format';
 import { TranscriptView } from './TranscriptView';
@@ -73,18 +74,50 @@ function ProgressStrip({ view }: { view: ProgressView }) {
 
 type BusyStatus = 'queued' | 'transcribing';
 
+/** Текст встречи, связанный с плеером: звучащая реплика подсвечена, щелчок по времени — слушать с этого места. */
+function ReadyText({
+  load,
+  meeting,
+  playback,
+  canPlay,
+}: {
+  load: Extract<TranscriptLoad, { kind: 'ready' }>;
+  meeting: Meeting;
+  playback: Playback;
+  canPlay: boolean;
+}) {
+  const { transcript } = load;
+  const starts = useMemo(() => transcript.segments.map((s) => s.start), [transcript]);
+  // До первого «Слушать» ничего не подсвечено.
+  const nowIndex = canPlay && (playback.playing || playback.position > 0) ? segmentAt(starts, playback.position) : -1;
+  return (
+    <TranscriptView
+      transcript={transcript}
+      names={meeting.speakerNames}
+      nowIndex={nowIndex}
+      playing={playback.playing}
+      onPlayAt={canPlay ? playback.seekAndPlay : null}
+    />
+  );
+}
+
 /** Средняя часть встречи: текст, ход расшифровки или приглашение расшифровать. */
 function Body({
   meeting,
   load,
   busy,
   progress,
+  playback,
+  canPlay,
   onTranscribe,
 }: {
   meeting: Meeting;
   load: TranscriptLoad;
   busy: BusyStatus | null;
   progress: TranscriptionProgress | null;
+  playback: Playback;
+  /** Запись готова к прослушиванию. */
+  canPlay: boolean;
   /** Кнопка «Расшифровать» под «Текста пока нет»; null — её нет (например, она уже в заголовке). */
   onTranscribe: (() => void) | null;
 }) {
@@ -93,7 +126,7 @@ function Body({
     return (
       <>
         {busy && <ProgressStrip view={progressView(busy, progress)} />}
-        <TranscriptView transcript={load.transcript} names={meeting.speakerNames} />
+        <ReadyText load={load} meeting={meeting} playback={playback} canPlay={canPlay} />
       </>
     );
   }
@@ -125,7 +158,9 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
   const [dialog, setDialog] = useState(false);
   const { meeting, mixReady, mixFailed } = entry;
   const busy = meeting.status === 'queued' || meeting.status === 'transcribing' ? meeting.status : null;
-  const load = useTranscript(meeting.id, meeting.status, busy !== null || progress !== null);
+  const [load] = useTranscript(meeting.id, meeting.status, busy !== null || progress !== null);
+  const playback = usePlayback(meeting.id, meeting.durationSec);
+  const canPlay = mixReady && !playback.failed;
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
   if (meeting.participantsHint !== null) meta.push(participantsText(meeting.participantsHint));
   if (load.kind === 'ready') meta.push(`Текст: ${transcriptModelTitle(load.transcript)}`);
@@ -188,10 +223,12 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
         load={load}
         busy={busy}
         progress={progress}
+        playback={playback}
+        canPlay={canPlay}
         onTranscribe={actions.body ? () => setDialog(true) : null}
       />
       {mixReady ? (
-        <Player meetingId={meeting.id} fallbackDuration={meeting.durationSec} />
+        <Player meetingId={meeting.id} playback={playback} />
       ) : (
         hasAudio && (
           <footer className="player pending">

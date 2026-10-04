@@ -1102,6 +1102,45 @@ kbd.k {
   font-variant-numeric: tabular-nums;
 }
 
+/* Время реплики — кнопка «Слушать с …»; при наведении — значок ▶. */
+.tbtn {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 4px;
+  align-self: start;
+  background: none;
+  border: 0;
+  padding: 2px 0 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tbtn .ic {
+  width: 9px;
+  height: 9px;
+  margin-top: 3px;
+  opacity: 0;
+}
+
+.tbtn:hover,
+.tbtn:focus-visible {
+  color: var(--accent);
+}
+
+.tbtn:hover .ic,
+.tbtn:focus-visible .ic {
+  opacity: 1;
+}
+
+/* Звучащая реплика — «маркер», как на листе 9 макета. */
+.row.now {
+  background: var(--now);
+}
+
+.row.now .tbtn {
+  color: var(--text);
+}
+
 .who {
   font-size: 12.5px;
   font-weight: 600;

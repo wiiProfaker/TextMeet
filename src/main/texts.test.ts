@@ -141,6 +141,7 @@ describe('transcription texts', () => {
     expect(transcriptionTexts.download(new DownloadError('corrupt', 'x'))).toContain('повреждён');
     expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toMatch(/нужно \d+ МБ/);
     expect(transcriptionTexts.download(new DownloadError('disk', 'x'))).toContain('на диск');
+    expect(transcriptionTexts.download(new DownloadError('cancelled', 'x'))).toBe('Скачивание модели отменено.');
   });
 
   it('asks for the space the download needs, not for the size of all models', () => {

@@ -121,6 +121,8 @@ export const transcriptionTexts = {
         return `Не хватает места на диске для модели расшифровки: нужно ${Math.ceil((err.neededBytes ?? TOTAL_MODELS_SIZE) / 1024 ** 2)} МБ свободного места.`;
       case 'disk':
         return MODELS_DISK_TEXT;
+      case 'cancelled':
+        return 'Скачивание модели отменено.';
     }
   },
   /** Сбой процесса расшифровки (его текст — для журнала: вывод sherpa-onnx и ffmpeg, пути к файлам) → текст для человека. */

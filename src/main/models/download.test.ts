@@ -278,6 +278,50 @@ describe('downloadFile', () => {
     await expect(downloadFile(options(url, join(blocker, 'model.onnx')))).rejects.toMatchObject({ kind: 'disk' });
     expect(ranges).toEqual([]);
   });
+
+  it('stops a running download when cancelled and keeps the part', async () => {
+    const controller = new AbortController();
+    const { url, ranges } = await serve((_req, res) => {
+      res.writeHead(200, { 'content-length': BODY.length });
+      // Часть файла — и сервер замолкает: отмену прерывает ожидание, а не сторож тишины.
+      res.write(BODY.subarray(0, 4000));
+    });
+    const dest = join(makeTempDir(), 'model.onnx');
+    const download = downloadFile({
+      ...options(url, dest),
+      idleTimeoutMs: 60_000,
+      signal: controller.signal,
+      onProgress: () => controller.abort(),
+    });
+    await expect(download).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(ranges).toHaveLength(1);
+    expect(existsSync(dest)).toBe(false);
+    expect(existsSync(`${dest}.part`)).toBe(true);
+  });
+
+  it('does not wait for the next attempt once cancelled', async () => {
+    const controller = new AbortController();
+    const { url, ranges } = await serve((_req, res, n) => {
+      res.writeHead(500);
+      res.end();
+      if (n === 0) setTimeout(() => controller.abort(), 20);
+    });
+    const dest = join(makeTempDir(), 'model.onnx');
+    const started = Date.now();
+    const download = downloadFile({ ...options(url, dest), retryDelayMs: 60_000, signal: controller.signal });
+    await expect(download).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(ranges).toHaveLength(1);
+  });
+
+  it('does not start when already cancelled', async () => {
+    const { url, ranges } = await serve(sendBody);
+    const controller = new AbortController();
+    controller.abort();
+    const dest = join(makeTempDir(), 'model.onnx');
+    await expect(downloadFile({ ...options(url, dest), signal: controller.signal })).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(ranges).toEqual([]);
+  });
 });
 
 describe('sha256File', () => {

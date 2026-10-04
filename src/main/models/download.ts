@@ -4,9 +4,9 @@ import { dirname } from 'node:path';
 
 /**
  * Почему не скачалось: нет связи (повторяли), сервер отказал в файле (403, 404 — повтор не поможет), файл пришёл
- * испорченным, не хватает места, не записать на диск.
+ * испорченным, не хватает места, не записать на диск, скачивание отменили («Отменить» в карточке модели).
  */
-export type DownloadFailure = 'network' | 'server' | 'corrupt' | 'space' | 'disk';
+export type DownloadFailure = 'network' | 'server' | 'corrupt' | 'space' | 'disk' | 'cancelled';
 
 export interface DownloadErrorOptions extends ErrorOptions {
   /** Для 'space': сколько свободного места нужно (недостающие файлы и запас), байт. */
@@ -42,6 +42,29 @@ export interface DownloadOptions {
   retryDelayMs?: number;
   /** На столько байт попытка должна продвинуть файл дальше достигнутого, чтобы счёт повторов начался заново. */
   minProgressBytes?: number;
+  /** Отмена: запрос обрывается, повторов нет, `.part` остаётся (его удаляет тот, кто отменил). */
+  signal?: AbortSignal;
+}
+
+const cancelled = (cause?: unknown): DownloadError => new DownloadError('cancelled', 'скачивание отменено', { cause });
+
+/** Пауза перед повтором; отмена её прерывает. */
+function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(cancelled());
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(cancelled());
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 export const IDLE_TIMEOUT_MS = 30_000;
@@ -97,6 +120,9 @@ async function fetchInto(part: string, options: DownloadOptions): Promise<void> 
     clearTimeout(timer);
     timer = setTimeout(() => controller.abort(), idleMs);
   };
+  const stop = (): void => controller.abort();
+  options.signal?.addEventListener('abort', stop, { once: true });
+  if (options.signal?.aborted) stop();
   try {
     const response = await (options.fetch ?? fetch)(options.url, {
       headers: from > 0 ? { Range: `bytes=${from}-` } : {},
@@ -128,6 +154,7 @@ async function fetchInto(part: string, options: DownloadOptions): Promise<void> 
     }
   } finally {
     clearTimeout(timer);
+    options.signal?.removeEventListener('abort', stop);
     // Запрос освобождается при любом исходе (ошибка сервера, нет данных, файл не открылся); после полного чтения — no-op.
     controller.abort();
   }
@@ -149,12 +176,14 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
   // Самый длинный .part за всё скачивание: сервер без Range качает с нуля, и рост от нуля — не продвижение.
   let reached = await sizeOf(part);
   for (let attempt = 0; ; attempt++) {
+    if (options.signal?.aborted) throw cancelled();
     try {
       await fetchInto(part, options);
       // Сервер закрыл ответ раньше времени без ошибки — докачиваем, как после обрыва.
       if ((await sizeOf(part)) < options.size) throw new Error('ответ оборвался');
       break;
     } catch (err) {
+      if (options.signal?.aborted) throw cancelled(err);
       if (isDiskError(err)) throw new DownloadError('disk', 'не удалось записать файл модели', { cause: err });
       if (err instanceof FinalHttpError) throw new DownloadError('server', err.message, { cause: err });
       if (err instanceof OversizeError) {
@@ -167,7 +196,7 @@ export async function downloadFile(options: DownloadOptions): Promise<void> {
       if (now >= reached + minProgress) attempt = -1;
       else if (attempt >= retries) throw new DownloadError('network', 'нет связи с сервером', { cause: err });
       reached = Math.max(reached, now);
-      await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs ?? RETRY_DELAY_MS));
+      await pause(options.retryDelayMs ?? RETRY_DELAY_MS, options.signal);
     }
   }
   const size = await sizeOf(part);

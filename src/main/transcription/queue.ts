@@ -100,6 +100,8 @@ export class TranscriptionQueue {
   private starting: Job | null = null;
   private pendingEnqueues = 0;
   private worker: WorkerHandle | null = null;
+  /** Модель последней задачи этого процесса: он держит её в памяти (Whisper — около 1 ГБ). */
+  private workerModel: AsrModelId | null = null;
   private running = false;
   private disposed = false;
   private jobCounter = 0;
@@ -391,7 +393,11 @@ export class TranscriptionQueue {
       ffmpegPath: this.deps.ffmpegPath(),
       threads: this.deps.threads(),
     };
+    // Другая модель: прежний процесс (он простаивает — задачи идут по одной) закрывается, и память его модели
+    // освобождается сразу, а не когда до неё дойдёт сборщик мусора.
+    if (this.worker && this.workerModel !== model) this.killWorker(this.worker);
     const worker = this.ensureWorker();
+    this.workerModel = model;
     return new Promise((resolve) => {
       current.worker = worker;
       current.jobId = command.jobId;

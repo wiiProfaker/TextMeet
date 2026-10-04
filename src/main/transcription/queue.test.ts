@@ -225,9 +225,36 @@ describe('TranscriptionQueue', () => {
     expect(first.model).toBe('t-one');
     t.worker().post(done(first.jobId));
     await t.queue.enqueue(lib, unknown.id);
-    const second = await transcribeSent(t.worker, 2);
+    // Модель другая — у второй встречи новый процесс.
+    await vi.waitFor(() => expect(t.workers).toHaveLength(2));
+    const second = await transcribeSent(t.worker);
     expect(second.model).toBe('gigaam-v3-e2e-rnnt');
     expect(vi.mocked(logger.warn).mock.calls.map(([m]) => m).join('\n')).toContain('whisper-tiny');
+  });
+
+  it('starts a fresh process when the next meeting has another model, and reuses it for the same model', async () => {
+    const lib = makeTempDir();
+    const first = await recordedMeeting(lib);
+    const same = await recordedMeeting(lib);
+    const other = await recordedMeeting(lib);
+    const t = setup();
+    await t.queue.enqueue(lib, first.id, undefined, 't-one');
+    const one = await transcribeSent(t.worker);
+    t.worker().post(done(one.jobId));
+    await t.queue.enqueue(lib, same.id, undefined, 't-one');
+    const two = await transcribeSent(t.worker, 2);
+    t.worker().post(done(two.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(2));
+    expect(t.workers).toHaveLength(1);
+    // Другая модель: прежний процесс закрывается и освобождает память своей модели, не дожидаясь сборщика мусора.
+    await t.queue.enqueue(lib, other.id, undefined, 'whisper-large-v3-turbo');
+    await vi.waitFor(() => expect(t.workers).toHaveLength(2));
+    expect(t.workers[0]?.killed).toBe(true);
+    const command = await transcribeSent(t.worker);
+    expect(command.model).toBe('whisper-large-v3-turbo');
+    t.worker().post(done(command.jobId));
+    await vi.waitFor(() => expect(t.finished).toHaveLength(3));
+    expect(t.finished.map((f) => f.ok)).toEqual([true, true, true]);
   });
 
   it('names the model that could not be loaded', async () => {

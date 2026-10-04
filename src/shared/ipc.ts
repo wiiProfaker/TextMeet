@@ -126,6 +126,8 @@ export interface RenameSpeakerRequest {
 export interface EditTranscriptRequest {
   meetingId: string;
   edit: TranscriptEdit;
+  /** createdAt того текста, к которому сделана правка: текст в файле другой — правка отклоняется. */
+  transcriptVersion: string;
 }
 
 export interface EditedTranscript {

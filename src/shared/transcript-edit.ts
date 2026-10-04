@@ -21,10 +21,16 @@ export type TranscriptEdit =
   | { kind: 'merge'; from: SpeakerId; into: SpeakerId };
 
 export const editTexts = {
+  /** Правка сделана к другому тексту: id реплик позиционные («seg-3»), после новой расшифровки они совпадают с прежними. */
+  transcriptChanged: 'Текст встречи изменился — правка не сохранена. Текст перечитан.',
   segmentGone: 'Реплика не найдена — текст встречи изменился. Правка не сохранена.',
   speakerGone: 'Такого спикера во встрече уже нет — текст встречи изменился.',
   tooManySpeakers: 'Во встрече слишком много спикеров.',
 } as const;
+
+/** Отказ из-за того, что текст встречи уже другой: окно должно перечитать текст. */
+export const isStaleEditMessage = (message: string): boolean =>
+  [editTexts.transcriptChanged, editTexts.segmentGone, editTexts.speakerGone].some((text) => message.includes(text));
 
 /** Наибольший номер собеседника: s999 (так в схеме). */
 const MAX_OTHER = 999;

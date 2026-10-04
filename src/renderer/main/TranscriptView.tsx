@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { speakerLabel, type SpeakerId, type Transcript, type TranscriptSegment } from '../../shared/transcript';
-import type { TranscriptEdit } from '../../shared/transcript-edit';
+import { editTexts, type TranscriptEdit } from '../../shared/transcript-edit';
 import { errorText } from './errors';
 import { ChevronIcon, PlayIcon } from './icons';
 import { shouldFollow } from './playback';
@@ -229,6 +229,23 @@ export function TranscriptView({
     setRemoved([]);
     setUndoError(null);
   }, [onEdit]);
+
+  // Текст заменили целиком (расшифровали заново, на другом компьютере) — открытая правка и «Вернуть» относились к
+  // старому тексту; id реплик позиционные, и они попали бы в чужую реплику. Сообщение — в общую плашку: поле правки
+  // с его собственной ошибкой закрывается вместе со старым текстом.
+  const version = transcript.createdAt;
+  const shownVersion = useRef(version);
+  const somethingOpen = useRef(false);
+  somethingOpen.current = editingId !== null || removed.length > 0 || undoError !== null;
+  useEffect(() => {
+    if (shownVersion.current === version) return;
+    shownVersion.current = version;
+    if (somethingOpen.current) onError(editTexts.transcriptChanged);
+    setEditingId(null);
+    setMenuFor(null);
+    setRemoved([]);
+    setUndoError(null);
+  }, [version, onError]);
 
   const pickSpeaker = useCallback(
     (segment: TranscriptSegment, speakerId: SpeakerId | 'new') => {

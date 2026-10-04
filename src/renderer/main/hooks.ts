@@ -159,20 +159,21 @@ export type TranscriptLoad =
  * и окно увидит «готово → готово». Ещё текст перечитывается при возврате в окно — его могли заменить снаружи
  * (другой компьютер через OneDrive). Пока текст перечитывается, показывается прежний (старый текст виден до конца
  * расшифровки заново); пока грузится текст другой встречи, прежний не показывается. set — показать текст, который
- * вернула правка, не перечитывая файл.
+ * вернула правка, не перечитывая файл; reload — перечитать сразу (правку отклонили: текст в файле уже другой).
  */
 export function useTranscript(
   meetingId: string,
   status: MeetingStatus,
   running: boolean,
-): [TranscriptLoad, (transcript: Transcript) => void] {
+): [TranscriptLoad, (transcript: Transcript) => void, () => void] {
   const [state, setState] = useState<{ meetingId: string; load: TranscriptLoad } | null>(null);
-  const [focusCount, setFocusCount] = useState(0);
+  const [reloadCount, setReloadCount] = useState(0);
+  const reload = useCallback(() => setReloadCount((n) => n + 1), []);
   useEffect(() => {
-    const onFocus = () => setFocusCount((n) => n + 1);
+    const onFocus = () => reload();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, []);
+  }, [reload]);
   // Номер последнего запроса: ответ на более ранний (например, перечитывание при возврате в окно, начатое до
   // правки) не затирает более свежий текст.
   const latest = useRef(0);
@@ -198,8 +199,8 @@ export function useTranscript(
       .getTranscript(meetingId)
       .then((transcript) => done(transcript ? { kind: 'ready', transcript } : { kind: 'none' }))
       .catch((err: unknown) => done({ kind: 'error', message: errorText(err) }));
-  }, [meetingId, status, running, focusCount]);
-  return [state?.meetingId === meetingId ? state.load : { kind: 'loading' }, set];
+  }, [meetingId, status, running, reloadCount]);
+  return [state?.meetingId === meetingId ? state.load : { kind: 'loading' }, set, reload];
 }
 
 /** Плеер встречи: элемент <audio> — у Player, управление — у всей встречи (щелчок по времени реплики). */

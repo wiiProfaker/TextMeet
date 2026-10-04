@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import type { Meeting } from '../../shared/meeting';
 import { ME, SpeakerIdSchema, TranscriptSegmentSchema, type SpeakerId, type Transcript } from '../../shared/transcript';
-import { applyEdit, type TranscriptEdit } from '../../shared/transcript-edit';
+import { applyEdit, editTexts, type TranscriptEdit } from '../../shared/transcript-edit';
 import { readMeeting, updateMeeting } from './library';
 import { updateTranscript } from './transcript-store';
 
@@ -52,17 +52,24 @@ function namesOfPresent(names: Readonly<Record<string, string>>, transcript: Tra
 
 /**
  * Правка текста. Пока встреча ждёт расшифровки заново или расшифровывается, правка всё равно пропала бы —
- * отказываем. Ответ — встреча, новый текст и поменялась ли встреча (забыты имена спикеров без реплик).
+ * отказываем. Правка делается к тому тексту, который видел человек (transcriptVersion — createdAt расшифровки; ручные
+ * правки его не меняют): id реплик позиционные, и после новой расшифровки старое окно попало бы не в ту реплику.
+ * Ответ — встреча, новый текст и поменялась ли встреча (забыты имена спикеров без реплик).
  */
 export async function editTranscript(
   libraryDir: string,
   meetingId: string,
   edit: TranscriptEdit,
+  transcriptVersion: string,
   now: Date,
 ): Promise<{ meeting: Meeting; transcript: Transcript; meetingChanged: boolean }> {
   const before = await readMeeting(libraryDir, meetingId);
   if (before.status === 'queued' || before.status === 'transcribing') throw new Error(meetingEditTexts.transcribing);
-  const transcript = await updateTranscript(libraryDir, meetingId, (t) => applyEdit(t, edit, now));
+  // Версия сверяется под замком вместе с правкой: расшифровка заново не успеет вклиниться между ними.
+  const transcript = await updateTranscript(libraryDir, meetingId, (t) => {
+    if (t.createdAt !== transcriptVersion) throw new Error(editTexts.transcriptChanged);
+    return applyEdit(t, edit, now);
+  });
   if (!namesOfPresent(before.speakerNames, transcript)) return { meeting: before, transcript, meetingChanged: false };
   const meeting = await updateMeeting(libraryDir, meetingId, (m) => ({
     ...m,

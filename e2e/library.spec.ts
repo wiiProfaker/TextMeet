@@ -1,6 +1,6 @@
 // Библиотека: прослушивание с места реплики, правка, спикеры, поиск, удаление (План 4).
 import { existsSync } from 'node:fs';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { launchApp, meetingJson, pollMeetingJson, type LaunchedApp } from './helpers';
@@ -138,6 +138,42 @@ test('an emptied segment is deleted and «Вернуть» brings it back', asyn
     'seg-2',
     'seg-3',
   ]);
+});
+
+test('an edit made to a text that was replaced on disk is refused and the new text is shown', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page, libraryDir } = launched;
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  await expect(text.getByRole('button', { name: 'С подрядчиками или без?' })).toBeVisible();
+
+  // Встречу расшифровали заново на другом компьютере: файл заменился, окно этого не заметило. id реплик те же.
+  const replaced = {
+    ...TRANSCRIPT,
+    createdAt: '2026-09-26T09:00:00.000Z',
+    segments: TRANSCRIPT.segments.map((s) => ({ ...s, text: `Новая расшифровка ${s.id}.` })),
+  };
+  await writeFile(join(libraryDir, ID, 'transcript.json'), JSON.stringify(replaced));
+
+  await text.getByRole('button', { name: 'С подрядчиками или без?' }).click();
+  const field = text.getByRole('textbox', { name: 'Текст реплики' });
+  await field.fill('Правка к старому тексту');
+  await field.press('Enter');
+
+  // Правка не попала в чужую реплику, а окно показало то, что лежит в файле.
+  await expect(page.getByRole('alert').filter({ hasText: 'Текст встречи изменился' })).toBeVisible();
+  await expect(text.getByRole('button', { name: 'Новая расшифровка seg-2.' })).toBeVisible();
+  await expect(field).toBeHidden();
+  expect((await pollTranscript(libraryDir))?.segments[1]).toMatchObject({ text: 'Новая расшифровка seg-2.', edited: false });
+
+  // Дальше правка идёт к новому тексту.
+  await text.getByRole('button', { name: 'Новая расшифровка seg-2.' }).click();
+  await field.fill('Уже к новому');
+  await field.press('Enter');
+  await expect(text.getByRole('button', { name: 'Уже к новому' })).toBeVisible();
+  await expect
+    .poll(async () => (await pollTranscript(libraryDir))?.segments[1])
+    .toMatchObject({ text: 'Уже к новому', edited: true });
 });
 
 test('two deleted segments are brought back one by one, the latest first', async () => {

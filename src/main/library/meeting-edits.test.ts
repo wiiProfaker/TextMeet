@@ -8,6 +8,8 @@ import { createMeeting, readMeeting, updateMeeting } from './library';
 import { readTranscript, writeTranscript } from './transcript-store';
 
 const NOW = new Date('2026-10-04T09:00:00.000Z');
+/** Версия текста — время расшифровки: правка делается к тому тексту, который видел человек. */
+const VERSION = '2026-10-01T10:00:00.000Z';
 
 const transcript: Transcript = {
   schemaVersion: 1,
@@ -58,7 +60,7 @@ describe('renameSpeaker', () => {
 describe('editTranscript', () => {
   it('applies an edit and returns the meeting and the saved text', async () => {
     const { lib, id } = await meetingWithText();
-    const result = await editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: 'Добрый вечер.' }, NOW);
+    const result = await editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: 'Добрый вечер.' }, VERSION, NOW);
     expect(result.transcript.segments[1]).toMatchObject({ text: 'Добрый вечер.', edited: true });
     expect(result.meeting.id).toBe(id);
     expect(result.meetingChanged).toBe(false);
@@ -67,7 +69,7 @@ describe('editTranscript', () => {
 
   it('forgets the name of a speaker that has no segments left', async () => {
     const { lib, id } = await meetingWithText({ speakerNames: { me: 'Кирилл', s1: 'Ирина', s2: 'Олег' } });
-    const result = await editTranscript(lib, id, { kind: 'merge', from: 's2', into: 's1' }, NOW);
+    const result = await editTranscript(lib, id, { kind: 'merge', from: 's2', into: 's1' }, VERSION, NOW);
     expect(result.meeting.speakerNames).toEqual({ me: 'Кирилл', s1: 'Ирина' });
     expect(result.meetingChanged).toBe(true);
     expect((await readMeeting(lib, id)).speakerNames).toEqual({ me: 'Кирилл', s1: 'Ирина' });
@@ -75,20 +77,49 @@ describe('editTranscript', () => {
 
   it('keeps the owner name even when the owner has no segments', async () => {
     const { lib, id } = await meetingWithText({ speakerNames: { me: 'Кирилл' } });
-    const result = await editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: '' }, NOW);
+    const result = await editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: '' }, VERSION, NOW);
     expect(result.meeting.speakerNames).toEqual({ me: 'Кирилл' });
   });
 
   it.each(['queued', 'transcribing'] as const)('refuses to edit while the meeting is %s', async (status) => {
     const { lib, id } = await meetingWithText({ status });
-    await expect(editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: 'x' }, NOW)).rejects.toThrow(
+    await expect(editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: 'x' }, VERSION, NOW)).rejects.toThrow(
       meetingEditTexts.transcribing,
     );
   });
 
+  it('refuses an edit made against another transcription and leaves the file as it was', async () => {
+    const { lib, id } = await meetingWithText();
+    const before = await readTranscript(lib, id);
+    await expect(
+      editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: 'x' }, '2026-10-02T10:00:00.000Z', NOW),
+    ).rejects.toThrow(editTexts.transcriptChanged);
+    expect(await readTranscript(lib, id)).toEqual(before);
+  });
+
+  it('refuses a restore made against another transcription', async () => {
+    const { lib, id } = await meetingWithText();
+    const gone = transcript.segments[1];
+    if (!gone) throw new Error('нет реплики');
+    await editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: '' }, VERSION, NOW);
+    const before = await readTranscript(lib, id);
+    await expect(
+      editTranscript(lib, id, { kind: 'restore', segment: gone }, '2026-10-02T10:00:00.000Z', NOW),
+    ).rejects.toThrow(editTexts.transcriptChanged);
+    expect(await readTranscript(lib, id)).toEqual(before);
+  });
+
+  it('keeps the version across manual edits, so consecutive edits work', async () => {
+    const { lib, id } = await meetingWithText();
+    await editTranscript(lib, id, { kind: 'text', segmentId: 'a', text: 'Раз.' }, VERSION, NOW);
+    const second = await editTranscript(lib, id, { kind: 'text', segmentId: 'b', text: 'Два.' }, VERSION, NOW);
+    expect(second.transcript.createdAt).toBe(VERSION);
+    expect(second.transcript.segments.map((s) => s.text)).toEqual(['Раз.', 'Два.', 'Добрый день.']);
+  });
+
   it('reports a segment that is gone', async () => {
     const { lib, id } = await meetingWithText();
-    await expect(editTranscript(lib, id, { kind: 'text', segmentId: 'zz', text: 'x' }, NOW)).rejects.toThrow(
+    await expect(editTranscript(lib, id, { kind: 'text', segmentId: 'zz', text: 'x' }, VERSION, NOW)).rejects.toThrow(
       editTexts.segmentGone,
     );
   });

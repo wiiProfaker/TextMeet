@@ -1,9 +1,9 @@
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import { transcriptModelTitle, type SpeakerId } from '../../shared/transcript';
-import { hasManualChanges, type TranscriptEdit } from '../../shared/transcript-edit';
+import { hasManualChanges, isStaleEditMessage, type TranscriptEdit } from '../../shared/transcript-edit';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { formatLongDate, participantsText } from './format';
@@ -28,6 +28,7 @@ interface Props {
 }
 
 const AUDIO_BUSY = 'Аудио нельзя удалить, пока встреча ждёт расшифровки или расшифровывается.';
+const NO_TEXT_TO_EDIT = 'Текст встречи ещё не открыт — правка не сохранена.';
 const AUDIO_MIXING = 'Запись ещё готовится к прослушиванию — удалите аудио чуть позже.';
 
 function OpenFolder({ id, onError }: { id: string; onError(message: string): void }) {
@@ -239,13 +240,28 @@ function MeetingView({
   const [dialog, setDialog] = useState(false);
   const { meeting, mixReady, mixFailed } = entry;
   const busy = meeting.status === 'queued' || meeting.status === 'transcribing' ? meeting.status : null;
-  const [load, setTranscript] = useTranscript(meeting.id, meeting.status, busy !== null || progress !== null);
+  const [load, setTranscript, reloadTranscript] = useTranscript(
+    meeting.id,
+    meeting.status,
+    busy !== null || progress !== null,
+  );
+  // Правка делается к тому тексту, который сейчас показан: id реплик позиционные, чужой текст ими не правят.
+  const shownVersion = useRef<string | null>(null);
+  shownVersion.current = load.kind === 'ready' ? load.transcript.createdAt : null;
   const edit = useCallback(
     async (change: TranscriptEdit) => {
-      const result = await window.textmeet.editTranscript({ meetingId: meeting.id, edit: change });
-      setTranscript(result.transcript);
+      const transcriptVersion = shownVersion.current;
+      if (transcriptVersion === null) throw new Error(NO_TEXT_TO_EDIT);
+      try {
+        const result = await window.textmeet.editTranscript({ meetingId: meeting.id, edit: change, transcriptVersion });
+        setTranscript(result.transcript);
+      } catch (err) {
+        // Текст в файле уже другой (расшифровали заново, правили на другом компьютере) — показываем его, а не старый.
+        if (isStaleEditMessage(errorText(err))) reloadTranscript();
+        throw err;
+      }
     },
-    [meeting.id, setTranscript],
+    [meeting.id, setTranscript, reloadTranscript],
   );
   const playback = usePlayback(meeting.id, meeting.durationSec);
   const canPlay = mixReady && !playback.failed;

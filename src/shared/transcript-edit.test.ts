@@ -5,6 +5,7 @@ import {
   applyEdit,
   editTexts,
   hasManualChanges,
+  isStaleEditMessage,
   mergeTarget,
   nextSpeakerId,
   pruneSpeakers,
@@ -62,6 +63,14 @@ describe('applyEdit — text', () => {
 
   it('refuses a segment that is gone', () => {
     expect(() => applyEdit(base(), { kind: 'text', segmentId: 'x', text: 'а' }, NOW)).toThrow(editTexts.segmentGone);
+  });
+
+  it('tells the refusals that mean the text has changed from other errors', () => {
+    expect(isStaleEditMessage(editTexts.transcriptChanged)).toBe(true);
+    expect(isStaleEditMessage(editTexts.segmentGone)).toBe(true);
+    expect(isStaleEditMessage(editTexts.speakerGone)).toBe(true);
+    expect(isStaleEditMessage(editTexts.tooManySpeakers)).toBe(false);
+    expect(isStaleEditMessage('Не удалось сохранить правку: файл занят другой программой')).toBe(false);
   });
 
   it('keeps unknown fields of the segment', () => {

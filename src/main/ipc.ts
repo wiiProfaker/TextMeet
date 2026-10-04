@@ -97,7 +97,11 @@ const RenameSpeakerSchema = z.object({
   speakerId: SpeakerIdSchema,
   name: z.string().max(100).nullable(),
 });
-const EditTranscriptSchema = z.object({ meetingId: MeetingIdSchema, edit: TranscriptEditSchema });
+const EditTranscriptSchema = z.object({
+  meetingId: MeetingIdSchema,
+  edit: TranscriptEditSchema,
+  transcriptVersion: z.iso.datetime(),
+});
 
 const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
 const TranscribeRequestSchema = z.object({
@@ -306,7 +310,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.editTranscript, async (arg) => {
     const request = EditTranscriptSchema.parse(arg);
     const result = await shown('Не удалось сохранить правку', () =>
-      editTranscript(deps.libraryDir(), request.meetingId, request.edit, new Date()),
+      editTranscript(deps.libraryDir(), request.meetingId, request.edit, request.transcriptVersion, new Date()),
     )();
     searchChanged(request.meetingId);
     if (result.meetingChanged) deps.libraryChanged();

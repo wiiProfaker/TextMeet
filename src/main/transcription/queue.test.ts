@@ -408,6 +408,16 @@ describe('TranscriptionQueue', () => {
     expect(loggedErrors()).toContain('DownloadError: нет связи с сервером');
   });
 
+  it('leaves the download stage as soon as the models are ready', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib);
+    const t = setup({ ensure: async (onProgress) => onProgress({ done: 400, total: 400 }) });
+    await t.queue.enqueue(lib, meeting.id);
+    await transcribeSent(t.worker);
+    // Процесс ещё ничего не прислал, а байты скачивания уже не показываются.
+    expect(t.queue.progress()).toEqual([{ meetingId: meeting.id, stage: 'prepare', fraction: 0, download: null }]);
+  });
+
   it('shows «preparing the model» when the check of the models takes long', async () => {
     const lib = makeTempDir();
     const meeting = await recordedMeeting(lib);

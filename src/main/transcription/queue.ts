@@ -313,6 +313,8 @@ export class TranscriptionQueue {
     } finally {
       clearTimeout(slow);
     }
+    // Модели на месте: дальше — подготовка звука, а не застывшие байты скачивания до первого сообщения процесса.
+    this.setProgress(current, { stage: 'prepare', fraction: 0, download: null });
   }
 
   /** Модели, процесс расшифровки, запись результата. null — уведомлять не о чем (встречу поставили заново). */

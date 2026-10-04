@@ -1,13 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
-import { transcriptModelTitle } from '../../shared/transcript';
+import { transcriptModelTitle, type Transcript } from '../../shared/transcript';
+import type { TranscriptEdit } from '../../shared/transcript-edit';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { formatLongDate, participantsText } from './format';
 import { usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, WarnIcon } from './icons';
+import { MeetingTitle } from './MeetingTitle';
 import { Player } from './Player';
 import { segmentAt } from './playback';
 import { TranscribeDialog } from './TranscribeDialog';
@@ -80,11 +82,13 @@ function ReadyText({
   meeting,
   playback,
   canPlay,
+  onEdit,
 }: {
   load: Extract<TranscriptLoad, { kind: 'ready' }>;
   meeting: Meeting;
   playback: Playback;
   canPlay: boolean;
+  onEdit: ((edit: TranscriptEdit) => Promise<void>) | null;
 }) {
   const { transcript } = load;
   const starts = useMemo(() => transcript.segments.map((s) => s.start), [transcript]);
@@ -97,6 +101,7 @@ function ReadyText({
       nowIndex={nowIndex}
       playing={playback.playing}
       onPlayAt={canPlay ? playback.seekAndPlay : null}
+      onEdit={onEdit}
     />
   );
 }
@@ -109,6 +114,7 @@ function Body({
   progress,
   playback,
   canPlay,
+  onEdit,
   onTranscribe,
 }: {
   meeting: Meeting;
@@ -118,6 +124,7 @@ function Body({
   playback: Playback;
   /** Запись готова к прослушиванию. */
   canPlay: boolean;
+  onEdit(edit: TranscriptEdit): Promise<void>;
   /** Кнопка «Расшифровать» под «Текста пока нет»; null — её нет (например, она уже в заголовке). */
   onTranscribe: (() => void) | null;
 }) {
@@ -126,7 +133,8 @@ function Body({
     return (
       <>
         {busy && <ProgressStrip view={progressView(busy, progress)} />}
-        <ReadyText load={load} meeting={meeting} playback={playback} canPlay={canPlay} />
+        {/* Пока встреча ждёт расшифровки заново или расшифровывается, прежний текст не правится: правки пропали бы. */}
+        <ReadyText load={load} meeting={meeting} playback={playback} canPlay={canPlay} onEdit={busy ? null : onEdit} />
       </>
     );
   }
@@ -158,7 +166,14 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
   const [dialog, setDialog] = useState(false);
   const { meeting, mixReady, mixFailed } = entry;
   const busy = meeting.status === 'queued' || meeting.status === 'transcribing' ? meeting.status : null;
-  const [load] = useTranscript(meeting.id, meeting.status, busy !== null || progress !== null);
+  const [load, setTranscript] = useTranscript(meeting.id, meeting.status, busy !== null || progress !== null);
+  const edit = useCallback(
+    async (change: TranscriptEdit) => {
+      const result = await window.textmeet.editTranscript({ meetingId: meeting.id, edit: change });
+      setTranscript(result.transcript);
+    },
+    [meeting.id, setTranscript],
+  );
   const playback = usePlayback(meeting.id, meeting.durationSec);
   const canPlay = mixReady && !playback.failed;
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
@@ -182,7 +197,7 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
   return (
     <main className="pane" aria-label="Встреча">
       <header className="head">
-        <h1>{meeting.title}</h1>
+        <MeetingTitle meetingId={meeting.id} title={meeting.title} onError={onError} />
         <div className="meta">{meta.join(' · ')}</div>
         <div className="acts">
           {actions.header && (
@@ -225,6 +240,7 @@ function MeetingView({ entry, progress, onError }: Props & { entry: Extract<Meet
         progress={progress}
         playback={playback}
         canPlay={canPlay}
+        onEdit={edit}
         onTranscribe={actions.body ? () => setDialog(true) : null}
       />
       {mixReady ? (

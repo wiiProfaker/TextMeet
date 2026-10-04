@@ -60,6 +60,12 @@ export const ChevronIcon = () => (
   </Icon>
 );
 
+export const PencilIcon = () => (
+  <Icon>
+    <path d="M4 20h4L19 9l-4-4L4 16z" />
+  </Icon>
+);
+
 export const PlayIcon = () => (
   <Icon filled>
     <path d="M8 5l11 7-11 7z" />

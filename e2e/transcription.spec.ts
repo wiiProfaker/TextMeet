@@ -94,7 +94,10 @@ test('a failed transcription shows the reason and «Повторить» tries a
 
   const banner = page.getByRole('alert').filter({ hasText: 'Ошибка расшифровки' });
   await expect(banner).toContainText('ffmpeg не прочитал дорожку', { timeout: 20_000 });
-  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText('ошибка расшифровки');
+  // В списке встреч: название встречи справа — тоже кнопка (переименовать).
+  await expect(
+    page.getByRole('navigation', { name: 'Встречи' }).getByRole('button', { name: /Созвон с Ириной/ }),
+  ).toContainText('ошибка расшифровки');
   // Текста ещё не было — «заново» не к чему.
   await expect(page.getByRole('button', { name: 'Расшифровать', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Расшифровать заново' })).toHaveCount(0);
@@ -159,7 +162,9 @@ test('«Расшифровать заново» replaces the text and keeps the 
     page.getByRole('status').filter({ hasText: /В очереди на расшифровку|Скачиваем модель GigaAM v3|Готовим звук/ }),
   ).toBeVisible();
   await expect(page.getByLabel('Текст встречи')).toContainText('Старый текст.');
-  await expect(page.getByRole('button', { name: /Созвон с Ириной/ })).toContainText(/в очереди на расшифровку|скачиваем модель|расшифровка/);
+  await expect(
+    page.getByRole('navigation', { name: 'Встречи' }).getByRole('button', { name: /Созвон с Ириной/ }),
+  ).toContainText(/в очереди на расшифровку|скачиваем модель|расшифровка/);
 
   await transcription.release();
   await expect(page.getByLabel('Текст встречи')).toContainText('Проверка расшифровки', { timeout: 20_000 });

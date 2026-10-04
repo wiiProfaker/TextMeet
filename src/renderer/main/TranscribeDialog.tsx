@@ -1,6 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { ASR_MODEL_IDS, isAsrModelId, type AsrModelId } from '../../shared/asr-models';
+import type { ModelsState } from '../../shared/transcription';
 import { errorText } from './errors';
 import { keepFocusInside } from './focus';
+import { ChevronIcon } from './icons';
+import { modelChoiceLabel } from './model-catalog';
 import { choiceFor, readChoice } from './participants';
 import { ParticipantsPicker } from './ParticipantsPicker';
 
@@ -15,9 +19,12 @@ interface Props {
   onClose(): void;
 }
 
-/** «Расшифровать» / «Расшифровать заново»: число участников и запуск. */
+/** «Расшифровать» / «Расшифровать заново»: модель (по умолчанию — из настроек), число участников и запуск. */
 export function TranscribeDialog({ meetingId, again, replacesText, participantsHint, onClose }: Props) {
   const [participants, setParticipants] = useState(() => choiceFor(participantsHint));
+  const [models, setModels] = useState<ModelsState | null>(null);
+  /** null — пока не выбрали сами: модель из настроек. */
+  const [model, setModel] = useState<AsrModelId | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const dialog = useRef<HTMLDivElement>(null);
@@ -30,6 +37,20 @@ export function TranscribeDialog({ meetingId, again, replacesText, participantsH
     return () => opener?.focus();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    // Список моделей не пришёл — окно работает и без него: расшифровка пойдёт моделью из настроек.
+    window.textmeet
+      .getModels()
+      .then((state) => {
+        if (active) setModels(state);
+      })
+      .catch((err: unknown) => console.error('TextMeet: список моделей не получен', errorText(err)));
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const confirm = async () => {
     const n = readChoice(participants);
     if (n === 'invalid') {
@@ -38,7 +59,7 @@ export function TranscribeDialog({ meetingId, again, replacesText, participantsH
     }
     setSaving(true);
     try {
-      await window.textmeet.transcribe({ meetingId, participantsHint: n, model: null });
+      await window.textmeet.transcribe({ meetingId, participantsHint: n, model });
       onClose();
     } catch (err) {
       setError(errorText(err));
@@ -63,6 +84,28 @@ export function TranscribeDialog({ meetingId, again, replacesText, participantsH
       >
         <h2 id={titleId}>{title}</h2>
         {replacesText && <div className="meta">Текст заменится, когда новая расшифровка закончится.</div>}
+        {models && (
+          <div className="dlg-field">
+            <div className="q">Модель</div>
+            <span className="selw">
+              <select
+                aria-label="Модель расшифровки"
+                value={model ?? models.selected}
+                onChange={(e) => {
+                  const next = e.currentTarget.value;
+                  if (isAsrModelId(next)) setModel(next);
+                }}
+              >
+                {ASR_MODEL_IDS.map((id) => (
+                  <option key={id} value={id}>
+                    {modelChoiceLabel(models, id)}
+                  </option>
+                ))}
+              </select>
+              <ChevronIcon />
+            </span>
+          </div>
+        )}
         <ParticipantsPicker
           value={participants}
           onChange={(next) => {

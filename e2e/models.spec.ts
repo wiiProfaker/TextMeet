@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { launchApp, type LaunchedApp } from './helpers';
+import { launchApp, meetingJson, pollMeetingJson, type LaunchedApp } from './helpers';
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -52,4 +52,38 @@ test('the catalog downloads, cancels, selects and deletes models', async () => {
   await expect(selected.getByRole('article', { name: 'GigaAM v3' })).toBeVisible();
   await expect.poll(async () => (await settingsFile(userDataDir)).asrModel).toBe('gigaam-v3-e2e-rnnt');
   await expect(russian.getByRole('article', { name: 'T-one' })).toBeVisible();
+});
+
+const ID = '2026-09-25_1430_a1b2c3';
+
+test('a meeting is transcribed with the model chosen in the window and shows it', async () => {
+  launched = await launchApp({
+    meetings: [
+      {
+        id: ID,
+        json: meetingJson(ID, {
+          title: 'Созвон с Ириной',
+          durationSec: 3,
+          tracks: [{ kind: 'mic', file: 'mic.webm', startOffsetMs: 0 }],
+        }),
+        audio: { 'mic.webm': 2 },
+      },
+    ],
+  });
+  const { page, libraryDir } = launched;
+  await page.getByRole('button', { name: /Созвон с Ириной/ }).click();
+  await page.getByRole('button', { name: 'Расшифровать', exact: true }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Расшифровать' });
+  const select = dialog.getByRole('combobox', { name: 'Модель расшифровки' });
+  await expect(select).toHaveValue('gigaam-v3-e2e-rnnt');
+  await expect(select.locator('option[value="canary-180m-flash"]')).toHaveText(/только английский — скачается, \d+ МБ/);
+  await select.selectOption('t-one');
+  await dialog.getByRole('button', { name: 'Расшифровать' }).click();
+
+  await expect(page.getByLabel('Текст встречи')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('main', { name: 'Встреча' })).toContainText('Текст: T-one');
+  await expect.poll(async () => (await pollMeetingJson(libraryDir, ID))?.model).toBe('t-one');
+  const transcript = JSON.parse(await readFile(join(libraryDir, ID, 'transcript.json'), 'utf8')) as Record<string, unknown>;
+  expect(transcript).toMatchObject({ model: 't-one', modelTitle: 'T-one' });
 });

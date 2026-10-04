@@ -1,0 +1,33 @@
+name: models-check
+
+# Каждая модель каталога на настоящих файлах (npm run test:catalog, ~4,5 ГБ моделей) на всех трёх ОС: модель
+# остаётся в каталоге, только если работает и на Windows, и на Mac (решения Плана 7, §3). Запуск — по кнопке
+# или отправкой ветки models-check/… (так проверяют ветку, где этого файла ещё нет на main).
+on:
+  workflow_dispatch:
+  push:
+    branches: ['models-check/**']
+
+permissions:
+  contents: read
+
+jobs:
+  models:
+    # Скачивание ~4,5 ГБ и восемь моделей подряд; macOS считается с множителем — зависший запуск не должен съесть минуты.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      TEXTMEET_MODELS_DIR: ${{ github.workspace }}/../textmeet-models
+      TEXTMEET_TEST_FIXTURES_DIR: ${{ github.workspace }}/../textmeet-test-fixtures
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run test:catalog

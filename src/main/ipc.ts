@@ -18,7 +18,7 @@ import {
   type RecorderMessageChannel,
   type SettingsState,
 } from '../shared/ipc';
-import { DEFAULT_ASR_MODEL } from '../shared/asr-models';
+import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
 import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
 import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
 import { humanFsError } from './fs/fs-errors';
@@ -51,7 +51,7 @@ export interface IpcDeps {
   /** Горячая клавиша сменилась — обновить подсказку в меню трея. */
   hotkeyChanged(): void;
   transcription: {
-    enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null): Promise<void>;
+    enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null, model?: AsrModelId): Promise<void>;
     progress(): TranscriptionProgress[];
     isBusy(): boolean;
     stopIdleWorker(): void;
@@ -76,9 +76,11 @@ const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запи
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
 
+const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
 const TranscribeRequestSchema = z.object({
   meetingId: MeetingIdSchema,
   participantsHint: z.number().int().min(1).max(50).nullable(),
+  model: AsrModelIdSchema.nullable(),
 });
 
 const RecorderSchemas = {
@@ -265,7 +267,8 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.transcribe, async (arg) => {
     const request = TranscribeRequestSchema.parse(arg);
-    await deps.transcription.enqueue(deps.libraryDir(), request.meetingId, request.participantsHint);
+    const model = request.model ?? deps.settings.get().asrModel;
+    await deps.transcription.enqueue(deps.libraryDir(), request.meetingId, request.participantsHint, model);
   });
 
   handle(IPC.getTranscript, (arg) => readTranscript(deps.libraryDir(), MeetingIdSchema.parse(arg)));

@@ -53,6 +53,26 @@ export function downloadButton(title: string, failed: boolean): { text: string; 
   return { text, label: `${text}: ${title}` };
 }
 
+/** Ошибки каталога: чтения состояния и ответа на нажатие («Удалить», «Скачать»…). */
+export interface CatalogErrors {
+  load: string | null;
+  action: string | null;
+}
+
+export const NO_CATALOG_ERRORS: CatalogErrors = { load: null, action: null };
+
+/**
+ * Ошибки после ответа: удачное чтение снимает прежнюю ошибку чтения, но не ответ на нажатие — каталог перечитывается
+ * дважды в секунду во время скачивания, и отказ стёрся бы раньше, чем его прочтут. Удачное нажатие снимает обе.
+ */
+export function catalogErrorsAfter(errors: CatalogErrors, source: 'load' | 'action', error: string | null): CatalogErrors {
+  if (source === 'load') return { ...errors, load: error };
+  return error === null ? NO_CATALOG_ERRORS : { ...errors, action: error };
+}
+
+/** Что показать: ответ на нажатие важнее ошибки чтения. */
+export const catalogErrorText = (errors: CatalogErrors): string | null => errors.action ?? errors.load;
+
 /** Подпись скачивания в карточке. */
 export const downloadText = (done: number, total: number): string =>
   total > 0 ? `Скачиваем — ${formatDownloaded(done, total)}` : 'Скачиваем…';

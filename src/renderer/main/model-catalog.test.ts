@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { ASR_MODEL_IDS, type AsrModelId } from '../../shared/asr-models';
 import type { ModelsState } from '../../shared/transcription';
-import { catalogSections, downloadButton, downloadText, modelBars, modelChoiceLabel } from './model-catalog';
+import {
+  catalogErrorsAfter,
+  catalogErrorText,
+  catalogSections,
+  downloadButton,
+  downloadText,
+  modelBars,
+  modelChoiceLabel,
+  NO_CATALOG_ERRORS,
+} from './model-catalog';
 
 const MB = 1024 * 1024;
 
@@ -57,5 +66,22 @@ describe('model card texts', () => {
   it('names the download button by its visible word, also after a failure', () => {
     expect(downloadButton('T-one', false)).toEqual({ text: 'Скачать', label: 'Скачать: T-one' });
     expect(downloadButton('T-one', true)).toEqual({ text: 'Повторить', label: 'Повторить: T-one' });
+  });
+});
+
+describe('catalog errors', () => {
+  it('drops a reading error once the catalog is read again', () => {
+    const failed = catalogErrorsAfter(NO_CATALOG_ERRORS, 'load', 'Не удалось прочитать модели');
+    expect(catalogErrorText(failed)).toBe('Не удалось прочитать модели');
+    expect(catalogErrorText(catalogErrorsAfter(failed, 'load', null))).toBeNull();
+  });
+
+  it('keeps the answer to a click while the catalog is re-read, and clears everything after a successful click', () => {
+    const refused = catalogErrorsAfter(NO_CATALOG_ERRORS, 'action', 'Модели нельзя удалить, пока скачивается модель.');
+    const reread = catalogErrorsAfter(refused, 'load', null);
+    expect(catalogErrorText(reread)).toBe('Модели нельзя удалить, пока скачивается модель.');
+    const both = catalogErrorsAfter(reread, 'load', 'Не удалось прочитать модели');
+    expect(catalogErrorText(both)).toBe('Модели нельзя удалить, пока скачивается модель.');
+    expect(catalogErrorsAfter(both, 'action', null)).toEqual(NO_CATALOG_ERRORS);
   });
 });

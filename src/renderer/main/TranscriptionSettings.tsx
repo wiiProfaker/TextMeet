@@ -3,13 +3,13 @@ import type { AsrModelId } from '../../shared/asr-models';
 import { formatMegabytes } from '../../shared/format';
 import type { ModelGroupId, ModelsState } from '../../shared/transcription';
 import { errorText } from './errors';
-import { catalogSections } from './model-catalog';
+import { catalogErrorsAfter, catalogErrorText, catalogSections, NO_CATALOG_ERRORS } from './model-catalog';
 import { ModelCard, type ModelCardActions } from './ModelCard';
 
 /** Настройки → «Расшифровка»: каталог моделей (решения Плана 7, §2) и общие модели голосов. */
 export function TranscriptionSettings() {
   const [models, setModels] = useState<ModelsState | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errors, setErrors] = useState(NO_CATALOG_ERRORS);
   // Запросы могут наложиться и ответить не по порядку — показываем только ответ на последний.
   const latestRequest = useRef(0);
 
@@ -19,10 +19,12 @@ export function TranscriptionSettings() {
       return window.textmeet
         .getModels()
         .then((state) => {
-          if (request === latestRequest.current) setModels(state);
+          if (request !== latestRequest.current) return;
+          setModels(state);
+          setErrors((prev) => catalogErrorsAfter(prev, 'load', null));
         })
         .catch((err: unknown) => {
-          if (request === latestRequest.current) setError(errorText(err));
+          if (request === latestRequest.current) setErrors((prev) => catalogErrorsAfter(prev, 'load', errorText(err)));
         });
     };
     void load();
@@ -48,10 +50,10 @@ export function TranscriptionSettings() {
     const request = ++latestRequest.current;
     try {
       const state = await action();
-      setError(null);
+      setErrors((prev) => catalogErrorsAfter(prev, 'action', null));
       if (request === latestRequest.current) setModels(state);
     } catch (err) {
-      setError(errorText(err));
+      setErrors((prev) => catalogErrorsAfter(prev, 'action', errorText(err)));
     }
   };
 
@@ -63,6 +65,7 @@ export function TranscriptionSettings() {
   };
 
   const sections = models && catalogSections(models);
+  const error = catalogErrorText(errors);
   const group = (title: string, ids: AsrModelId[]) =>
     models &&
     ids.length > 0 && (

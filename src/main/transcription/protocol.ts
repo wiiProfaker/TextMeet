@@ -1,5 +1,6 @@
 // Сообщения между main и процессом расшифровки (utilityProcess). Проверяются zod с обеих сторон.
 import { z } from 'zod';
+import { ASR_MODEL_IDS } from '../../shared/asr-models';
 import { TrackKindSchema } from '../../shared/meeting';
 import { SpeakerIdSchema } from '../../shared/transcript';
 
@@ -18,6 +19,8 @@ export const MainToWorkerSchema = z.discriminatedUnion('type', [
     jobId: z.string().min(1),
     input: PipelineInputSchema,
     modelsDir: z.string().min(1),
+    /** Модель расшифровки этой встречи (каталог). */
+    model: z.enum(ASR_MODEL_IDS),
     ffmpegPath: z.string().min(1),
     threads: z.number().int().min(1).max(64),
   }),
@@ -54,7 +57,13 @@ export const WorkerToMainSchema = z.discriminatedUnion('type', [
       skippedTracks: z.array(z.object({ kind: TrackKindSchema, message: z.string() })).default([]),
     }),
   }),
-  z.object({ type: z.literal('failed'), jobId: z.string(), message: z.string() }),
+  z.object({
+    type: z.literal('failed'),
+    jobId: z.string(),
+    message: z.string(),
+    /** model-load — не загрузилась модель расшифровки (файлы целы по суммам, но движок их не принял). */
+    code: z.literal('model-load').optional(),
+  }),
 ]);
 
 /** Отказы процесса расшифровки: написаны для человека, main показывает их как есть (прочие ошибки — общим текстом). */

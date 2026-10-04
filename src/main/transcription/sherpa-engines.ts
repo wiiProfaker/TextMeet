@@ -1,6 +1,8 @@
 // Настоящие движки на sherpa-onnx (проверяются интеграционными тестами на реальных моделях).
 import * as sherpa from 'sherpa-onnx-node';
-import { asrFilePath, voicePaths, type VoicePaths } from '../models/registry';
+import type { AsrModelId } from '../../shared/asr-models';
+import { voicePaths, type VoicePaths } from '../models/registry';
+import { recognizerSpec, type RecognizerSpec } from './asr-config';
 import { SAMPLE_RATE } from './decode';
 import { latestByThreads, type Diarizer, type Engines, type Recognizer, type SpeechDetector, type VoiceprintExtractor } from './engines';
 import type { Interval } from './turns';
@@ -55,31 +57,46 @@ function detector(paths: VoicePaths): SpeechDetector {
   };
 }
 
-function recognizer(root: string, threads: number): Recognizer {
-  const file = (name: string): string => asrFilePath(root, 'gigaam-v3-e2e-rnnt', name);
-  const native = new sherpa.OfflineRecognizer({
-    featConfig: { sampleRate: SAMPLE_RATE, featureDim: 64 },
-    modelConfig: {
-      transducer: {
-        encoder: file('gigaam_v3_e2e_rnnt_encoder_int8.onnx'),
-        decoder: file('gigaam_v3_e2e_rnnt_decoder.onnx'),
-        joiner: file('gigaam_v3_e2e_rnnt_joint.onnx'),
+/** Кусок с тишиной до и после (spec.leadSec / tailSec); без неё — тот же буфер. */
+function padded(samples: Float32Array, spec: RecognizerSpec): Float32Array {
+  if (spec.leadSec === 0 && spec.tailSec === 0) return samples;
+  const lead = Math.round(spec.leadSec * SAMPLE_RATE);
+  const result = new Float32Array(lead + samples.length + Math.round(spec.tailSec * SAMPLE_RATE));
+  result.set(samples, lead);
+  return result;
+}
+
+/** Ошибка загрузки модели: процесс расшифровки сообщает о ней отдельно («Не удалось загрузить модель …»). */
+export class ModelLoadError extends Error {}
+
+function recognizer(spec: RecognizerSpec): Recognizer {
+  try {
+    if (spec.online) {
+      const native = new sherpa.OnlineRecognizer(spec.config);
+      return {
+        recognize(samples: Float32Array): string {
+          const stream = native.createStream();
+          if (spec.language) stream.setOption('language', spec.language);
+          stream.acceptWaveform({ sampleRate: SAMPLE_RATE, samples: padded(samples, spec) });
+          stream.inputFinished();
+          while (native.isReady(stream)) native.decode(stream);
+          return String(native.getResult(stream).text ?? '');
+        },
+      };
+    }
+    const native = new sherpa.OfflineRecognizer(spec.config);
+    return {
+      recognize(samples: Float32Array): string {
+        const stream = native.createStream();
+        if (spec.language) stream.setOption('language', spec.language);
+        stream.acceptWaveform({ sampleRate: SAMPLE_RATE, samples: padded(samples, spec) });
+        native.decode(stream);
+        return String(native.getResult(stream).text ?? '');
       },
-      tokens: file('gigaam_v3_e2e_rnnt_tokens.txt'),
-      modelType: 'nemo_transducer',
-      numThreads: threads,
-      provider: 'cpu',
-      debug: 0,
-    },
-  });
-  return {
-    recognize(samples: Float32Array): string {
-      const stream = native.createStream();
-      stream.acceptWaveform({ sampleRate: SAMPLE_RATE, samples });
-      native.decode(stream);
-      return String(native.getResult(stream).text ?? '');
-    },
-  };
+    };
+  } catch (err) {
+    throw new ModelLoadError(err instanceof Error ? err.message : String(err), { cause: err });
+  }
 }
 
 /** Модели разделения загружаются при первом разделении: встречам без «других» они не нужны. */
@@ -114,14 +131,15 @@ function voiceprints(paths: VoicePaths, threads: number): VoiceprintExtractor {
 }
 
 /**
- * Движки sherpa-onnx. Распознаватель, разделение по голосам и отпечатки живут, пока жив этот объект, и переиспользуются
- * встречами (загрузка GigaAM — секунды); каждого вида — одна копия, для последнего числа потоков (latestByThreads).
+ * Движки sherpa-onnx с моделью расшифровки model из папки моделей root. Распознаватель, разделение по голосам и
+ * отпечатки живут, пока жив этот объект, и переиспользуются встречами (загрузка модели — секунды); каждого вида —
+ * одна копия, для последнего числа потоков (latestByThreads).
  */
-export function sherpaEngines(root: string): Engines {
+export function sherpaEngines(root: string, model: AsrModelId): Engines {
   const paths = voicePaths(root);
   return {
     detector: () => detector(paths),
-    recognizer: latestByThreads((threads) => recognizer(root, threads)),
+    recognizer: latestByThreads((threads) => recognizer(recognizerSpec(model, root, threads))),
     diarizer: latestByThreads((threads) => diarizer(paths, threads)),
     voiceprints: latestByThreads((threads) => voiceprints(paths, threads)),
   };

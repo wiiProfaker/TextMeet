@@ -22,6 +22,14 @@ describe('progress', () => {
     expect(overallFraction(steps, 4, 7)).toBeCloseTo(1, 10);
   });
 
+  it('gives recognition a bigger share for a slower model', () => {
+    const slow = planSteps(plans, [100, 100], 10);
+    expect(slow.map((s) => s.stage)).toEqual(steps.map((s) => s.stage));
+    // Конец разделения по голосам (начало распознавания собеседников) у медленной модели — раньше по доле.
+    expect(overallFraction(slow, 4, 0)).toBeLessThan(overallFraction(steps, 4, 0));
+    expect(slow[1]!.cost).toBeCloseTo(steps[1]!.cost * 10);
+  });
+
   it('is zero without steps', () => {
     expect(overallFraction([], 0, 0.5)).toBe(0);
   });

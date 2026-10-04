@@ -343,6 +343,7 @@ export class TranscriptionQueue {
       jobId: `job-${++this.jobCounter}`,
       input,
       modelsDir: this.deps.models.root,
+      model: DEFAULT_ASR_MODEL,
       ffmpegPath: this.deps.ffmpegPath(),
       threads: this.deps.threads(),
     };

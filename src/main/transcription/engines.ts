@@ -1,4 +1,5 @@
 // Тонкие интерфейсы над нативными движками: конвейер проверяется без sherpa-onnx (поддельные движки в тестах).
+import type { AsrModelId } from '../../shared/asr-models';
 import type { Interval, Turn } from './turns';
 
 /** Детектор речи: участки речи на дорожке. */
@@ -47,13 +48,19 @@ export function latestByThreads<T>(create: (threads: number) => T): (threads: nu
 }
 
 /**
- * Движки процесса расшифровки: один объект на папку моделей, общий для всех встреч, — модели загружаются один раз
- * на процесс, а не для каждой встречи. Другая папка — новые движки.
+ * Движки процесса расшифровки: один объект на папку моделей и модель расшифровки, общий для встреч подряд, — модели
+ * загружаются один раз, а не для каждой встречи. Другая папка или модель — новые движки; прежние отпускаются
+ * (две модели расшифровки в памяти разом не держим).
  */
-export function enginesByModelsDir(create: (modelsDir: string) => Engines): (modelsDir: string) => Engines {
-  let last: { modelsDir: string; engines: Engines } | null = null;
-  return (modelsDir) => {
-    if (last?.modelsDir !== modelsDir) last = { modelsDir, engines: create(modelsDir) };
+export function enginesByModel(
+  create: (modelsDir: string, model: AsrModelId) => Engines,
+): (modelsDir: string, model: AsrModelId) => Engines {
+  let last: { modelsDir: string; model: AsrModelId; engines: Engines } | null = null;
+  return (modelsDir, model) => {
+    if (last?.modelsDir !== modelsDir || last.model !== model) {
+      last = null;
+      last = { modelsDir, model, engines: create(modelsDir, model) };
+    }
     return last.engines;
   };
 }

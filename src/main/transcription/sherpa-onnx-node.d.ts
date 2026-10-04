@@ -9,6 +9,8 @@ declare module 'sherpa-onnx-node' {
 
   export interface OfflineStream {
     acceptWaveform(wave: Waveform): void;
+    /** Настройка потока, например язык ('language') у Qwen3-ASR. */
+    setOption(key: string, value: string): void;
   }
 
   export class OfflineRecognizer {
@@ -16,6 +18,22 @@ declare module 'sherpa-onnx-node' {
     createStream(): OfflineStream;
     decode(stream: OfflineStream): void;
     getResult(stream: OfflineStream): { text?: string };
+  }
+
+  export interface OnlineStream {
+    acceptWaveform(wave: Waveform): void;
+    inputFinished(): void;
+    /** Настройка потока, например язык ('language') у Nemotron. */
+    setOption(key: string, value: string): void;
+  }
+
+  /** Потоковое распознавание (Nemotron, T-one): TextMeet подаёт кусок целиком и декодирует до конца. */
+  export class OnlineRecognizer {
+    constructor(config: object);
+    createStream(): OnlineStream;
+    isReady(stream: OnlineStream): boolean;
+    decode(stream: OnlineStream): void;
+    getResult(stream: OnlineStream): { text?: string };
   }
 
   export interface SpeechSegment {

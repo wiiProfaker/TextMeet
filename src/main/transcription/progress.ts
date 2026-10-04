@@ -16,15 +16,18 @@ export interface Step {
   cost: number;
 }
 
-/** Шаги по порядку: для каждой дорожки — подготовка, (разделение), распознавание. */
-export function planSteps(plans: readonly TrackPlan[], durationsSec: readonly number[]): Step[] {
+/**
+ * Шаги по порядку: для каждой дорожки — подготовка, (разделение), распознавание. slowdown — во сколько раз модель
+ * расшифровки медленнее GigaAM (каталог): у Whisper распознавание — почти вся работа, у GigaAM — треть.
+ */
+export function planSteps(plans: readonly TrackPlan[], durationsSec: readonly number[], slowdown = 1): Step[] {
   return plans.flatMap((plan, track) => {
     const sec = Math.max(1, durationsSec[track] ?? 0);
     const steps: Step[] = [{ stage: 'prepare', track, cost: COST_PER_SEC.prepare * sec }];
     if (plan.role === 'others' && plan.diarize.mode !== 'none') {
       steps.push({ stage: 'diarize', track, cost: COST_PER_SEC.diarize * sec });
     }
-    steps.push({ stage: plan.role === 'me' ? 'me' : 'others', track, cost: COST_PER_SEC.recognize * sec });
+    steps.push({ stage: plan.role === 'me' ? 'me' : 'others', track, cost: COST_PER_SEC.recognize * slowdown * sec });
     return steps;
   });
 }

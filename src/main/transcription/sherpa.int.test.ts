@@ -19,7 +19,7 @@ beforeAll(async () => {
 
 // Одни движки на все проверки — как в процессе расшифровки: модели загружаются один раз.
 let shared: Engines | null = null;
-const engines = (): Engines => (shared ??= sherpaEngines(MODELS_ROOT));
+const engines = (): Engines => (shared ??= sherpaEngines(MODELS_ROOT, 'gigaam-v3-e2e-rnnt'));
 /** Запись четырёх человек — на китайском: русская GigaAM даёт по ней пустой текст, а пустые реплики не пишутся.
  *  Поэтому разделение по голосам проверяется с настоящими моделями голосов, но с «текстом» вместо распознавания. */
 const withoutAsr = (): Engines => ({ ...engines(), recognizer: () => ({ recognize: () => 'реплика' }) });

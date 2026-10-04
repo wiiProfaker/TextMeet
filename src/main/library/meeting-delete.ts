@@ -2,7 +2,7 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import type { Meeting } from '../../shared/meeting';
-import { fsErrorReason } from '../fs/fs-errors';
+import { knownFsReason } from '../fs/fs-errors';
 import type { Logger } from '../logger';
 import { audioDir, meetingDir, readMeeting, updateMeeting } from './library';
 import { moveToTrash, type Trash } from './trash';
@@ -55,10 +55,14 @@ export async function audioSize(libraryDir: string, meetingId: string): Promise<
   return sizes.reduce((sum, size) => sum + size, 0);
 }
 
+/** Папки нет — только по ENOENT/ENOTDIR; любая другая ошибка (занят, нет прав, диск) — «есть», путь удаления её покажет. */
 const exists = (path: string): Promise<boolean> =>
-  fsp.access(path).then(
+  fsp.stat(path).then(
     () => true,
-    () => false,
+    (err: unknown) => {
+      const code = (err as NodeJS.ErrnoException | null)?.code;
+      return code !== 'ENOENT' && code !== 'ENOTDIR';
+    },
   );
 
 /** Аудио — в Корзину; текст остаётся. Встреча больше не сводится и не расшифровывается: дорожек у неё нет. */
@@ -77,7 +81,8 @@ export async function deleteAudio(deps: DeleteDeps, meetingId: string): Promise<
   } catch (err) {
     // Папки уже нет, а meeting.json ещё с дорожками: повтор найдёт папку пустой и только обновит запись.
     deps.logger.warn(`Аудио встречи ${meetingId} убрано, но запись не обновилась`, err);
-    const reason = fsErrorReason(err);
+    // Текст системы — на английском и с путём: человеку только известная причина, подробности — в журнале (cause).
+    const reason = knownFsReason(err) ?? 'файл занят или недоступен';
     throw new Error(
       moved
         ? `Аудио перенесено в Корзину, но запись о встрече не обновилась: ${reason}. Повторите удаление.`

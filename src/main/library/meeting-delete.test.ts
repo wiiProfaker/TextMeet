@@ -11,6 +11,16 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Папку не удаётся проверить (OneDrive, антивирус, отключённый диск): это не «папки нет». */
+function checkFailsFor(path: string, code: string): void {
+  const fail = () => Promise.reject(Object.assign(new Error(`${code}: ${path}`), { code }));
+  for (const name of ['stat', 'access'] as const) {
+    const real = fsp[name].bind(fsp) as (...args: unknown[]) => Promise<unknown>;
+    vi.spyOn(fsp, name).mockImplementation(((file: unknown, ...rest: unknown[]) =>
+      String(file) === path ? fail() : real(file, ...rest)) as never);
+  }
+}
+
 async function setup(patch: Partial<Meeting> = {}) {
   const lib = makeTempDir('textmeet-delete-');
   const created = await createMeeting(lib, { source: 'recording', status: 'recording' });
@@ -99,6 +109,33 @@ describe('deleteAudio', () => {
     expect(await readMeeting(lib, meeting.id)).toMatchObject({ tracks: [], audioDeleted: true });
   });
 
+  it('uses a generic reason, not the system text with a path, for an unknown error code', async () => {
+    const { lib, meeting, deps } = await setup();
+    const realRename = fsp.rename.bind(fsp);
+    vi.spyOn(fsp, 'rename').mockImplementation((from, to) =>
+      String(to).endsWith('meeting.json')
+        ? Promise.reject(Object.assign(new Error(`EMFILE: too many open files, rename '${String(to)}'`), { code: 'EMFILE' }))
+        : realRename(from, to),
+    );
+    const failure = await deleteAudio(deps, meeting.id).catch((err: unknown) => err as Error);
+    expect(failure.message).toBe(
+      'Аудио перенесено в Корзину, но запись о встрече не обновилась: файл занят или недоступен. Повторите удаление.',
+    );
+    expect(failure.message).not.toContain(lib);
+  });
+
+  it('still tries the trash when the audio folder cannot be checked', async () => {
+    const { lib, meeting, deps } = await setup();
+    checkFailsFor(audioDir(lib, meeting.id), 'EPERM');
+    const trash = vi.fn(async () => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    });
+    deps.trash = trash;
+    await expect(deleteAudio(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
+    expect(trash).toHaveBeenCalled();
+    expect(await readMeeting(lib, meeting.id)).toMatchObject({ audioDeleted: false });
+  });
+
   it.each([
     ['being recorded', {}, { recording: true }, deleteTexts.recording],
     ['queued', { status: 'queued' }, {}, deleteTexts.transcribing],
@@ -176,6 +213,28 @@ describe('deleteMeeting', () => {
     await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
     expect(calls).toEqual([`transcription ${meeting.id}`, `mixer ${meeting.id}`, `remix ${meeting.id}`]);
   });
+
+  it.each(['EPERM', 'EACCES', 'EBUSY', 'EIO'])(
+    'does not report a meeting as deleted when its folder cannot be checked (%s)',
+    async (code) => {
+      const { lib, meeting, deps, calls } = await setup({ status: 'queued' });
+      vi.mocked(deps.mixer.isPending).mockReturnValue(true);
+      checkFailsFor(meetingDir(lib, meeting.id), code);
+      const trash = vi.fn(async () => {
+        throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+      });
+      deps.trash = trash;
+      await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
+      expect(trash).toHaveBeenCalled();
+      expect(calls).toEqual([
+        `transcription ${meeting.id}`,
+        `mixer ${meeting.id}`,
+        `requeue ${meeting.id}`,
+        `remix ${meeting.id}`,
+      ]);
+      expect(deps.dropStopDialog).not.toHaveBeenCalled();
+    },
+  );
 
   it('counts a folder that is already gone as deleted', async () => {
     const { lib, meeting, deps, calls } = await setup();

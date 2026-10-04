@@ -319,8 +319,12 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.deleteAudio, async (arg) => {
     const id = MeetingIdSchema.parse(arg);
-    await shown('Не удалось удалить аудио', () => deleteAudio(deps.deletion, id))();
-    deps.libraryChanged();
+    try {
+      await shown('Не удалось удалить аудио', () => deleteAudio(deps.deletion, id))();
+    } finally {
+      // И при сбое: аудио могло уйти в Корзину, а запись о встрече — не обновиться.
+      deps.libraryChanged();
+    }
   });
 
   // Имя папки, а не только прочитанная встреча: удалить можно и папку, которую не удалось прочитать.

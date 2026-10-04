@@ -31,7 +31,7 @@ import { buildModelsState, type CatalogDownloadsSnapshot } from './models/models
 import { MODEL_GROUP_IDS } from './models/registry';
 import type { RecordingController } from './recording/controller';
 import type { SettingsStore } from './settings/settings-store';
-import { systemSettingsUrl } from './texts';
+import { systemSettingsUrl, transcriptionTexts } from './texts';
 
 export interface IpcDeps {
   settings: SettingsStore;
@@ -300,7 +300,8 @@ export function registerIpc(deps: IpcDeps): void {
     try {
       await deps.models.remove(group);
     } catch (err) {
-      throw humanFsError('Не удалось удалить модели', err);
+      // Исходная ошибка (cause) попадает в журнал вместе с этой.
+      throw new Error(transcriptionTexts.deleteModels(err), { cause: err });
     }
     // Удалили выбранную модель — новые встречи пойдут на модель по умолчанию (она скачается при расшифровке).
     if (group === deps.settings.get().asrModel) await deps.settings.update({ asrModel: DEFAULT_ASR_MODEL });

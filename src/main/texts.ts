@@ -3,6 +3,7 @@ import { formatBytes, formatDurationShort } from '../shared/format';
 import type { MediaFailure, StartProblem, SystemSettingsKind } from '../shared/recording';
 import { knownFsReason } from './fs/fs-errors';
 import { DownloadError } from './models/download';
+import { MODELS_ENSURING } from './models/model-manager';
 import { WORKER_REFUSALS } from './transcription/protocol';
 
 const RECORDER_BROKEN_TEXT = 'Окно записи несколько раз закрылось из-за сбоя. Перезапустите TextMeet.';
@@ -137,6 +138,11 @@ export const transcriptionTexts = {
   unexpected(err: unknown): string {
     const reason = knownFsReason(err);
     return reason ? `Расшифровка не удалась: ${reason}.` : INTERNAL_TEXT;
+  },
+  /** Модели не удалились → текст для окна; незнакомая ошибка (её текст с путями) остаётся только в журнале. */
+  deleteModels(err: unknown): string {
+    const reason = knownFsReason(err) ?? (err instanceof Error && err.message === MODELS_ENSURING ? MODELS_ENSURING : null);
+    return reason ? `Не удалось удалить модели: ${reason}` : `Не удалось удалить модели. ${SEE_LOG}`;
   },
 };
 

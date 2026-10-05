@@ -1,7 +1,7 @@
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
-import { parseProgressDuration, resolveFfmpegPath, runFfmpeg } from './ffmpeg';
+import { FFMPEG_CANCELLED, parseProgressDuration, resolveFfmpegPath, runFfmpeg } from './ffmpeg';
 
 describe('resolveFfmpegPath', () => {
   it('points inside app.asar.unpacked in the installed app', () => {
@@ -64,6 +64,22 @@ describe('runFfmpeg', () => {
     const started = Date.now();
     await expect(runFfmpeg(resolveFfmpegPath(), args, { stallMs: 500 })).rejects.toThrow('ffmpeg завис');
     expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('stops ffmpeg when the work is cancelled', async () => {
+    const args = ['-re', '-f', 'lavfi', '-i', 'sine=duration=30', '-f', 'null', '-'];
+    const abort = new AbortController();
+    const started = Date.now();
+    const run = runFfmpeg(resolveFfmpegPath(), args, { signal: abort.signal });
+    setTimeout(() => abort.abort(), 300);
+    await expect(run).rejects.toThrow(FFMPEG_CANCELLED);
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('does not start ffmpeg for work cancelled already', async () => {
+    await expect(runFfmpeg(resolveFfmpegPath(), ['-version'], { signal: AbortSignal.abort() })).rejects.toThrow(
+      FFMPEG_CANCELLED,
+    );
   });
 
   it('rejects when the binary cannot be started', async () => {

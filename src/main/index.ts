@@ -8,6 +8,7 @@ import {
   powerMonitor,
   protocol,
   session,
+  shell,
   systemPreferences,
   type BrowserWindow,
 } from 'electron';
@@ -25,6 +26,8 @@ import { currentLaunchAtLoginNotice, startedAtLogin, syncLaunchAtLogin } from '.
 import { HotkeyManager } from './hotkey-manager';
 import { registerIpc } from './ipc';
 import { listMeetings } from './library/library';
+import { SearchIndex } from './library/search-index';
+import { folderTrash, type Trash } from './library/trash';
 import { createLogger, type Logger } from './logger';
 import { MEDIA_SCHEME, serveMedia } from './media-protocol';
 import { CatalogDownloads } from './models/catalog-downloads';
@@ -67,6 +70,9 @@ const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
 const fakeDownloadStepMs = Number(process.env.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
 /** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
 const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
+/** Только для автотестов: «Корзина» — обычная папка (на машинах CI настоящей Корзины может не быть). */
+const testTrash = testRun ? process.env.TEXTMEET_TEST_TRASH : undefined;
+const trash: Trash = testTrash ? folderTrash(testTrash) : (path) => shell.trashItem(path);
 
 /** Потоков для расшифровки: все ядра, кроме одного (не больше 8); во время записи — 2 (§5.3 решений Плана 3). */
 const FULL_THREADS = Math.max(1, Math.min(8, availableParallelism() - 1));
@@ -304,6 +310,7 @@ async function start(logger: Logger): Promise<void> {
     openWindow: () => openMainWindow(logger),
     isWindowActive: () => mainVisible() && !!mainWindow?.isFocused(),
   });
+  const searchIndex = new SearchIndex({ libraryDir, logger });
   const mixer = new Mixer({
     ffmpegPath: () => resolveFfmpegPath(),
     logger,
@@ -427,6 +434,20 @@ async function start(logger: Logger): Promise<void> {
       logger.info('Окно записи готово');
     },
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
+    libraryChanged: () => sendToMain(IPC.libraryChanged),
+    search: searchIndex,
+    deletion: {
+      libraryDir,
+      trash,
+      isRecording: (id) => {
+        const state = controller.getState();
+        return state.phase !== 'idle' && state.meetingId === id;
+      },
+      transcription: queue,
+      mixer,
+      logger,
+      dropStopDialog: (id) => controller.dropStopDialog(id),
+    },
     transcription: queue,
     models,
     downloads: catalogDownloads,
@@ -462,6 +483,7 @@ async function start(logger: Logger): Promise<void> {
   if (hotkeyManager.busy) notify(notificationTexts.hotkeyBusy(hotkeyManager.label));
   logger.info(`TextMeet ${app.getVersion()} запущен (${process.platform})`);
   void recoverAndMix(logger, libraryDir(), notify, mixer, controller, queue);
+  searchIndex.refresh().catch((err: unknown) => logger.warn('Поиск не построился при запуске', err));
 }
 
 /** Сбой запуска не должен быть молчаливым: пишем в журнал и показываем окно с путём к нему. */

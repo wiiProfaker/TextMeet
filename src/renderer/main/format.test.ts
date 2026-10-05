@@ -3,6 +3,7 @@ import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import {
   cleanDeviceLabel,
   dayLabel,
+  deleteAudioText,
   formatClock,
   formatDuration,
   formatDurationWithSeconds,
@@ -15,6 +16,8 @@ import {
   parseParticipants,
   participantsText,
   pluralize,
+  searchFoundText,
+  searchMeetingMeta,
 } from './format';
 
 const meeting = (id: string, createdAt: Date, patch: Partial<Meeting> = {}): Meeting => ({
@@ -31,6 +34,7 @@ const meeting = (id: string, createdAt: Date, patch: Partial<Meeting> = {}): Mee
   speakerNames: {},
   tracks: [],
   recovered: false,
+  audioDeleted: false,
   ...patch,
 });
 
@@ -231,5 +235,52 @@ describe('launchAtLoginNoticeText', () => {
     expect(launchAtLoginNoticeText('needs-approval')).toContain('Объекты входа');
     expect(launchAtLoginNoticeText('blocked-by-system')).toContain('Диспетчер задач');
     expect(launchAtLoginNoticeText('unsupported')).toContain('не поддерживается');
+  });
+});
+
+describe('deleteAudioText', () => {
+  const tail = 'переместится в Корзину. Текст встречи останется, но слушать запись и расшифровывать её заново будет нельзя.';
+
+  it('names the length and the size of the recording', () => {
+    expect(deleteAudioText(32 * 60, 15 * 1024 * 1024)).toBe(`Запись (32 мин, 15 МБ) ${tail}`);
+  });
+
+  it('says «меньше 1 МБ» for a tiny recording', () => {
+    expect(deleteAudioText(30, 200_000)).toBe(`Запись (меньше минуты, меньше 1 МБ) ${tail}`);
+  });
+
+  it('leaves out what is not known yet', () => {
+    expect(deleteAudioText(null, null)).toBe(`Запись ${tail}`);
+    expect(deleteAudioText(120, null)).toBe(`Запись (2 мин) ${tail}`);
+  });
+
+  it('does not name the size when there is nothing in the folder', () => {
+    expect(deleteAudioText(120, 0)).toBe(`Запись (2 мин) ${tail}`);
+    expect(deleteAudioText(null, 0)).toBe(`Запись ${tail}`);
+  });
+});
+
+describe('search texts', () => {
+  const now = new Date(2026, 9, 4, 12, 0);
+
+  it('describes a found meeting by its day, time and number of matches', () => {
+    expect(searchMeetingMeta(new Date(2026, 9, 3, 16, 20).toISOString(), 2, now)).toBe('вчера, 16:20 · 2 совпадения');
+    expect(searchMeetingMeta(new Date(2026, 9, 4, 11, 0).toISOString(), 1, now)).toBe('сегодня, 11:00 · 1 совпадение');
+    expect(searchMeetingMeta(new Date(2026, 8, 22, 10, 0).toISOString(), 14, now)).toBe(
+      '22 сентября, 10:00 · 14 совпадений',
+    );
+  });
+
+  it('leaves out the number when only the title matched', () => {
+    expect(searchMeetingMeta(new Date(2026, 8, 22, 10, 0).toISOString(), 0, now)).toBe('22 сентября, 10:00');
+  });
+
+  it('says how many meetings were found', () => {
+    expect(searchFoundText(0, false)).toBe('Ничего не найдено');
+    expect(searchFoundText(1, false)).toBe('Найдено в 1 встрече');
+    expect(searchFoundText(3, false)).toBe('Найдено в 3 встречах');
+    expect(searchFoundText(11, false)).toBe('Найдено в 11 встречах');
+    expect(searchFoundText(21, false)).toBe('Найдено в 21 встрече');
+    expect(searchFoundText(200, true)).toBe('Найдено в первых 200 встречах');
   });
 });

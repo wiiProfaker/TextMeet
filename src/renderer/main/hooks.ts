@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
+import type { SearchResult } from '../../shared/search';
+import { isSearchable } from '../../shared/search-text';
 import type { Transcript } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { cleanDeviceLabel } from './format';
+import { nextSpeed } from './playback';
 
 /** Состояние записи из main: сначала запрос, дальше — события. */
 export function useRecordingState(): RecordingState | null {
@@ -153,23 +156,252 @@ export type TranscriptLoad =
 /**
  * Текст встречи; перечитывается, когда меняется статус или расшифровка начинается и заканчивается (running — есть
  * ход от main). Одного статуса мало: быстрая расшифровка заново может пройти между перечитываниями списка встреч,
- * и окно увидит «готово → готово». Пока текст перечитывается, показывается прежний (старый текст виден до конца
- * расшифровки заново); пока грузится текст другой встречи, прежний не показывается.
+ * и окно увидит «готово → готово». Ещё текст перечитывается при возврате в окно — его могли заменить снаружи
+ * (другой компьютер через OneDrive). Пока текст перечитывается, показывается прежний (старый текст виден до конца
+ * расшифровки заново); пока грузится текст другой встречи, прежний не показывается. set — показать текст, который
+ * вернула правка, не перечитывая файл; reload — перечитать сразу (правку отклонили: текст в файле уже другой).
  */
-export function useTranscript(meetingId: string, status: MeetingStatus, running: boolean): TranscriptLoad {
+export function useTranscript(
+  meetingId: string,
+  status: MeetingStatus,
+  running: boolean,
+): [TranscriptLoad, (transcript: Transcript) => void, () => void] {
   const [state, setState] = useState<{ meetingId: string; load: TranscriptLoad } | null>(null);
+  const [reloadCount, setReloadCount] = useState(0);
+  const reload = useCallback(() => setReloadCount((n) => n + 1), []);
   useEffect(() => {
-    let active = true;
+    const onFocus = () => reload();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [reload]);
+  // Номер последнего запроса: ответ на более ранний (например, перечитывание при возврате в окно, начатое до
+  // правки) не затирает более свежий текст.
+  const latest = useRef(0);
+  const set = useCallback(
+    (transcript: Transcript) => {
+      latest.current += 1;
+      setState({ meetingId, load: { kind: 'ready', transcript } });
+    },
+    [meetingId],
+  );
+  useEffect(() => {
+    const request = ++latest.current;
     const done = (load: TranscriptLoad) => {
-      if (active) setState({ meetingId, load });
+      if (request !== latest.current) return;
+      setState((current) => {
+        // Перечитать не вышло (OneDrive ещё пишет файл) — показанный текст и открытая правка остаются.
+        // Файла нет совсем (ответ «нет текста») — это не сбой: показывать прежний текст нельзя.
+        const shown = current?.meetingId === meetingId && current.load.kind === 'ready';
+        return shown && load.kind === 'error' ? current : { meetingId, load };
+      });
     };
     window.textmeet
       .getTranscript(meetingId)
       .then((transcript) => done(transcript ? { kind: 'ready', transcript } : { kind: 'none' }))
       .catch((err: unknown) => done({ kind: 'error', message: errorText(err) }));
-    return () => {
-      active = false;
-    };
-  }, [meetingId, status, running]);
-  return state?.meetingId === meetingId ? state.load : { kind: 'loading' };
+  }, [meetingId, status, running, reloadCount]);
+  return [state?.meetingId === meetingId ? state.load : { kind: 'loading' }, set, reload];
 }
+
+/** Плеер встречи: элемент <audio> — у Player, управление — у всей встречи (щелчок по времени реплики). */
+export interface Playback {
+  /** Ref элемента <audio>: когда элемента нет (запись не готова, не открылась), плеер сбрасывается. */
+  ref(element: HTMLAudioElement | null): void;
+  playing: boolean;
+  /** Место в записи, секунды. */
+  position: number;
+  duration: number | null;
+  speed: number;
+  failed: boolean;
+  toggle(): void;
+  seek(seconds: number): void;
+  /** Слушать с этого места. */
+  seekAndPlay(seconds: number): void;
+  nextSpeed(): void;
+  /**
+   * Остановить и отпустить файл записи (перед удалением: иначе Windows не даст перенести папку в Корзину).
+   * Возвращает «вернуть как было» — если удалить не вышло.
+   */
+  release(): () => void;
+  /** Обработчики событий <audio>. */
+  events: {
+    onPlay(): void;
+    onPause(): void;
+    onEnded(): void;
+    onTimeUpdate(event: SyntheticEvent<HTMLAudioElement>): void;
+    onLoadedMetadata(event: SyntheticEvent<HTMLAudioElement>): void;
+    onError(): void;
+  };
+}
+
+export function usePlayback(meetingId: string, fallbackDuration: number | null): Playback {
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState<number | null>(fallbackDuration);
+  const [speed, setSpeed] = useState(1);
+  const [failed, setFailed] = useState(false);
+
+  // Другая встреча — плеер с нуля (длительность из meeting.json может уточниться во время игры — это не повод).
+  useEffect(() => {
+    setPlaying(false);
+    setPosition(0);
+    setDuration(fallbackDuration);
+    setFailed(false);
+  }, [meetingId]);
+
+  // Длительность из meeting.json могла прийти после появления плеера, а сам файл её не сообщил.
+  useEffect(() => {
+    setDuration((current) => current ?? fallbackDuration);
+  }, [fallbackDuration]);
+
+  useEffect(() => {
+    if (audio.current) audio.current.playbackRate = speed;
+  }, [speed]);
+
+  // Элемент появился или исчез (Player не показывается, пока запись не готова или не открылась) — играть нечему.
+  const ref = useCallback((element: HTMLAudioElement | null) => {
+    audio.current = element;
+    setPlaying(false);
+    setPosition(0);
+  }, []);
+
+  // AbortError — воспроизведение прервали (пауза, перемотка, удаление аудио): это не поломка записи.
+  const play = useCallback((el: HTMLAudioElement) => {
+    void el.play().catch((err: unknown) => {
+      if ((err as Error | null)?.name !== 'AbortError') setFailed(true);
+    });
+  }, []);
+  // Постоянная функция: её получает каждая реплика, и новая функция перерисовывала бы весь текст при игре.
+  const seekAndPlay = useCallback(
+    (seconds: number) => {
+      const el = audio.current;
+      if (!el) return;
+      el.currentTime = seconds;
+      setPosition(seconds);
+      if (el.paused) play(el);
+    },
+    [play],
+  );
+
+  return {
+    ref,
+    playing,
+    position,
+    duration,
+    speed,
+    failed,
+    toggle: () => {
+      const el = audio.current;
+      if (!el) return;
+      if (el.paused) play(el);
+      else el.pause();
+    },
+    seek: (seconds) => {
+      const el = audio.current;
+      if (el) el.currentTime = seconds;
+      setPosition(seconds);
+    },
+    seekAndPlay,
+    nextSpeed: () => setSpeed((s) => nextSpeed(s)),
+    release: () => {
+      const el = audio.current;
+      const src = el?.getAttribute('src');
+      if (!el || !src) return () => undefined;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+      return () => {
+        el.setAttribute('src', src);
+        el.load();
+        // Файл загружен заново — с начала.
+        setPlaying(false);
+        setPosition(0);
+      };
+    },
+    events: {
+      onPlay: () => setPlaying(true),
+      onPause: () => setPlaying(false),
+      onEnded: () => setPlaying(false),
+      onTimeUpdate: (event) => setPosition(event.currentTarget.currentTime),
+      onLoadedMetadata: (event) => {
+        if (Number.isFinite(event.currentTarget.duration)) setDuration(event.currentTarget.duration);
+        event.currentTarget.playbackRate = speed;
+      },
+      onError: () => setFailed(true),
+    },
+  };
+}
+
+/** Пауза набора перед поиском. */
+const SEARCH_DELAY_MS = 200;
+
+export type SearchState =
+  | { kind: 'idle' }
+  | { kind: 'searching'; result: SearchResult | null }
+  | { kind: 'ready'; result: SearchResult }
+  | { kind: 'error'; message: string };
+
+/**
+ * Поиск по всем встречам: после паузы набора; показывается только ответ на последний запрос. Повторяется, когда
+ * библиотека изменилась, при возврате в окно и когда изменился refreshKey (правка текста: main о ней не
+ * сообщает, если meeting.json не менялся) — найденное не устаревает.
+ */
+export function useSearch(query: string, refreshKey: number): SearchState {
+  const [state, setState] = useState<SearchState>({ kind: 'idle' });
+  const [again, setAgain] = useState(0);
+  const latest = useRef(0);
+  const active = isSearchable(query);
+
+  useEffect(() => {
+    if (!active) return;
+    const bump = () => setAgain((n) => n + 1);
+    window.addEventListener('focus', bump);
+    const unsubscribe = window.textmeet.onLibraryChanged(bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      unsubscribe();
+    };
+  }, [active]);
+
+  useEffect(() => {
+    const request = ++latest.current;
+    if (!active) {
+      setState({ kind: 'idle' });
+      return;
+    }
+    // Прежний ответ виден, пока идёт новый поиск: без мелькания «Ищем…» и подсветки при каждой набранной букве.
+    setState((current) => ({
+      kind: 'searching',
+      result: current.kind === 'ready' || current.kind === 'searching' ? current.result : null,
+    }));
+    const timer = setTimeout(() => {
+      window.textmeet
+        .search(query)
+        .then((result) => {
+          if (request === latest.current) setState({ kind: 'ready', result });
+        })
+        .catch((err: unknown) => {
+          if (request === latest.current) setState({ kind: 'error', message: errorText(err) });
+        });
+    }, SEARCH_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [query, active, again, refreshKey]);
+
+  return state;
+}
+
+/** Поиск глазами открытой встречи: слова для подсветки и реплика, к которой перешли из найденного. */
+export interface SearchView {
+  /** Слова запроса; пусто — поиска нет. */
+  words: readonly string[];
+  /**
+   * nonce — каждый переход новый: повторный щелчок по той же реплике снова к ней прокручивает. segmentId null — перешли
+   * по названию встречи: она открывается сверху (в том числе уже открытая).
+   */
+  focus: { meetingId: string; segmentId: string | null; nonce: number } | null;
+  /** Текст встречи правили — повторить поиск. */
+  refresh(): void;
+}
+
+export const SearchViewContext = createContext<SearchView>({ words: [], focus: null, refresh: () => undefined });

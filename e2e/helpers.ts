@@ -35,6 +35,8 @@ export interface LaunchedApp {
   userDataDir: string;
   homeDir: string;
   libraryDir: string;
+  /** «Корзина» программы в тестах (TEXTMEET_TEST_TRASH): удалённое переносится сюда. */
+  trashDir: string;
   close(): Promise<void>;
 }
 
@@ -175,6 +177,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   const userDataDir = join(root, 'userData');
   const homeDir = join(root, 'home');
   const libraryDir = join(root, 'library');
+  const trashDir = join(root, 'trash');
 
   let app: ElectronApplication | undefined;
   let page: Page;
@@ -191,6 +194,8 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         TEXTMEET_TEST_ASR: 'fake',
         TEXTMEET_MODELS_DIR: join(root, 'models'),
         TEXTMEET_TEST_DOWNLOAD_MS: String(options.downloadStepMs ?? 0),
+        // Удалённое — в папку теста, а не в Корзину системы (на машинах CI её может не быть).
+        TEXTMEET_TEST_TRASH: trashDir,
       },
     });
     page = await mainWindow(app);
@@ -207,6 +212,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     userDataDir,
     homeDir,
     libraryDir,
+    trashDir,
     close: async () => {
       // Если запись ещё идёт, при выходе программа спросит системным окном — отвечаем «Остановить и выйти».
       // Тест мог уже закрыть программу сам (выход из меню) — тогда закрывать нечего.

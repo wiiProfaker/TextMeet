@@ -1,18 +1,32 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AppInfo, SettingsState } from '../../shared/ipc';
 import { entryId } from '../../shared/meeting';
 import { IDLE_RECORDING_STATE } from '../../shared/recording';
+import { isSearchable, queryWords } from '../../shared/search-text';
 import { errorText } from './errors';
-import { useMeetings, useMicrophones, useRecordingState, useTranscriptionProgress } from './hooks';
+import {
+  SearchViewContext,
+  useMeetings,
+  useMicrophones,
+  useRecordingState,
+  useSearch,
+  useTranscriptionProgress,
+  type SearchView,
+} from './hooks';
 import { SettingsIcon } from './icons';
 import { LivePane } from './LivePane';
 import { MeetingList } from './MeetingList';
 import { MeetingPane } from './MeetingPane';
 import { RecordPanel } from './RecordPanel';
+import { SearchBox } from './SearchBox';
+import { SearchResults } from './SearchResults';
 import { SettingsPane } from './SettingsPane';
 import { StopDialog } from './StopDialog';
 
 type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
+
+/** Один и тот же пустой список: новый [] перерисовывал бы каждую реплику открытой встречи. */
+const NO_WORDS: readonly string[] = [];
 
 export function App() {
   const recording = useRecordingState() ?? IDLE_RECORDING_STATE;
@@ -23,6 +37,28 @@ export function App() {
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [focus, setFocus] = useState<SearchView['focus']>(null);
+  const searching = isSearchable(query);
+  const [searchStamp, setSearchStamp] = useState(0);
+  const refreshSearch = useCallback(() => setSearchStamp((n) => n + 1), []);
+  const search = useSearch(query, searchStamp);
+  // Подсветка — по запросу, ответ на который уже пришёл (после паузы набора), а не на каждую нажатую букву.
+  const searched =
+    searching && (search.kind === 'ready' || search.kind === 'searching') ? (search.result?.query ?? '') : '';
+  const searchView = useMemo<SearchView>(
+    () => ({
+      words: searched ? queryWords(searched) : NO_WORDS,
+      focus: searching ? focus : null,
+      refresh: refreshSearch,
+    }),
+    [searched, searching, focus, refreshSearch],
+  );
+  const changeQuery = (next: string) => {
+    setQuery(next);
+    // Запрос изменился — забыть реплику, к которой переходили: у нового поиска её нет.
+    setFocus(null);
+  };
 
   useEffect(() => {
     Promise.all([window.textmeet.getSettings(), window.textmeet.getAppInfo()])
@@ -53,6 +89,20 @@ export function App() {
   const selectedId = selection?.kind === 'meeting' ? selection.id : null;
   const selectedEntry = entries?.find((e) => entryId(e) === selectedId) ?? null;
 
+  /**
+   * Встречу удалили — выбрать соседнюю: ниже по списку, а если её нет — выше. Пока удаление шло, человек мог выбрать
+   * другую встречу — тогда выбор не трогаем.
+   */
+  const selectNeighbor = (id: string) => {
+    const list = entries ?? [];
+    const at = list.findIndex((e) => entryId(e) === id);
+    const next = list[at + 1] ?? list[at - 1];
+    setSelection((current) => {
+      if (current?.kind !== 'meeting' || current.id !== id) return current;
+      return next && at !== -1 ? { kind: 'meeting', id: entryId(next) } : null;
+    });
+  };
+
   let pane;
   if (selection?.kind === 'settings') {
     pane = settings ? <SettingsPane state={settings} info={info} onChange={setSettings} /> : null;
@@ -67,6 +117,7 @@ export function App() {
         entry={selectedEntry}
         progress={progress.get(entryId(selectedEntry)) ?? null}
         onError={setError}
+        onDeleted={() => selectNeighbor(entryId(selectedEntry))}
       />
     );
   } else {
@@ -81,43 +132,57 @@ export function App() {
   }
 
   return (
-    <div className="app">
-      <aside className="side" aria-label="Запись и встречи">
-        <RecordPanel state={recording} hotkey={hotkey} micLabel={micLabel} onError={setError} />
-        {error && (
-          <p role="alert" className="problem">
-            {error}
-          </p>
-        )}
-        <MeetingList
-          entries={entries}
-          error={listError}
-          recording={recording}
-          selectedId={selectedId}
-          progress={progress}
-          onSelect={(id) => setSelection({ kind: 'meeting', id })}
-        />
-        <div className="foot">
-          <button
-            type="button"
-            className="btn grow"
-            onClick={() => window.textmeet.openLibraryDir().catch((err: unknown) => setError(errorText(err)))}
-          >
-            Открыть папку библиотеки
-          </button>
-          <button
-            type="button"
-            className={`btn sq-btn${selection?.kind === 'settings' ? ' on' : ''}`}
-            aria-label="Настройки"
-            aria-pressed={selection?.kind === 'settings'}
-            onClick={() => setSelection({ kind: 'settings' })}
-          >
-            <SettingsIcon />
-          </button>
-        </div>
-      </aside>
-      {pane}
-      {recording.stopDialog && <StopDialog data={recording.stopDialog} onError={setError} />}
-    </div>
+    <SearchViewContext.Provider value={searchView}>
+      <div className="app">
+        <aside className="side" aria-label="Запись и встречи">
+          <RecordPanel state={recording} hotkey={hotkey} micLabel={micLabel} onError={setError} />
+          {error && (
+            <p role="alert" className="problem">
+              {error}
+            </p>
+          )}
+          <SearchBox value={query} onChange={changeQuery} />
+          {searching ? (
+            <SearchResults
+              state={search}
+              selected={focus ? { meetingId: focus.meetingId, segmentId: focus.segmentId } : null}
+              onOpen={(id, segmentId) => {
+                setSelection({ kind: 'meeting', id });
+                setFocus((prev) => ({ meetingId: id, segmentId, nonce: (prev?.nonce ?? 0) + 1 }));
+              }}
+            />
+          ) : (
+            <MeetingList
+              entries={entries}
+              error={listError}
+              recording={recording}
+              selectedId={selectedId}
+              progress={progress}
+              onSelect={(id) => setSelection({ kind: 'meeting', id })}
+            />
+          )}
+          <div className="foot">
+            <button
+              type="button"
+              className="btn grow"
+              onClick={() => window.textmeet.openLibraryDir().catch((err: unknown) => setError(errorText(err)))}
+            >
+              Открыть папку библиотеки
+            </button>
+            <button
+              type="button"
+              className={`btn sq-btn${selection?.kind === 'settings' ? ' on' : ''}`}
+              aria-label="Настройки"
+              aria-pressed={selection?.kind === 'settings'}
+              onClick={() => setSelection({ kind: 'settings' })}
+            >
+              <SettingsIcon />
+            </button>
+          </div>
+        </aside>
+        {pane}
+        {recording.stopDialog && <StopDialog data={recording.stopDialog} onError={setError} />}
+      </div>
+    </SearchViewContext.Provider>
   );
 }

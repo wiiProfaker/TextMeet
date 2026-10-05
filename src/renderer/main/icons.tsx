@@ -60,6 +60,52 @@ export const ChevronIcon = () => (
   </Icon>
 );
 
+export const PencilIcon = () => (
+  <Icon>
+    <path d="M4 20h4L19 9l-4-4L4 16z" />
+  </Icon>
+);
+
+export const MoreIcon = () => (
+  <Icon filled>
+    <circle cx="5" cy="12" r="1.7" />
+    <circle cx="12" cy="12" r="1.7" />
+    <circle cx="19" cy="12" r="1.7" />
+  </Icon>
+);
+
+export const MuteIcon = () => (
+  <Icon>
+    <path d="M4 9v6h4l5 4V5L8 9z" />
+    <path d="M17 9l4 6M21 9l-4 6" />
+  </Icon>
+);
+
+export const TrashIcon = () => (
+  <Icon>
+    <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />
+  </Icon>
+);
+
+export const SearchIcon = () => (
+  <Icon>
+    <circle cx="11" cy="11" r="7" />
+    <path d="M20 20l-4-4" />
+  </Icon>
+);
+
+export const CloseIcon = () => (
+  <Icon>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </Icon>
+);
+
+export const PlusIcon = () => (
+  <Icon>
+    <path d="M12 5v14M5 12h14" />
+  </Icon>
+);
+
 export const PlayIcon = () => (
   <Icon filled>
     <path d="M8 5l11 7-11 7z" />

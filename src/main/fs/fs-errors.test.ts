@@ -29,4 +29,14 @@ describe('humanFsError', () => {
     expect(err.message).toBe('Не удалось открыть папку: нет прав на эту папку');
     expect(err.cause).toBe(original);
   });
+
+  it('shows no system text or path for an unknown code; the full error stays in the cause', () => {
+    const original = Object.assign(new Error("UNKNOWN: unknown error, open 'C:/Users/Ирина/Library/meeting.json'"), {
+      code: 'UNKNOWN',
+    });
+    const err = humanFsError('Не удалось сохранить правку', original);
+    expect(err.message).toBe('Не удалось сохранить правку: файл занят или недоступен');
+    expect(err.message).not.toMatch(/UNKNOWN|Users|meeting\.json/);
+    expect(err.cause).toBe(original);
+  });
 });

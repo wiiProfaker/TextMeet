@@ -2,6 +2,7 @@
 // прогресс, сторож зависания, отмена, продолжение после запуска. Electron сюда не подключается — процесс внедряется.
 import { asrModel, DEFAULT_ASR_MODEL, isAsrModelId, type AsrModelId } from '../../shared/asr-models';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
+import { ME } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { updateMeeting } from '../library/library';
 import { writeTranscript } from '../library/transcript-store';
@@ -13,6 +14,10 @@ import { buildPipelineInput } from './job-input';
 import type { PipelineInput, PipelineResult } from './pipeline';
 import { interpolateDiarize, type DiarizeClock } from './progress';
 import { WorkerToMainSchema, type MainToWorker, type TranscribeCommand } from './protocol';
+
+/** Из имён спикеров остаётся только имя владельца. */
+const ownNameOnly = (names: Readonly<Record<string, string>>): Record<string, string> =>
+  names[ME] === undefined ? {} : { [ME]: names[ME] };
 
 /** Процесс расшифровки глазами очереди (в программе — utilityProcess, в тестах — подделка). */
 export interface WorkerHandle {
@@ -98,6 +103,10 @@ export class TranscriptionQueue {
   private active: Job | null = null;
   /** Задача взята из очереди, а meeting.json ещё не прочитан: она прочитает и то, что запишут до этого. */
   private starting: Job | null = null;
+  /** Задача, которая сейчас выполняется (active), закончилась — для отмены, которой надо дождаться. */
+  private activeDone: Promise<void> | null = null;
+  /** Задачу отменяют (встречу удаляют), пока она ещё готовится: она не начнёт работу. */
+  private cancelling: Job | null = null;
   private pendingEnqueues = 0;
   private worker: WorkerHandle | null = null;
   /** Модель последней задачи этого процесса: он держит её в памяти (Whisper — около 1 ГБ). */
@@ -123,6 +132,7 @@ export class TranscriptionQueue {
     try {
       await updateMeeting(libraryDir, meetingId, (m) => {
         if (m.status === 'recording') throw new Error(transcriptionTexts.stillRecording);
+        if (m.audioDeleted) throw new Error(transcriptionTexts.audioDeleted);
         return {
           ...m,
           status: 'queued',
@@ -151,6 +161,30 @@ export class TranscriptionQueue {
       // По времени создания: createdAt точнее id (в id — минуты местного времени), id — на случай совпадения.
       .sort((a, b) => rank(a) - rank(b) || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
     for (const meeting of meetings) this.add({ libraryDir, meetingId: meeting.id });
+  }
+
+  /**
+   * Встречу удаляют: снять её из очереди; если она расшифровывается — прервать (процесс расшифровки закрывается) и
+   * дождаться, пока задача отпустит файлы встречи. Статус в meeting.json не меняется — папку всё равно удалят.
+   */
+  async cancel(libraryDir: string, meetingId: string): Promise<void> {
+    const job: Job = { libraryDir, meetingId };
+    for (let i = this.queue.length - 1; i >= 0; i--) {
+      if (sameJob(this.queue[i]!, job)) this.queue.splice(i, 1);
+    }
+    const active = this.active;
+    if (active && sameJob(active, job)) {
+      this.cancelling = active;
+      const current = this.current;
+      if (current && sameJob(current.job, job)) {
+        current.cancelled = true;
+        current.abort.abort();
+        if (current.settle) this.killWorker(current.worker);
+      }
+      await this.activeDone;
+      if (this.cancelling === active) this.cancelling = null;
+    }
+    this.emitProgress(true);
   }
 
   /** Началась или закончилась запись: процессу — новое число потоков. */
@@ -225,11 +259,17 @@ export class TranscriptionQueue {
       this.active = job;
       this.starting = job;
       try {
-        await this.runJob(job);
+        const run = this.runJob(job);
+        this.activeDone = run.then(
+          () => undefined,
+          () => undefined,
+        );
+        await run;
       } catch (err) {
         this.deps.logger.error(`Очередь расшифровки: сбой задачи ${job.meetingId}`, err);
       } finally {
         this.active = null;
+        this.activeDone = null;
         this.starting = null;
       }
     }
@@ -256,7 +296,7 @@ export class TranscriptionQueue {
       worker: null,
       progress: { meetingId, stage: 'prepare', fraction: 0, download: null },
       clock: null,
-      cancelled: this.disposed,
+      cancelled: this.disposed || this.cancelling === job,
       abort: new AbortController(),
       settle: null,
       rearm: null,
@@ -349,8 +389,14 @@ export class TranscriptionQueue {
         segments: outcome.result.segments.map((s) => ({ ...s, edited: false })),
       });
       const done = await updateMeeting(libraryDir, meetingId, (m) =>
-        m.status === 'transcribing' ? { ...m, status: 'done', model, errorMessage: null } : m,
+        // «Спикер 1» новой расшифровки — не обязательно тот же человек: имена собеседников сбрасываются, имя «Я» —
+        // это всегда владелец — остаётся.
+        m.status === 'transcribing'
+          ? { ...m, status: 'done', model, errorMessage: null, speakerNames: ownNameOnly(m.speakerNames) }
+          : m,
       );
+      // Встречу удаляют: результат записан в папку, которая уходит в Корзину, — сообщать не о чем.
+      if (current.cancelled) return null;
       if (done.status !== 'done') {
         // Встречу поставили заново, пока результат сохранялся: её расшифруют ещё раз — сообщать о готовности рано.
         this.deps.logger.info(`Расшифровка ${meetingId} сохранена, но встреча уже снова в очереди`);

@@ -3,7 +3,7 @@
 // проверка типов. preload работает в песочнице и не может подключать zod и другие пакеты:
 // здесь только константы и типы, из других файлов — только `import type`.
 import type { AsrModelId } from './asr-models';
-import type { MeetingListEntry } from './meeting';
+import type { Meeting, MeetingListEntry } from './meeting';
 import type {
   Peaks,
   RecorderChunk,
@@ -18,8 +18,10 @@ import type {
   StopDialogAnswer,
   SystemSettingsKind,
 } from './recording';
+import type { SearchResult } from './search';
 import type { Settings } from './settings';
-import type { Transcript } from './transcript';
+import type { SpeakerId, Transcript } from './transcript';
+import type { TranscriptEdit } from './transcript-edit';
 import type { ModelGroupId, ModelsState, TranscribeRequest, TranscriptionProgress } from './transcription';
 
 export const IPC = {
@@ -34,6 +36,13 @@ export const IPC = {
   openLibraryDir: 'library:open-dir',
   openMeetingDir: 'library:open-meeting-dir',
   listMeetings: 'library:list',
+  renameMeeting: 'library:rename-meeting',
+  renameSpeaker: 'library:rename-speaker',
+  editTranscript: 'library:edit-transcript',
+  search: 'library:search',
+  audioSize: 'library:audio-size',
+  deleteAudio: 'library:delete-audio',
+  deleteMeeting: 'library:delete-meeting',
   getAppInfo: 'app:info',
   getRecordingState: 'recording:get-state',
   toggleRecording: 'recording:toggle',
@@ -102,6 +111,30 @@ export interface AppInfo {
   recorderReady: boolean;
 }
 
+export interface RenameMeetingRequest {
+  meetingId: string;
+  title: string;
+}
+
+export interface RenameSpeakerRequest {
+  meetingId: string;
+  speakerId: SpeakerId;
+  /** null или пусто — вернуть «Спикер N» / «Я». */
+  name: string | null;
+}
+
+export interface EditTranscriptRequest {
+  meetingId: string;
+  edit: TranscriptEdit;
+  /** createdAt того текста, к которому сделана правка: текст в файле другой — правка отклоняется. */
+  transcriptVersion: string;
+}
+
+export interface EditedTranscript {
+  meeting: Meeting;
+  transcript: Transcript;
+}
+
 /** Запросы главного окна: канал → аргумент (void — без аргумента) → ответ. */
 export interface MainInvokeContract {
   [IPC.getSettings]: { arg: void; result: SettingsState };
@@ -114,6 +147,13 @@ export interface MainInvokeContract {
   [IPC.openLibraryDir]: { arg: void; result: void };
   [IPC.openMeetingDir]: { arg: string; result: void };
   [IPC.listMeetings]: { arg: void; result: MeetingListEntry[] };
+  [IPC.renameMeeting]: { arg: RenameMeetingRequest; result: Meeting };
+  [IPC.renameSpeaker]: { arg: RenameSpeakerRequest; result: Meeting };
+  [IPC.editTranscript]: { arg: EditTranscriptRequest; result: EditedTranscript };
+  [IPC.search]: { arg: string; result: SearchResult };
+  [IPC.audioSize]: { arg: string; result: number };
+  [IPC.deleteAudio]: { arg: string; result: void };
+  [IPC.deleteMeeting]: { arg: string; result: void };
   [IPC.getAppInfo]: { arg: void; result: AppInfo };
   [IPC.getRecordingState]: { arg: void; result: RecordingState };
   [IPC.toggleRecording]: { arg: void; result: void };
@@ -182,6 +222,18 @@ export interface TextMeetApi {
   openLibraryDir(): Promise<void>;
   openMeetingDir(id: string): Promise<void>;
   listMeetings(): Promise<MeetingListEntry[]>;
+  renameMeeting(request: RenameMeetingRequest): Promise<Meeting>;
+  renameSpeaker(request: RenameSpeakerRequest): Promise<Meeting>;
+  /** Правка текста встречи; ответ — встреча и сохранённый текст. */
+  editTranscript(request: EditTranscriptRequest): Promise<EditedTranscript>;
+  /** Поиск по всем встречам. */
+  search(query: string): Promise<SearchResult>;
+  /** Сколько байт занимает аудио встречи (для окна «Удалить аудио?»). */
+  audioSize(meetingId: string): Promise<number>;
+  /** «Удалить аудио»: папка audio/ — в Корзину, текст остаётся. */
+  deleteAudio(meetingId: string): Promise<void>;
+  /** «Удалить встречу»: папка встречи — в Корзину (и папка, которую не удалось прочитать). */
+  deleteMeeting(meetingId: string): Promise<void>;
   getAppInfo(): Promise<AppInfo>;
   getRecordingState(): Promise<RecordingState>;
   toggleRecording(): Promise<void>;

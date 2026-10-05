@@ -1,5 +1,6 @@
 import type { LaunchAtLoginNotice } from '../../shared/ipc';
 import { entryId, type Meeting, type MeetingListEntry } from '../../shared/meeting';
+import { formatBytes, formatDurationShort } from '../../shared/format';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { percent } from './transcription-format';
 
@@ -104,6 +105,22 @@ export function dayLabel(date: Date, now: Date): string {
   return date.getFullYear() === now.getFullYear() ? base : `${base} ${date.getFullYear()}`;
 }
 
+/** Встреча в найденном: «вчера, 16:20 · 2 совпадения»; совпало только название — без числа. */
+export function searchMeetingMeta(createdAt: string, total: number, now: Date): string {
+  const date = new Date(createdAt);
+  const day = dayLabel(date, now);
+  const when = `${day === 'Сегодня' || day === 'Вчера' ? day.toLowerCase() : day}, ${formatTimeOfDay(createdAt)}`;
+  if (total === 0) return when;
+  return `${when} · ${total} ${pluralize(total, 'совпадение', 'совпадения', 'совпадений')}`;
+}
+
+/** «Найдено в 1 встрече», «Найдено в 3 встречах»; truncated — показаны не все. */
+export function searchFoundText(meetings: number, truncated: boolean): string {
+  if (meetings === 0) return 'Ничего не найдено';
+  const place = meetings % 10 === 1 && meetings % 100 !== 11 ? 'встрече' : 'встречах';
+  return `Найдено в ${truncated ? 'первых ' : ''}${meetings} ${place}`;
+}
+
 export interface DayGroup {
   label: string;
   entries: MeetingListEntry[];
@@ -157,6 +174,16 @@ export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress):
     case 'done':
       return null;
   }
+}
+
+/** Текст окна «Удалить аудио?»: «Запись (32 мин, 15 МБ) переместится в Корзину…»; размер — когда узнали. */
+export function deleteAudioText(durationSec: number | null, bytes: number | null): string {
+  const parts: string[] = [];
+  if (durationSec !== null && durationSec >= 0) parts.push(formatDurationShort(durationSec));
+  // 0 — папки с записью нет или она пуста: размер не называем.
+  if (bytes !== null && bytes > 0) parts.push(bytes < 1024 * 1024 ? 'меньше 1 МБ' : formatBytes(bytes));
+  const what = parts.length > 0 ? `Запись (${parts.join(', ')})` : 'Запись';
+  return `${what} переместится в Корзину. Текст встречи останется, но слушать запись и расшифровывать её заново будет нельзя.`;
 }
 
 /** Убирает приставку «По умолчанию — » / «Default - » из названия устройства. */

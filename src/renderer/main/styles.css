@@ -24,6 +24,7 @@
   --sp4: #7a6420;
   --warn: #855700;
   --warn-soft: #f4e6c4;
+  --mark: #eacb62;
   --shade: rgba(38, 34, 27, 0.42);
   --f-ui: 'Golos Text', 'Segoe UI', -apple-system, sans-serif;
   --f-text: 'Literata', Georgia, serif;
@@ -57,6 +58,7 @@
     --sp4: #e0c477;
     --warn: #e8b04b;
     --warn-soft: #3b2f17;
+    --mark: #7a6420;
     --shade: rgba(0, 0, 0, 0.55);
   }
 }
@@ -930,6 +932,10 @@ kbd.k {
   gap: 14px;
 }
 
+.dlg:focus {
+  outline: none;
+}
+
 .dlg h2 {
   margin: 0;
   font-family: var(--f-text);
@@ -1049,6 +1055,43 @@ kbd.k {
   font-size: 12.5px;
 }
 
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:hover {
+  border-color: var(--muted);
+}
+
+/* Безымянный собеседник — пунктиром: его стоит назвать. */
+.chip.un {
+  border-style: dashed;
+}
+
+.chip .ic {
+  width: 13px;
+  height: 13px;
+  color: var(--muted);
+}
+
+.chip.edit {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  padding-right: 4px;
+}
+
+.chip.edit input {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  width: 110px;
+  outline: none;
+}
+
+.chip.edit input::placeholder {
+  color: var(--muted);
+}
+
 .pip {
   width: 8px;
   height: 8px;
@@ -1102,6 +1145,175 @@ kbd.k {
   font-variant-numeric: tabular-nums;
 }
 
+/* Время реплики — кнопка «Слушать с …»; при наведении — значок ▶. */
+.tbtn {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 4px;
+  align-self: start;
+  background: none;
+  border: 0;
+  padding: 2px 0 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tbtn .ic {
+  width: 9px;
+  height: 9px;
+  margin-top: 3px;
+  opacity: 0;
+}
+
+.tbtn:hover,
+.tbtn:focus-visible {
+  color: var(--accent);
+}
+
+.tbtn:hover .ic,
+.tbtn:focus-visible .ic {
+  opacity: 1;
+}
+
+/* Реплика с открытым меню «Кто говорит»: без экономии отрисовки (она обрезает всё, что выходит за реплику) и
+   поверх следующих реплик. */
+.row.menu-open {
+  content-visibility: visible;
+  position: relative;
+  z-index: 3;
+}
+
+/* Звучащая реплика — «маркер», как на листе 9 макета. */
+.row.now {
+  background: var(--now);
+}
+
+.row.now .tbtn {
+  color: var(--text);
+}
+
+/* Имя над репликой — кнопка меню «Кто говорит в этой реплике?». */
+.who-wrap {
+  position: relative;
+}
+
+.whob {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.whob .ic {
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+}
+
+.whob:hover .ic,
+.whob:focus-visible .ic,
+.whob[aria-expanded='true'] .ic {
+  opacity: 0.8;
+}
+
+.menu {
+  position: absolute;
+  z-index: 4;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  width: 260px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+  display: flex;
+  flex-direction: column;
+  font-size: 13px;
+}
+
+.mhead {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mi {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mi:hover,
+.mi:focus-visible {
+  background: var(--sel);
+  outline: none;
+}
+
+.mi[aria-checked='true'] {
+  font-weight: 600;
+}
+
+.mi-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mi .ic {
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+}
+
+.mi.danger {
+  color: var(--rec);
+}
+
+.mi.danger .ic {
+  color: var(--rec);
+}
+
+.mi:disabled {
+  opacity: 0.5;
+  cursor: default;
+  background: transparent;
+}
+
+/* Меню «…» в заголовке встречи — справа под кнопкой. */
+.more-wrap {
+  position: relative;
+}
+
+.menu.right {
+  left: auto;
+  right: 0;
+}
+
+.sep {
+  height: 1px;
+  background: var(--line);
+  margin: 5px 4px;
+}
+
+.dlg .note.body {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
 .who {
   font-size: 12.5px;
   font-weight: 600;
@@ -1113,6 +1325,120 @@ kbd.k {
   font-size: 16.5px;
   line-height: 1.55;
   user-select: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Щелчок по тексту — правка (лист 9 макета). */
+.say.editable {
+  cursor: text;
+  border-radius: 4px;
+  margin: -2px -6px;
+  padding: 2px 6px;
+}
+
+.say.editable:hover {
+  background: color-mix(in srgb, var(--sel) 45%, transparent);
+}
+
+.say.editable:focus-visible {
+  outline: 2px solid var(--accent);
+}
+
+.say-edit {
+  display: block;
+  width: calc(100% + 22px);
+  margin: -3px -11px 0;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  border-radius: var(--r);
+  background: var(--surface);
+  padding: 2px 10px;
+  font-family: var(--f-text);
+  font-size: 16.5px;
+  line-height: 1.55;
+  resize: none;
+  outline: none;
+  field-sizing: content;
+  min-height: 2.6em;
+}
+
+.edit-hint {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+/* «Реплика удалена · Вернуть» — внизу текста, пока её можно вернуть. Обёртка есть всегда: читалка объявляет появившийся текст. */
+.undo-live {
+  position: sticky;
+  bottom: 0;
+  align-self: flex-start;
+}
+
+.undo {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 9px 14px;
+  background: var(--btn);
+  color: var(--btn-text);
+  border-radius: var(--r);
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.undo .lnk {
+  color: var(--btn-text);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
+.undo-err {
+  color: var(--btn-text);
+  opacity: 0.8;
+}
+
+/* Название встречи: щелчок — переименовать. */
+.title-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+
+.title-btn .ic {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.title-btn:hover .ic,
+.title-btn:focus-visible .ic {
+  opacity: 1;
+}
+
+.title-edit {
+  width: 100%;
+  font: inherit;
+  letter-spacing: inherit;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+  border-radius: var(--r);
+  background: var(--surface);
+  padding: 0 8px;
+  margin: 0 -9px;
+  outline: none;
 }
 
 /* ---- Ход расшифровки ---- */
@@ -1381,4 +1707,143 @@ kbd.k {
 .lnk:disabled {
   color: var(--muted);
   cursor: default;
+}
+
+/* ---- Поиск по всем встречам (лист 10 макета) ---- */
+.search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px 0 10px;
+  border-radius: var(--r);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  flex: none;
+}
+
+.search:focus-within,
+.search.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  outline: none;
+}
+
+.search input::placeholder {
+  color: var(--muted);
+}
+
+.search .clr {
+  display: flex;
+  border: 0;
+  background: none;
+  padding: 3px;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.search .clr:hover {
+  color: var(--text);
+}
+
+mark {
+  background: var(--mark);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.found-n {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 10px 6px;
+}
+
+.rg {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: 8px;
+}
+
+.rg-h,
+.hit,
+.more {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.rg-h {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px 4px;
+}
+
+.rg-h b {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.rg-h span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.hit {
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.rg-h:hover,
+.hit:hover {
+  background: color-mix(in srgb, var(--sel) 55%, transparent);
+}
+
+.hit[aria-current='true'] {
+  background: var(--sel);
+}
+
+.hit .ht {
+  font-family: var(--f-text);
+  font-size: 11.5px;
+  color: var(--muted);
+  padding-top: 1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.hit .hw {
+  font-weight: 600;
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.more {
+  padding: 2px 10px 2px 54px;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+/* Реплика, к которой перешли из найденного; раскладывается сразу — к ней прокручивают. */
+.row.found {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  content-visibility: visible;
 }

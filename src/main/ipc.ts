@@ -20,10 +20,14 @@ import {
 } from '../shared/ipc';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
 import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
+import { SpeakerIdSchema } from '../shared/transcript';
 import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import { listMeetings, meetingDir } from './library/library';
+import { audioSize, deleteAudio, deleteMeeting, type DeleteDeps } from './library/meeting-delete';
+import { editTranscript, renameMeeting, renameSpeaker, TranscriptEditSchema } from './library/meeting-edits';
+import type { SearchIndex } from './library/search-index';
 import { readTranscript } from './library/transcript-store';
 import type { Logger } from './logger';
 import type { ModelStore } from './models/model-manager';
@@ -50,6 +54,10 @@ export interface IpcDeps {
   onRecorderReady(): void;
   /** Горячая клавиша сменилась — обновить подсказку в меню трея. */
   hotkeyChanged(): void;
+  /** Встреча изменилась — окно перечитает список встреч. */
+  libraryChanged(): void;
+  search: Pick<SearchIndex, 'refresh' | 'invalidate' | 'remove' | 'search'>;
+  deletion: DeleteDeps;
   transcription: {
     enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null, model?: AsrModelId): Promise<void>;
     progress(): TranscriptionProgress[];
@@ -82,6 +90,18 @@ const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запи
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
 const MODELS_DOWNLOADING = 'Модели нельзя удалить, пока скачивается модель.';
+
+const RenameMeetingSchema = z.object({ meetingId: MeetingIdSchema, title: z.string().max(200) });
+const RenameSpeakerSchema = z.object({
+  meetingId: MeetingIdSchema,
+  speakerId: SpeakerIdSchema,
+  name: z.string().max(100).nullable(),
+});
+const EditTranscriptSchema = z.object({
+  meetingId: MeetingIdSchema,
+  edit: TranscriptEditSchema,
+  transcriptVersion: z.iso.datetime(),
+});
 
 const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
 const TranscribeRequestSchema = z.object({
@@ -243,9 +263,86 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.openMeetingDir, (arg) => openMeetingFolder(meetingDir(deps.libraryDir(), MeetingIdSchema.parse(arg))));
 
+  /** Системная ошибка файла (EACCES, ENOSPC…) — понятной причиной, без путей; остальные тексты уже для людей. */
+  const forPeople = (action: string, err: unknown): Error =>
+    (err as NodeJS.ErrnoException | null)?.code ? humanFsError(action, err) : (err as Error);
+  const shown =
+    <T>(action: string, work: () => Promise<T>) =>
+    (): Promise<T> =>
+      work().catch((err: unknown) => {
+        throw forPeople(action, err);
+      });
+
+  /** Встречу поменяла программа: поиск перечитает её, даже если время изменения файла то же. */
+  const searchChanged = (meetingId: string): void => {
+    deps.search.invalidate(meetingId);
+    deps.search.refresh().catch((err: unknown) => deps.logger.warn('Поиск не обновился', err));
+  };
+
   handle(IPC.listMeetings, () => {
     const libraryDir = deps.libraryDir();
+    // Окно перечитывает список при каждом изменении и при возврате фокуса — заодно поиск подхватывает
+    // изменённые и пришедшие через OneDrive встречи.
+    deps.search.refresh().catch((err: unknown) => deps.logger.warn('Поиск не обновился', err));
     return listMeetings(libraryDir, (id) => deps.mixFailed(libraryDir, id));
+  });
+
+  handle(IPC.renameMeeting, async (arg) => {
+    const request = RenameMeetingSchema.parse(arg);
+    const meeting = await shown('Не удалось переименовать встречу', () =>
+      renameMeeting(deps.libraryDir(), request.meetingId, request.title),
+    )();
+    searchChanged(request.meetingId);
+    deps.libraryChanged();
+    return meeting;
+  });
+
+  handle(IPC.renameSpeaker, async (arg) => {
+    const request = RenameSpeakerSchema.parse(arg);
+    const meeting = await shown('Не удалось переименовать спикера', () =>
+      renameSpeaker(deps.libraryDir(), request.meetingId, request.speakerId, request.name),
+    )();
+    searchChanged(request.meetingId);
+    deps.libraryChanged();
+    return meeting;
+  });
+
+  handle(IPC.editTranscript, async (arg) => {
+    const request = EditTranscriptSchema.parse(arg);
+    const result = await shown('Не удалось сохранить правку', () =>
+      editTranscript(deps.libraryDir(), request.meetingId, request.edit, request.transcriptVersion, new Date()),
+    )();
+    searchChanged(request.meetingId);
+    if (result.meetingChanged) deps.libraryChanged();
+    return { meeting: result.meeting, transcript: result.transcript };
+  });
+
+  handle(IPC.search, (arg) => deps.search.search(z.string().max(500).parse(arg)));
+
+  handle(IPC.audioSize, (arg) => audioSize(deps.libraryDir(), MeetingIdSchema.parse(arg)));
+
+  handle(IPC.deleteAudio, async (arg) => {
+    const id = MeetingIdSchema.parse(arg);
+    try {
+      await shown('Не удалось удалить аудио', () => deleteAudio(deps.deletion, id))();
+    } finally {
+      // И при сбое: аудио могло уйти в Корзину, а запись о встрече — не обновиться.
+      deps.libraryChanged();
+    }
+  });
+
+  // Имя папки, а не только прочитанная встреча: удалить можно и папку, которую не удалось прочитать.
+  handle(IPC.deleteMeeting, async (arg) => {
+    const id = MeetingIdSchema.parse(arg);
+    try {
+      await shown('Не удалось удалить встречу', () => deleteMeeting(deps.deletion, id))();
+    } catch (err) {
+      // Не вышло — отменённая расшифровка и сведение поставлены обратно: состояние встречи изменилось.
+      deps.libraryChanged();
+      throw err;
+    }
+    deps.search.remove(id);
+    deps.libraryChanged();
   });
 
   handle(IPC.getAppInfo, () => deps.appInfo());

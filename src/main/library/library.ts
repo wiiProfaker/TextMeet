@@ -12,6 +12,7 @@ import {
 import { MIX_FILE } from '../../shared/recording';
 import { writeJsonAtomic } from '../fs/atomic-write';
 import { readJsonFile } from '../fs/read-json';
+import { withFileLock } from './file-lock';
 import { defaultMeetingTitle, makeMeetingId, randomMeetingSuffix } from './naming';
 
 export const MEETING_FILE = 'meeting.json';
@@ -93,29 +94,20 @@ export async function saveMeeting(libraryDir: string, meeting: Meeting): Promise
   await writeJsonAtomic(join(meetingDir(libraryDir, valid.id), MEETING_FILE), valid);
 }
 
-// Одну встречу могут менять почти одновременно (конец записи, сведение, ответ в окне «Запись остановлена»):
-// изменения одной встречи выполняются строго по очереди, чтобы ни одно не потерялось.
-const updateQueues = new Map<string, Promise<unknown>>();
-
-/** Прочитать → изменить → записать; незнакомые поля meeting.json сохраняются. */
+/**
+ * Прочитать → изменить → записать; незнакомые поля meeting.json сохраняются. Одну встречу могут менять почти
+ * одновременно (конец записи, сведение, ответ в окне «Запись остановлена», правки) — изменения идут по очереди.
+ */
 export function updateMeeting(
   libraryDir: string,
   id: string,
   change: (meeting: Meeting) => Meeting,
 ): Promise<Meeting> {
-  const key = meetingDir(libraryDir, id);
-  const previous = updateQueues.get(key) ?? Promise.resolve();
-  const run = previous.then(async () => {
+  return withFileLock(join(meetingDir(libraryDir, id), MEETING_FILE), async () => {
     const next = change(await readMeeting(libraryDir, id));
     await saveMeeting(libraryDir, next);
     return MeetingSchema.parse(next);
   });
-  const settled = run.catch(() => undefined);
-  updateQueues.set(key, settled);
-  void settled.then(() => {
-    if (updateQueues.get(key) === settled) updateQueues.delete(key);
-  });
-  return run;
 }
 
 /**

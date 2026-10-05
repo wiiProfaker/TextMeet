@@ -19,6 +19,8 @@ export function StopDialog({ data, onError }: { data: StopDialogData; onError(me
     setTitle(data.title);
     setParticipants(EMPTY_CHOICE);
     setError(null);
+    // Следующее окно из очереди приходит в тот же компонент — после «Расшифровать» кнопки не должны остаться выключенными.
+    setSaving(false);
     dialog.current?.focus();
   }, [data.meetingId, data.title]);
 

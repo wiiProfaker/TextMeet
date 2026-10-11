@@ -59,6 +59,17 @@ describe('createMeeting', () => {
     expect(meeting.title).toBe('Созвон');
   });
 
+  it('keeps the duration and the name of the source file of a meeting from a file', async () => {
+    const meeting = await createMeeting(tempLibrary(), {
+      source: 'import',
+      status: 'importing',
+      now: at,
+      durationSec: 2832.4,
+      sourceFileName: 'Созвон с Ириной.mp4',
+    });
+    expect(meeting).toMatchObject({ durationSec: 2832.4, sourceFileName: 'Созвон с Ириной.mp4', status: 'importing' });
+  });
+
   it('picks another suffix when the folder already exists', async () => {
     const lib = tempLibrary();
     mkdirSync(join(lib, '2026-09-25_1430_aaaaaa'), { recursive: true });

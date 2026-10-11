@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pickRecordedAt, titleFromFileName } from './naming';
+import { fitLength, pickRecordedAt, titleFromFileName } from './naming';
 
 const NOW = new Date('2026-10-05T12:00:00.000Z');
 const MODIFIED = new Date('2026-10-04T15:00:00.000Z');
@@ -46,6 +46,15 @@ describe('titleFromFileName', () => {
   });
 
   it('keeps at most 200 characters without cutting a letter in half', () => {
-    expect(Array.from(titleFromFileName(`${'😀'.repeat(250)}.mp3`, at))).toHaveLength(200);
+    expect(titleFromFileName(`${'я'.repeat(250)}.mp3`, at)).toBe('я'.repeat(200));
+    expect(titleFromFileName(`${'😀'.repeat(250)}.mp3`, at)).toBe('😀'.repeat(100));
+  });
+});
+
+describe('fitLength', () => {
+  it('cuts between characters', () => {
+    expect(fitLength('аб😀в', 3)).toBe('аб');
+    expect(fitLength('аб😀в', 4)).toBe('аб😀');
+    expect(fitLength('аб', 10)).toBe('аб');
   });
 });

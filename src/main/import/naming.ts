@@ -5,7 +5,8 @@ import { defaultMeetingTitle } from '../library/naming';
 const EARLIEST = Date.UTC(2000, 0, 1);
 /** Часы компьютера или телефона могут немного спешить. */
 const FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
-const MAX_TITLE_CHARS = 200;
+/** Как в проверке meeting.json. */
+const MAX_TITLE_LENGTH = 200;
 
 const plausible = (time: number, now: Date): boolean =>
   Number.isFinite(time) && time >= EARLIEST && time <= now.getTime() + FUTURE_SLACK_MS;
@@ -21,10 +22,21 @@ export function pickRecordedAt(creationTime: string | null, modifiedAt: Date | n
   return new Date(now.getTime());
 }
 
+/**
+ * Начало текста не длиннее max (длина — как её считают JavaScript и проверка meeting.json: в UTF-16). Режется между
+ * символами: эмодзи не разрывается пополам.
+ */
+export function fitLength(text: string, max: number): string {
+  let out = '';
+  for (const char of text) {
+    if (out.length + char.length > max) break;
+    out += char;
+  }
+  return out;
+}
+
 /** «Созвон с Ириной.mp4» → «Созвон с Ириной»; пустое — «Встреча ДД.ММ.ГГГГ ЧЧ:ММ» по дате записи. */
 export function titleFromFileName(fileName: string, recordedAt: Date): string {
-  const base = fileName.replace(/\.[^.]*$/, '').trim();
-  // По символам, а не по UTF-16: эмодзи не режется пополам.
-  const title = Array.from(base).slice(0, MAX_TITLE_CHARS).join('').trim();
+  const title = fitLength(fileName.replace(/\.[^.]*$/, '').trim(), MAX_TITLE_LENGTH).trim();
   return title === '' ? defaultMeetingTitle(recordedAt) : title;
 }

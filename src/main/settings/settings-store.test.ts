@@ -68,6 +68,18 @@ describe('createSettingsStore', () => {
     });
   });
 
+  it('settled() waits for the updates already started, failed ones included', async () => {
+    const file = join(tempDir(), 'settings.json');
+    const store = await createSettingsStore(file, fakeLogger());
+    const ok = store.update({ aiPrompt: 'Свой запрос' });
+    const bad = store.update({ libraryDir: '' });
+    await store.settled();
+    expect(store.get().aiPrompt).toBe('Свой запрос');
+    await expect(ok).resolves.toMatchObject({ aiPrompt: 'Свой запрос' });
+    await expect(bad).rejects.toThrow();
+    await expect(store.settled()).resolves.toBeUndefined();
+  });
+
   it('rejects invalid values and keeps the old ones', async () => {
     const file = join(tempDir(), 'settings.json');
     const store = await createSettingsStore(file, fakeLogger());

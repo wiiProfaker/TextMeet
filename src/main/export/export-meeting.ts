@@ -24,8 +24,11 @@ export interface ExportDeps {
   chooseSavePath(defaultPath: string, format: ExportFormat): Promise<string | null>;
   /** Обычный и (если есть) оформленный текст — в буфер обмена одной записью. */
   writeClipboard(data: { text: string; html?: string }): Promise<void>;
-  /** «Запрос для ИИ» из настроек: null — стандартный, '' — без запроса. */
-  aiPrompt(): string | null;
+  /**
+   * «Запрос для ИИ» из настроек (null — стандартный, '' — без запроса) — после уже начатых сохранений настроек:
+   * запрос, набранный перед уходом из настроек, успевает попасть в копию.
+   */
+  aiPrompt(): Promise<string | null>;
   /** Папка последнего сохранения (настройки); null — ещё не сохраняли. */
   exportDir(): string | null;
   rememberExportDir(dir: string): Promise<unknown>;
@@ -58,7 +61,8 @@ export async function copyMeeting(deps: ExportDeps, meetingId: string): Promise<
 /** «Скопировать для ИИ»: запрос и текст встречи — только простым текстом (чаты вставляют его без лишнего оформления). */
 export async function copyForAi(deps: ExportDeps, meetingId: string): Promise<void> {
   const doc = await loadDoc(deps.libraryDir(), meetingId);
-  await deps.writeClipboard({ text: withAiPrompt(resolveAiPrompt(deps.aiPrompt()), toPlainText(doc)) });
+  const prompt = resolveAiPrompt(await deps.aiPrompt());
+  await deps.writeClipboard({ text: withAiPrompt(prompt, toPlainText(doc)) });
 }
 
 async function fileData(doc: ExportDoc, format: ExportFormat, platform: string): Promise<Uint8Array | string> {

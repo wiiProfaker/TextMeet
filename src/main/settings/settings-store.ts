@@ -10,6 +10,8 @@ export interface SettingsStore {
   get(): Settings;
   /** Проверяет, сохраняет на диск и только потом меняет значение в памяти. */
   update(patch: SettingsUpdate): Promise<Settings>;
+  /** Дождаться уже начатых изменений (удачных и нет): после этого get() видит их результат. */
+  settled(): Promise<void>;
 }
 
 /** Нет файла — настройки по умолчанию. Файл повреждён — откладываем его в сторону и тоже берём умолчания. */
@@ -43,5 +45,6 @@ export async function createSettingsStore(file: string, logger: Logger): Promise
       queue = run.catch(() => undefined);
       return run;
     },
+    settled: () => queue.then(() => undefined),
   };
 }

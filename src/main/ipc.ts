@@ -99,6 +99,7 @@ const IMPORT_RUNNING = 'Папку библиотеки можно сменит�
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
 const MODELS_DOWNLOADING = 'Модели нельзя удалить, пока скачивается модель.';
+const AI_PROMPT_NOT_SAVED = 'Не удалось сохранить запрос для ИИ';
 
 const RenameMeetingSchema = z.object({ meetingId: MeetingIdSchema, title: z.string().max(200) });
 const RenameSpeakerSchema = z.object({
@@ -265,7 +266,12 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.setAiPrompt, async (arg) => {
-    await deps.settings.update({ aiPrompt: storedAiPrompt(AiPromptSchema.parse(arg)) });
+    const aiPrompt = storedAiPrompt(AiPromptSchema.parse(arg));
+    try {
+      await deps.settings.update({ aiPrompt });
+    } catch (err) {
+      throw humanFsError(AI_PROMPT_NOT_SAVED, err);
+    }
     return settingsState();
   });
 

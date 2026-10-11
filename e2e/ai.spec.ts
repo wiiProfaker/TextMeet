@@ -97,8 +97,13 @@ test('a prompt typed right before leaving the settings is saved and shown again'
   const { page, userDataDir } = launched;
   await page.getByRole('button', { name: 'Настройки' }).click();
   await page.getByRole('textbox', { name: 'Запрос для ИИ' }).fill('Список задач, по пунктам.');
-  // Сразу на встречу — раньше, чем пройдёт пауза набора.
-  await page.getByRole('navigation', { name: 'Встречи' }).getByRole('button', { name: /Созвон с Ириной/ }).click();
+  // Сразу на встречу — раньше, чем пройдёт пауза набора, и не уводя фокус из поля щелчком: набранное отправляется,
+  // когда страница настроек закрывается.
+  await page
+    .getByRole('navigation', { name: 'Встречи' })
+    .getByRole('button', { name: /Созвон с Ириной/ })
+    .dispatchEvent('click');
+  await expect(page.getByLabel('Текст встречи')).toContainText('Смотри, по бюджету.');
   await expect.poll(() => savedPrompt(userDataDir)).toBe('Список задач, по пунктам.');
 
   await page.getByRole('button', { name: 'Настройки' }).click();
@@ -119,13 +124,12 @@ test('copies the standard prompt and the meeting text as plain text', async () =
 
 test('copies with the own prompt, and only the text when the prompt is empty', async () => {
   launched = await launchWithMeeting();
-  const { app, page, userDataDir } = launched;
+  const { app, page } = launched;
   const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
   await page.getByRole('button', { name: 'Настройки' }).click();
   await field.fill('Что решили по бюджету?');
-  // Набранный запрос уходит в main при уходе со страницы настроек; копируем, когда он сохранён.
+  // Сразу на встречу и копировать: копия ждёт сохранения запроса, набранного перед уходом из настроек.
   await openMeeting(page);
-  await expect.poll(() => savedPrompt(userDataDir)).toBe('Что решили по бюджету?');
   await page.getByRole('button', { name: 'Скопировать для ИИ' }).click();
   await expect(page.getByRole('button', { name: 'Скопировано' })).toBeVisible();
   expect((await clipboardNow(app)).text).toBe(`Что решили по бюджету?\n\n${EXPECTED_TEXT}`);
@@ -133,9 +137,34 @@ test('copies with the own prompt, and only the text when the prompt is empty', a
   await page.getByRole('button', { name: 'Настройки' }).click();
   await field.fill('');
   await openMeeting(page);
-  await expect.poll(() => savedPrompt(userDataDir)).toBe('');
-  await page.getByRole('button', { name: /Скопировать для ИИ|Скопировано/ }).click();
-  await expect.poll(async () => (await clipboardNow(app)).text).toBe(EXPECTED_TEXT);
+  await page.getByRole('button', { name: 'Скопировать для ИИ' }).click();
+  await expect(page.getByRole('button', { name: 'Скопировано' })).toBeVisible();
+  expect((await clipboardNow(app)).text).toBe(EXPECTED_TEXT);
+});
+
+test('a prompt that could not be saved stays in the field, is retried and is reported after leaving', async () => {
+  launched = await launchWithMeeting();
+  const { app, page, userDataDir } = launched;
+  // Сохранение настроек не удаётся (например, диск недоступен).
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('settings:set-ai-prompt');
+    ipcMain.handle('settings:set-ai-prompt', () => {
+      throw new Error('Не удалось сохранить запрос для ИИ: диск недоступен.');
+    });
+  });
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
+  await field.fill('Новый запрос');
+  await field.blur();
+  const settingsPane = page.getByRole('main', { name: 'Настройки' });
+  await expect(settingsPane.getByRole('alert')).toHaveText('Не удалось сохранить запрос для ИИ: диск недоступен.');
+  await expect(field).toHaveValue('Новый запрос');
+
+  // Ушли со страницы настроек — текст отправляется ещё раз, и об ошибке говорит строка слева.
+  await openMeeting(page);
+  const side = page.getByRole('complementary', { name: 'Запись и встречи' });
+  await expect(side.getByRole('alert')).toHaveText('Не удалось сохранить запрос для ИИ: диск недоступен.');
+  expect(await savedPrompt(userDataDir)).toBeUndefined();
 });
 
 test('a meeting without text has no «Скопировать для ИИ»', async () => {

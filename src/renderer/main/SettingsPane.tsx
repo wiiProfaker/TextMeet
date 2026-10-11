@@ -12,6 +12,8 @@ interface Props {
   state: SettingsState;
   info: AppInfo | null;
   onChange(next: SettingsState): void;
+  /** Строка ошибки слева: для ошибок, которые пришли, когда со страницы настроек уже ушли. */
+  onError(message: string): void;
 }
 
 function Toggle({
@@ -39,7 +41,7 @@ function Toggle({
 }
 
 /** Настройки: запись, расшифровка, ИИ и общие. */
-export function SettingsPane({ state, info, onChange }: Props) {
+export function SettingsPane({ state, info, onChange, onError }: Props) {
   const [error, setError] = useState<string | null>(null);
   const microphones = useMicrophones();
   const platform = info?.platform ?? 'win32';
@@ -128,7 +130,10 @@ export function SettingsPane({ state, info, onChange }: Props) {
 
         <AiSettings
           aiPrompt={settings.aiPrompt}
-          save={(prompt) => void run(() => window.textmeet.setAiPrompt(prompt))}
+          save={(prompt) => window.textmeet.setAiPrompt(prompt)}
+          onSaved={onChange}
+          onError={setError}
+          onErrorAfterLeave={onError}
         />
 
         <section className="sec">

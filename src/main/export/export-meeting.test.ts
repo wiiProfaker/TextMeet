@@ -49,7 +49,7 @@ function deps(lib: string, over: Partial<ExportDeps> = {}): ExportDeps & { clipb
       clipboard.push(data);
     },
     exportDir: () => null,
-    aiPrompt: () => null,
+    aiPrompt: async () => null,
     rememberExportDir: async () => undefined,
     documentsDir: () => out,
     platform: 'win32',
@@ -100,7 +100,7 @@ describe('copyForAi', () => {
   it('takes the own prompt from the settings at the moment of copying', async () => {
     const { lib, id } = await meetingWithText();
     let prompt: string | null = 'Что решили?';
-    const d = deps(lib, { aiPrompt: () => prompt });
+    const d = deps(lib, { aiPrompt: async () => prompt });
     await copyForAi(d, id);
     prompt = '  Кратко.\r\nПо пунктам.  ';
     await copyForAi(d, id);
@@ -109,7 +109,7 @@ describe('copyForAi', () => {
 
   it('copies only the text when the prompt is empty', async () => {
     const { lib, id } = await meetingWithText();
-    const d = deps(lib, { aiPrompt: () => '' });
+    const d = deps(lib, { aiPrompt: async () => '' });
     await copyForAi(d, id);
     expect(d.clipboard).toEqual([{ text: PLAIN }]);
   });

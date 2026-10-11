@@ -189,7 +189,7 @@ export function App() {
 
   let pane;
   if (selection?.kind === 'settings') {
-    pane = settings ? <SettingsPane state={settings} info={info} onChange={setSettings} /> : null;
+    pane = settings ? <SettingsPane state={settings} info={info} onChange={setSettings} onError={setError} /> : null;
   } else if (selectedId !== null && selectedId === liveId) {
     const title = selectedEntry?.kind === 'ok' ? selectedEntry.meeting.title : 'Новая встреча';
     pane = <LivePane state={recording} title={title} hotkey={hotkey} platform={platform} onError={setError} />;

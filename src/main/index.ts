@@ -498,7 +498,7 @@ async function start(logger: Logger): Promise<void> {
           ),
         ]),
       exportDir: () => settings.get().exportDir,
-      aiPrompt: () => settings.get().aiPrompt,
+      aiPrompt: () => settings.settled().then(() => settings.get().aiPrompt),
       rememberExportDir: (dir) => settings.update({ exportDir: dir }),
       documentsDir: () => app.getPath('documents'),
       platform: process.platform,

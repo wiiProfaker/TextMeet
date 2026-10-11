@@ -52,6 +52,16 @@ describe('runFfmpeg', () => {
     expect(run.durationSec).toBeCloseTo(2, 1);
   });
 
+  it('reports how much sound is done while it works', async () => {
+    const seen: number[] = [];
+    const out = join(makeTempDir(), 'tone.opus');
+    const args = ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=3', '-c:a', 'libopus', '-f', 'ogg', out];
+    const run = await runFfmpeg(resolveFfmpegPath(), args, { onProgress: (seconds) => seen.push(seconds) });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    expect(seen.at(-1)).toBeCloseTo(run.durationSec ?? 0, 3);
+  });
+
   it('rejects with the tail of the ffmpeg log', async () => {
     await expect(runFfmpeg(resolveFfmpegPath(), ['-i', join(makeTempDir(), 'нет.webm'), '-f', 'null', '-'])).rejects.toThrow(
       /ffmpeg завершился с кодом \d+: .+/,

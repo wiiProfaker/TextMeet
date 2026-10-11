@@ -90,18 +90,27 @@ export class Importer {
     return list;
   }
 
-  /** Встречу удаляют: снять из очереди или остановить копирование и дождаться, пока ffmpeg отпустит файлы. */
-  async cancel(libraryDir: string, meetingId: string): Promise<void> {
+  isBusy(): boolean {
+    return this.current !== null || this.queue.length > 0;
+  }
+
+  /**
+   * Встречу удаляют: снять из очереди или остановить копирование и дождаться, пока ffmpeg отпустит файлы. Ответ —
+   * как вернуть файл в очередь (первым), если удалить встречу не выйдет; null — встреча не импортировалась.
+   */
+  async cancel(libraryDir: string, meetingId: string): Promise<(() => void) | null> {
     const waiting = this.queue.findIndex((job) => sameJob(job, libraryDir, meetingId));
     if (waiting !== -1) {
+      const job = this.queue[waiting]!;
       this.queue.splice(waiting, 1);
       this.report();
+      return () => this.requeue(job);
     }
     const current = this.current;
-    if (current && sameJob(current.job, libraryDir, meetingId)) {
-      current.abort.abort();
-      await current.done;
-    }
+    if (!current || !sameJob(current.job, libraryDir, meetingId)) return null;
+    current.abort.abort();
+    await current.done;
+    return () => this.requeue(current.job);
   }
 
   /** Выход из программы: остановить копирование и убрать недоделанные встречи — исходные файлы на месте. */
@@ -156,6 +165,13 @@ export class Importer {
     this.report();
     this.kick();
     return meeting.id;
+  }
+
+  private requeue(job: ImportJob): void {
+    if (this.disposed) return;
+    this.queue.unshift(job);
+    this.report();
+    this.kick();
   }
 
   private kick(): void {

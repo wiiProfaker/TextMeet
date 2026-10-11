@@ -200,15 +200,34 @@ describe('Importer queue', () => {
     const t = setup({ copy, examine: async () => goodFile(null) });
     const [first = '', second = ''] = (await t.importer.addFiles(lib, ['a.mp4', 'b.mp4'])).added;
     await until(() => calls.length === 1);
+    expect(t.importer.isBusy()).toBe(true);
     await t.importer.cancel(lib, second);
     expect(t.importer.progress().map((p) => p.meetingId)).toEqual([first]);
     await t.importer.cancel(lib, first);
     expect(t.importer.isPending(lib, first)).toBe(false);
+    expect(t.importer.isBusy()).toBe(false);
+    expect(await t.importer.cancel(lib, first)).toBeNull();
     expect(t.failed).toEqual([]);
     // Папки остались: их переносит в Корзину удаление встречи.
     expect(existsSync(join(lib, first))).toBe(true);
     await tick();
     expect(calls).toHaveLength(1);
+  });
+
+  it('puts a cancelled file back first when its meeting could not be deleted', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    const [first = '', second = ''] = (await t.importer.addFiles(lib, ['a.mp4', 'b.mp4'])).added;
+    await until(() => calls.length === 1);
+    const restore = await t.importer.cancel(lib, first);
+    await until(() => calls.length === 2);
+    expect(calls[1]?.source).toBe('b.mp4');
+    restore?.();
+    expect(t.importer.progress().map((p) => p.meetingId)).toEqual([second, first]);
+    calls[1]?.finish();
+    await until(() => calls.length === 3);
+    expect(calls[2]?.source).toBe('a.mp4');
   });
 
   it('removes unfinished meetings when the app quits', async () => {

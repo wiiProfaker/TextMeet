@@ -3,6 +3,12 @@
 /** Сколько файлов можно добавить за раз (кнопкой или перетаскиванием). */
 export const MAX_IMPORT_FILES = 100;
 
+/** Расширения для фильтра «Аудио и видео» в окне выбора файлов (остальное — через «Все файлы»). */
+export const IMPORT_EXTENSIONS = [
+  'mp3', 'm4a', 'aac', 'wav', 'ogg', 'oga', 'opus', 'flac', 'wma', 'amr', '3gp',
+  'mp4', 'm4v', 'mov', 'mkv', 'webm', 'avi',
+];
+
 /** Ход импорта встречи для списка и для самой встречи. */
 export interface ImportProgress {
   meetingId: string;

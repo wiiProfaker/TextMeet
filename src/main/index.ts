@@ -26,6 +26,7 @@ import { resolveFfmpegPath } from './audio/ffmpeg';
 import { meetingsNeedingMix, Mixer } from './audio/mixer';
 import { currentLaunchAtLoginNotice, startedAtLogin, syncLaunchAtLogin } from './autostart';
 import { HotkeyManager } from './hotkey-manager';
+import { Importer, recoverInterruptedImports } from './import/importer';
 import { registerIpc } from './ipc';
 import { listMeetings } from './library/library';
 import { SearchIndex } from './library/search-index';
@@ -97,6 +98,7 @@ let tray: AppTray | null = null;
 let hotkeys: HotkeyManager | null = null;
 let recorderReady = false;
 let transcription: TranscriptionQueue | null = null;
+let importer: Importer | null = null;
 /** Окно записи падало снова и снова, и его больше не перезапускают. */
 let recorderBroken = false;
 const recorderCrashes: number[] = [];
@@ -249,6 +251,8 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
   }
   if (controller.getState().phase !== 'idle') return;
   logger.info('TextMeet завершает работу');
+  // Недоделанные встречи из файлов убираются: исходные файлы на месте, добавить их можно снова.
+  await importer?.disposeForQuit().catch((err: unknown) => logger.error('Импорт не остановился перед выходом', err));
   await logger.flush();
   // Только когда выход точно состоится: остановленная очередь молча пропускала бы новые встречи.
   // Встречи остаются «в очереди» / «расшифровывается» и продолжатся при следующем запуске.
@@ -257,7 +261,9 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
   app.quit();
 }
 
-/** При запуске: закрыть прерванные сбоем записи, досвести и продолжить расшифровку того, что не успело. */
+/**
+ * При запуске: закрыть прерванные сбоем записи и импорт, досвести и продолжить расшифровку того, что не успело.
+ */
 async function recoverAndMix(
   logger: Logger,
   libraryDir: string,
@@ -265,6 +271,7 @@ async function recoverAndMix(
   mixer: Mixer,
   controller: RecordingController,
   queue: TranscriptionQueue,
+  imports: Importer,
 ): Promise<void> {
   try {
     const recovered = await recoverInterruptedRecordings(
@@ -276,6 +283,9 @@ async function recoverAndMix(
       notify(notificationTexts.recovered(recovered.length));
       sendToMain(IPC.libraryChanged);
     }
+    // Файлы могли начать добавлять сразу после запуска — их встречи не трогаем.
+    const interrupted = await recoverInterruptedImports(libraryDir, logger, (id) => imports.isPending(libraryDir, id));
+    if (interrupted.length > 0) sendToMain(IPC.libraryChanged);
     const entries = await listMeetings(libraryDir);
     for (const id of meetingsNeedingMix(entries)) mixer.enqueue(libraryDir, id);
     queue.resume(libraryDir, entries);
@@ -392,6 +402,26 @@ async function start(logger: Logger): Promise<void> {
       });
     },
   });
+  const imports = new Importer({
+    ffmpegPath: () => resolveFfmpegPath(),
+    logger,
+    now: () => new Date(),
+    freeBytes: freeDiskBytes,
+    libraryChanged: () => sendToMain(IPC.libraryChanged),
+    progressChanged: (progress) => sendToMain(IPC.importProgress, progress),
+    imported: ({ libraryDir: dir, meeting }) => {
+      mixer.enqueue(dir, meeting.id);
+      controller.queueDialog({
+        kind: 'import',
+        meetingId: meeting.id,
+        title: meeting.title,
+        durationSec: meeting.durationSec,
+        fileName: meeting.sourceFileName,
+      });
+    },
+    failed: (failure) => sendToMain(IPC.importFailed, failure),
+  });
+  importer = imports;
   const hotkeyManager = new HotkeyManager(globalShortcut, process.platform, () => void controller.toggle());
   hotkeys = hotkeyManager;
   if (hotkeyManager.init(settings.get().recordHotkey).invalid) {
@@ -447,9 +477,11 @@ async function start(logger: Logger): Promise<void> {
       },
       transcription: queue,
       mixer,
+      importer: imports,
       logger,
       dropStopDialog: (id) => controller.dropStopDialog(id),
     },
+    importer: imports,
     exporting: {
       libraryDir,
       chooseSavePath: async (defaultPath, format) => {
@@ -496,6 +528,7 @@ async function start(logger: Logger): Promise<void> {
     // сама, и без dispose() очередь посчитала бы это сбоем. Остановленная очередь оставляет встречу
     // «расшифровывается» — до следующего запуска.
     transcription?.dispose();
+    void importer?.disposeForQuit();
     onSystemEnding();
   });
   windowsCreated = true;
@@ -505,7 +538,7 @@ async function start(logger: Logger): Promise<void> {
   );
   if (hotkeyManager.busy) notify(notificationTexts.hotkeyBusy(hotkeyManager.label));
   logger.info(`TextMeet ${app.getVersion()} запущен (${process.platform})`);
-  void recoverAndMix(logger, libraryDir(), notify, mixer, controller, queue);
+  void recoverAndMix(logger, libraryDir(), notify, mixer, controller, queue, imports);
   searchIndex.refresh().catch((err: unknown) => logger.warn('Поиск не построился при запуске', err));
 }
 

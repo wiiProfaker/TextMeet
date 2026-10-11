@@ -1,6 +1,6 @@
 // Один preload на оба окна. Preload работает в песочнице: подключать можно только 'electron'
 // и собственный код без пакетов (zod сюда не тянуть). Кому что разрешено, проверяет main (ipc.ts).
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 import { heldEvent } from '../shared/held-event';
 import {
   IPC,
@@ -76,12 +76,18 @@ const api: TextMeetApi = {
   selectModel: (id) => invoke(IPC.selectModel, id),
   copyMeeting: (meetingId) => invoke(IPC.copyMeeting, meetingId),
   saveMeeting: (request) => invoke(IPC.saveMeeting, request),
+  pickImportFiles: () => invoke(IPC.pickImportFiles),
+  importFiles: (paths) => invoke(IPC.importFiles, paths),
+  getImportProgress: () => invoke(IPC.getImportProgress),
+  pathForFile: (file) => webUtils.getPathForFile(file),
   onRecordingState: (listener) => subscribe(IPC.recordingState, listener),
   onPeaks: (listener) => subscribe(IPC.recordingPeaks, listener),
   onLibraryChanged: (listener) => subscribe(IPC.libraryChanged, () => listener()),
   onTranscriptionProgress: (listener) => subscribe(IPC.transcriptionProgress, listener),
   onModelsChanged: (listener) => subscribe(IPC.modelsChanged, () => listener()),
   onShowMeeting: (listener) => showMeeting.subscribe(listener),
+  onImportProgress: (listener) => subscribe(IPC.importProgress, listener),
+  onImportFailed: (listener) => subscribe(IPC.importFailed, listener),
 };
 
 const recorder: RecorderBridge = {

@@ -1,9 +1,9 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RecorderStartCommand, RecordingState } from '../../shared/recording';
+import type { RecorderStartCommand, RecordingState, StopDialogData } from '../../shared/recording';
 import { makeTempDir } from '../../test-support/temp-dir';
-import { audioDir, MEETING_FILE, meetingDir, readMeeting } from '../library/library';
+import { audioDir, createMeeting, MEETING_FILE, meetingDir, readMeeting } from '../library/library';
 import type { Logger } from '../logger';
 import { MIC_ACCESS_DENIED, notificationTexts, RECORDER_BROKEN, RECORDER_NOT_READY, RECORDER_TIMEOUT } from '../texts';
 import { RecordingController, type ControllerDeps } from './controller';
@@ -159,7 +159,7 @@ describe('RecordingController — normal recording', () => {
       phase: 'idle',
       meetingId: null,
       systemAudioNext: true,
-      stopDialog: { meetingId: command.meetingId, title: recording.title, durationSec: 42.5 },
+      stopDialog: { kind: 'recording', meetingId: command.meetingId, title: recording.title, durationSec: 42.5, fileName: null },
     });
   });
 
@@ -833,6 +833,38 @@ describe('RecordingController — stop dialog', () => {
     expect(h.state().stopDialog?.meetingId).toBe(second.meetingId);
     await h.controller.finishStopDialog({ meetingId: second.meetingId, title: 'Вторая', participantsHint: null });
     expect(h.state().stopDialog).toBeNull();
+  });
+
+  it('shows the dialog of an added file at once, or after the dialogs already waiting', async () => {
+    const h = harness();
+    const fileDialog = (meetingId: string): StopDialogData => ({
+      kind: 'import',
+      meetingId,
+      title: 'Созвон с Ириной',
+      durationSec: null,
+      fileName: 'Созвон с Ириной.mp4',
+    });
+    h.controller.queueDialog(fileDialog('2026-10-04_1620_aaaaaa'));
+    expect(h.state().stopDialog).toEqual(fileDialog('2026-10-04_1620_aaaaaa'));
+
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    h.controller.queueDialog(fileDialog('2026-10-04_1620_bbbbbb'));
+    expect(h.state().stopDialog?.meetingId).toBe('2026-10-04_1620_aaaaaa');
+    h.controller.dropStopDialog('2026-10-04_1620_aaaaaa');
+    expect(h.state().stopDialog?.meetingId).toBe(command.meetingId);
+    await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Запись', participantsHint: 2 });
+    expect(h.state().stopDialog?.meetingId).toBe('2026-10-04_1620_bbbbbb');
+  });
+
+  it('names the dialog of an added file when its answer cannot be saved', async () => {
+    const h = harness();
+    const meeting = await createMeeting(h.lib, { source: 'import', status: 'recorded' });
+    h.controller.queueDialog({ kind: 'import', meetingId: meeting.id, title: 'a', durationSec: 3, fileName: 'a.mp3' });
+    breakMeetingFile(h.lib, meeting.id);
+    await expect(
+      h.controller.finishStopDialog({ meetingId: meeting.id, title: 'a', participantsHint: 3 }),
+    ).rejects.toThrow(/^Не удалось сохранить ответ в окне «Файл добавлен»/);
   });
 
   it('drops the dialog of a deleted meeting, open or waiting', async () => {

@@ -21,11 +21,15 @@ export interface StartProblem {
   settings: SystemSettingsKind | null;
 }
 
-/** Окно «Запись остановлена». */
+/** Окно «Запись остановлена» (после записи) или «Файл добавлен» (после импорта, План 5). */
 export interface StopDialogData {
+  kind: 'recording' | 'import';
   meetingId: string;
   title: string;
-  durationSec: number;
+  /** null — длительность файла неизвестна. */
+  durationSec: number | null;
+  /** Имя добавленного файла (импорт); у записи — null. */
+  fileName: string | null;
 }
 
 export interface StopDialogAnswer {

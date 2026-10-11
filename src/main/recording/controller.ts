@@ -187,7 +187,7 @@ export class RecordingController {
       }));
       saved = true;
     } catch (err) {
-      throw humanFsError('Не удалось сохранить ответ в окне «Запись остановлена»', err);
+      throw humanFsError(`Не удалось сохранить ответ в окне «${this.dialogTitle(answer.meetingId)}»`, err);
     } finally {
       if ((saved || skipped) && this.state.stopDialog?.meetingId === answer.meetingId) this.showNextStopDialog();
     }
@@ -488,7 +488,13 @@ export class RecordingController {
       if (session.interrupted) this.deps.notify(notificationTexts.interrupted());
       else if (reason === 'user') this.deps.notify(notificationTexts.stopped(durationSec), true);
       if (reason === 'mic-ended') this.deps.notify(notificationTexts.micEnded());
-      this.resetToIdle(session, { meetingId: meeting.id, title: meeting.title, durationSec });
+      this.resetToIdle(session, {
+        kind: 'recording',
+        meetingId: meeting.id,
+        title: meeting.title,
+        durationSec,
+        fileName: null,
+      });
       this.deps.showMainWindow();
     }
     this.deps.libraryChanged();
@@ -546,10 +552,21 @@ export class RecordingController {
     this.deps.notify(notificationTexts.startFailed(problem), true);
   }
 
+  /** Окно после импорта: сразу, если других окон нет, иначе — в очередь за ними. */
+  queueDialog(dialog: StopDialogData): void {
+    if (this.state.stopDialog) this.waitingDialogs.push(dialog);
+    else this.update({ stopDialog: dialog });
+  }
+
   /** Встречу удалили: её окно «Запись остановлена» больше не нужно — ни открытое, ни ждущее. */
   dropStopDialog(meetingId: string): void {
     this.waitingDialogs = this.waitingDialogs.filter((dialog) => dialog.meetingId !== meetingId);
     if (this.state.stopDialog?.meetingId === meetingId) this.showNextStopDialog();
+  }
+
+  private dialogTitle(meetingId: string): string {
+    const dialog = [this.state.stopDialog, ...this.waitingDialogs].find((d) => d?.meetingId === meetingId);
+    return dialog?.kind === 'import' ? 'Файл добавлен' : 'Запись остановлена';
   }
 
   private showNextStopDialog(): void {

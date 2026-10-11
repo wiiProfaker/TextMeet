@@ -1293,6 +1293,32 @@ button.chip:hover {
   background: transparent;
 }
 
+/* Меню «Экспорт» — под кнопкой, шире обычного: в пунктах — формат файла. */
+.export-menu {
+  width: 290px;
+}
+
+.btn .chev {
+  display: inline-flex;
+  margin-left: -2px;
+}
+
+.btn .chev .ic {
+  width: 13px;
+  height: 13px;
+  color: var(--muted);
+}
+
+/* Только для экранного диктора. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 /* Меню «…» в заголовке встречи — справа под кнопкой. */
 .more-wrap {
   position: relative;
@@ -1439,6 +1465,50 @@ button.chip:hover {
   padding: 0 8px;
   margin: 0 -9px;
   outline: none;
+}
+
+/* ---- Перетаскивание файлов в окно (План 5, лист 12) ---- */
+/* Затемнение одно для светлой и тёмной темы: светлый текст на нём читается в обеих. */
+.drop-shade {
+  padding: 28px;
+  background: rgba(29, 27, 23, 0.72);
+  z-index: 6;
+  pointer-events: none;
+}
+
+.drop-frame {
+  flex: 1;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border: 2px dashed #fffdf8;
+  border-radius: 14px;
+  color: #fffdf8;
+  text-align: center;
+}
+
+.drop-frame .ic {
+  width: 44px;
+  height: 44px;
+}
+
+.drop-frame b {
+  font-family: var(--f-text);
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.drop-frame span {
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.empty-note .small {
+  font-size: 12.5px;
+  max-width: 460px;
 }
 
 /* ---- Ход расшифровки ---- */

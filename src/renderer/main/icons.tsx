@@ -81,6 +81,38 @@ export const MuteIcon = () => (
   </Icon>
 );
 
+export const ExportIcon = () => (
+  <Icon>
+    <path d="M12 15V4M7 9l5-5 5 5M5 14v5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-5" />
+  </Icon>
+);
+
+export const CopyIcon = () => (
+  <Icon>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h8" />
+  </Icon>
+);
+
+export const FileIcon = () => (
+  <Icon>
+    <path d="M6 3h8l5 5v13H6z" />
+    <path d="M14 3v5h5M9 13h6M9 17h6" />
+  </Icon>
+);
+
+export const CheckIcon = () => (
+  <Icon>
+    <path d="M5 12l5 5 9-10" />
+  </Icon>
+);
+
+export const ImportIcon = () => (
+  <Icon>
+    <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />
+  </Icon>
+);
+
 export const TrashIcon = () => (
   <Icon>
     <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" />

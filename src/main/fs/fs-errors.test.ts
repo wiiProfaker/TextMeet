@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { fsErrorReason, humanFsError } from './fs-errors';
+import { humanFsError, humanFsReason } from './fs-errors';
 
 const withCode = (code: string): NodeJS.ErrnoException => Object.assign(new Error(`${code}: raw`), { code });
 
-describe('fsErrorReason', () => {
+describe('humanFsReason', () => {
   it.each([
     ['EACCES', 'нет прав на эту папку'],
     ['EPERM', 'нет прав на эту папку'],
@@ -12,13 +12,13 @@ describe('fsErrorReason', () => {
     ['ENOENT', 'папка не найдена'],
     ['EROFS', 'диск доступен только для чтения'],
   ])('%s → %s', (code, reason) => {
-    expect(fsErrorReason(withCode(code))).toBe(reason);
+    expect(humanFsReason(withCode(code))).toBe(reason);
   });
 
-  it('falls back to the error text for unknown codes and non-errors', () => {
-    expect(fsErrorReason(withCode('EWHATEVER'))).toBe('EWHATEVER: raw');
-    expect(fsErrorReason('строка')).toBe('строка');
-    expect(fsErrorReason(null)).toBe('null');
+  it('says it in general words, without the system text, for unknown codes and non-errors', () => {
+    expect(humanFsReason(withCode('EWHATEVER'))).toBe('файл занят или недоступен');
+    expect(humanFsReason('строка')).toBe('файл занят или недоступен');
+    expect(humanFsReason(null)).toBe('файл занят или недоступен');
   });
 });
 

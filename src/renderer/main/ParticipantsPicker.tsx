@@ -1,19 +1,25 @@
 import { useId } from 'react';
 import { CHOICES, type ParticipantsChoice } from './participants';
 
+/** Вопрос о встрече, записанной программой: на дорожке микрофона — вы. */
+export const RECORDING_QUESTION = 'Сколько человек было на встрече, включая вас?';
+/** Вопрос о встрече из файла: «Я» не выделяется, считаются все голоса записи. */
+export const FILE_QUESTION = 'Сколько человек говорит на записи?';
+
 interface Props {
   value: ParticipantsChoice;
   onChange(next: ParticipantsChoice): void;
+  question?: string;
 }
 
-/** Вопрос «Сколько человек было на встрече, включая вас?» — окно «Запись остановлена» и «Расшифровать заново». */
-export function ParticipantsPicker({ value, onChange }: Props) {
+/** Вопрос о числе людей — окна «Запись остановлена», «Файл добавлен» и «Расшифровать заново». */
+export function ParticipantsPicker({ value, onChange, question = RECORDING_QUESTION }: Props) {
   // Своё id у каждого вопроса: окно «Запись остановлена» может открыться поверх «Расшифровать заново».
   const questionId = useId();
   return (
     <>
       <div className="q" id={questionId}>
-        Сколько человек было на встрече, включая вас?
+        {question}
       </div>
       <div className="nums" role="group" aria-labelledby={questionId}>
         {CHOICES.map((n) => (

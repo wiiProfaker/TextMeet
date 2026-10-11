@@ -36,6 +36,10 @@ export interface NewMeeting {
   status: MeetingStatus;
   title?: string;
   now?: Date;
+  /** Длительность, если она известна заранее (встреча из файла). */
+  durationSec?: number | null;
+  /** Имя исходного файла встречи из файла. */
+  sourceFileName?: string | null;
   randomSuffix?: () => string;
 }
 
@@ -60,13 +64,14 @@ export async function createMeeting(libraryDir: string, input: NewMeeting): Prom
         id,
         title: input.title ?? defaultMeetingTitle(now),
         createdAt: now.toISOString(),
-        durationSec: null,
+        durationSec: input.durationSec ?? null,
         source: input.source,
         participantsHint: null,
         model: null,
         status: input.status,
         errorMessage: null,
         speakerNames: {},
+        sourceFileName: input.sourceFileName ?? null,
       });
       await writeJsonAtomic(join(dir, MEETING_FILE), meeting);
       return meeting;

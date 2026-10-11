@@ -1,4 +1,5 @@
 import { createContext, useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import type { ImportProgress } from '../../shared/import';
 import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
 import type { SearchResult } from '../../shared/search';
@@ -145,6 +146,98 @@ export function useTranscriptionProgress(): ReadonlyMap<string, TranscriptionPro
     };
   }, []);
   return new Map(list.map((p) => [p.meetingId, p]));
+}
+
+/** Ход импорта по встречам: сначала запрос, дальше — события. */
+export function useImportProgress(): ReadonlyMap<string, ImportProgress> {
+  const [list, setList] = useState<ImportProgress[]>([]);
+  useEffect(() => {
+    let active = true;
+    let gotEvent = false;
+    const unsubscribe = window.textmeet.onImportProgress((next) => {
+      gotEvent = true;
+      setList(next);
+    });
+    window.textmeet
+      .getImportProgress()
+      .then((initial) => {
+        if (active && !gotEvent) setList(initial);
+      })
+      .catch((err: unknown) => console.error('TextMeet: ход импорта не получен', errorText(err)));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+  return new Map(list.map((p) => [p.meetingId, p]));
+}
+
+/**
+ * Перетаскивание файлов в окно: true, пока над окном файлы (затемнение); отпустили — пути файлов и имена файлов без
+ * пути на диске (из архива, вложение письма). Счётчик входов: над вложенными элементами dragenter и dragleave
+ * приходят парами, и затемнение не мигает; уход из окна (relatedTarget нет) и потеря фокуса сбрасывают его, чтобы
+ * затемнение не залипло. Перетаскивание текста внутри окна (в нём нет файлов) не трогается.
+ */
+export function useFileDrop(onFiles: (paths: string[], pathless: string[]) => void): boolean {
+  const [dragging, setDragging] = useState(false);
+  const latest = useRef(onFiles);
+  latest.current = onFiles;
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (event: DragEvent): boolean => event.dataTransfer?.types.includes('Files') ?? false;
+    const enter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      depth += 1;
+      setDragging(true);
+    };
+    const over = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    };
+    const reset = () => {
+      depth = 0;
+      setDragging(false);
+    };
+    const leave = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      depth = event.relatedTarget === null ? 0 : Math.max(0, depth - 1);
+      if (depth === 0) setDragging(false);
+    };
+    const drop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      reset();
+      const files = [...(event.dataTransfer?.files ?? [])];
+      const pathOf = (file: File): string => {
+        try {
+          return window.textmeet.pathForFile(file);
+        } catch {
+          return '';
+        }
+      };
+      if (files.length === 0) return;
+      const paths = files.map(pathOf);
+      latest.current(
+        paths.filter((path) => path !== ''),
+        files.filter((_, index) => paths[index] === '').map((file) => file.name),
+      );
+    };
+    window.addEventListener('dragenter', enter);
+    window.addEventListener('dragover', over);
+    window.addEventListener('dragleave', leave);
+    window.addEventListener('drop', drop);
+    window.addEventListener('blur', reset);
+    return () => {
+      window.removeEventListener('blur', reset);
+      window.removeEventListener('dragenter', enter);
+      window.removeEventListener('dragover', over);
+      window.removeEventListener('dragleave', leave);
+      window.removeEventListener('drop', drop);
+    };
+  }, []);
+  return dragging;
 }
 
 export type TranscriptLoad =

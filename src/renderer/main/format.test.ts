@@ -7,7 +7,6 @@ import {
   formatClock,
   formatDuration,
   formatDurationWithSeconds,
-  formatLongDate,
   formatTimeOfDay,
   groupByDay,
   hotkeyKeys,
@@ -35,6 +34,7 @@ const meeting = (id: string, createdAt: Date, patch: Partial<Meeting> = {}): Mee
   tracks: [],
   recovered: false,
   audioDeleted: false,
+  sourceFileName: null,
   ...patch,
 });
 
@@ -77,15 +77,12 @@ describe('formatDurationWithSeconds', () => {
 });
 
 describe('dates', () => {
-  it('formats the time of day and the long date in local time', () => {
-    const iso = new Date(2026, 8, 27, 16, 5).toISOString();
-    expect(formatTimeOfDay(iso)).toBe('16:05');
-    expect(formatLongDate(iso)).toBe('27 сентября 2026, 16:05');
+  it('formats the time of day in local time', () => {
+    expect(formatTimeOfDay(new Date(2026, 8, 27, 16, 5).toISOString())).toBe('16:05');
   });
 
   it('shows a dash for garbage', () => {
     expect(formatTimeOfDay('вчера')).toBe('—');
-    expect(formatLongDate('вчера')).toBe('—');
   });
 });
 
@@ -181,6 +178,23 @@ describe('meetingNote', () => {
     expect(meetingNote(meeting('a', at, { status: 'queued' }))?.text).toBe('в очереди на расшифровку');
     expect(meetingNote(meeting('a', at, { status: 'transcribing' }))?.text).toBe('расшифровка…');
     expect(meetingNote(meeting('a', at, { status: 'error' }))).toEqual({ text: 'ошибка', tone: 'error' });
+    expect(meetingNote(meeting('a', at, { status: 'importing', source: 'import' }))).toEqual({
+      text: 'импорт…',
+      tone: 'accent',
+    });
+  });
+
+  it('shows the progress of an import and an import that broke off', () => {
+    const importing = meeting('a', at, { status: 'importing', source: 'import' });
+    expect(meetingNote(importing, undefined, { meetingId: 'a', fraction: 0.354, waiting: false })?.text).toBe('импорт 35%');
+    expect(meetingNote(importing, undefined, { meetingId: 'a', fraction: null, waiting: false })?.text).toBe('импорт…');
+    expect(meetingNote(importing, undefined, { meetingId: 'a', fraction: null, waiting: true })?.text).toBe('ждёт импорта');
+    expect(meetingNote(meeting('a', at, { status: 'error', source: 'import' }))).toEqual({
+      text: 'импорт прервался',
+      tone: 'error',
+    });
+    const tracks = [{ kind: 'file' as const, file: 'source.mka', startOffsetMs: 0 }];
+    expect(meetingNote(meeting('a', at, { status: 'error', source: 'import', tracks }))?.text).toBe('ошибка расшифровки');
   });
 
   it('shows the progress of transcription and its errors', () => {

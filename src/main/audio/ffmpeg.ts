@@ -38,14 +38,19 @@ export interface FfmpegOptions {
   stallMs?: number;
   /** Отмена: ffmpeg останавливается, обещание отклоняется с FFMPEG_CANCELLED. */
   signal?: AbortSignal;
+  /** Сколько секунд звука уже обработано — по мере работы (из -progress). */
+  onProgress?(seconds: number): void;
 }
 
 export const FFMPEG_CANCELLED = 'ffmpeg остановлен: работа отменена';
 
+/** ffmpeg запустился и отказался: завершился с ошибкой (а не был отменён, не завис и не запустился вовсе). */
+export class FfmpegExitError extends Error {}
+
 /** Запускает ffmpeg с пониженным приоритетом (не мешать идущей записи); ошибка — с хвостом его вывода. */
 export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: FfmpegOptions = {}): Promise<FfmpegRun> {
   const stallMs = options.stallMs ?? FFMPEG_STALL_MS;
-  const { signal } = options;
+  const { signal, onProgress } = options;
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error(FFMPEG_CANCELLED));
@@ -83,9 +88,17 @@ export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: 
 
     let progress = '';
     let errors = '';
+    let reported: number | null = null;
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
       progress = keepTail(progress + chunk);
       rearmWatchdog();
+      if (!onProgress) return;
+      // Только целые строки: недописанное «out_time_us=12» показало бы откат назад.
+      const seconds = parseProgressDuration(progress.slice(0, progress.lastIndexOf('\n') + 1));
+      if (seconds !== null && seconds !== reported) {
+        reported = seconds;
+        onProgress(seconds);
+      }
     });
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
       errors = keepTail(errors + chunk);
@@ -104,7 +117,7 @@ export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: 
       else if (code === 0) resolve({ durationSec: parseProgressDuration(progress) });
       else {
         const how = code === null ? `сигналом ${killSignal}` : `кодом ${code}`;
-        reject(new Error(`ffmpeg завершился с ${how}: ${errors.trim().split('\n').slice(-3).join(' | ')}`));
+        reject(new FfmpegExitError(`ffmpeg завершился с ${how}: ${errors.trim().split('\n').slice(-3).join(' | ')}`));
       }
     });
   });

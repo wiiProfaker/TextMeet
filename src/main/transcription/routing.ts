@@ -30,6 +30,7 @@ export function othersMode(voices: number | null): DiarizeMode {
  * План по дорожкам.
  * - Запись со звуком компьютера: микрофон — «Я»; звук компьютера — собеседники, их на одного меньше, чем участников.
  * - Запись без звука компьютера (живая встреча): микрофон слышит всех — делится по голосам, все — «Спикер N».
+ * - Встреча из файла: одна общая дорожка — как живая встреча, «Я» не выделяется.
  * recordedSystem — писался ли звук компьютера (есть ли дорожка system в meeting.json), даже если её файл пуст.
  */
 export function planTracks(
@@ -37,6 +38,8 @@ export function planTracks(
   recordedSystem: boolean,
   participantsHint: number | null,
 ): TrackPlan[] {
+  const file = tracks.find((t) => t.kind === 'file');
+  if (file) return [{ track: file, role: 'others', diarize: othersMode(participantsHint) }];
   const mic = tracks.find((t) => t.kind === 'mic');
   const system = tracks.find((t) => t.kind === 'system');
   if (!recordedSystem) {

@@ -3,17 +3,6 @@ import { formatDownloaded } from '../../shared/format';
 import type { MeetingStatus } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 
-const pad = (n: number): string => String(n).padStart(2, '0');
-
-/** Время реплики: «1:05», «12:04», «1:02:05». */
-export function formatTimestamp(seconds: number): string {
-  const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
-}
-
 /** Доля → целые проценты 0–100 (и для NaN — 0). */
 export const percent = (fraction: number): number =>
   Number.isNaN(fraction) ? 0 : Math.round(Math.min(1, Math.max(0, fraction)) * 100);

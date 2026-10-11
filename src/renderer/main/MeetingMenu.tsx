@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { Meeting } from '../../shared/meeting';
 import { ConfirmDialog } from './ConfirmDialog';
 import { errorText } from './errors';
-import { deleteAudioText } from './format';
+import { deleteAudioText, isImportFailure } from './format';
 import { FolderIcon, MoreIcon, MuteIcon, TrashIcon } from './icons';
 import { menuFocusStep } from './menu-keys';
 
@@ -111,7 +111,8 @@ export function MeetingMenu({ meeting, audioBlocked, releaseAudio, onDeleted, on
             <span className="mi-label">Открыть папку встречи</span>
           </button>
           <div className="sep" role="separator" />
-          {!meeting.audioDeleted && (
+          {/* Звук из файла копируется или так и не скопировался — удалить можно только встречу целиком. */}
+          {!meeting.audioDeleted && meeting.status !== 'importing' && !isImportFailure(meeting) && (
             <button
               type="button"
               className="mi"

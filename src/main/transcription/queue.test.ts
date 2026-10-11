@@ -5,7 +5,7 @@ import type { Meeting } from '../../shared/meeting';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { withFileLock } from '../library/file-lock';
-import { audioDir, createMeeting, readMeeting, updateMeeting } from '../library/library';
+import { audioDir, createMeeting, listMeetings, readMeeting, updateMeeting } from '../library/library';
 import { readTranscript } from '../library/transcript-store';
 import { describeError, type Logger } from '../logger';
 import { DownloadError } from '../models/download';
@@ -295,6 +295,16 @@ describe('TranscriptionQueue', () => {
     const lib = makeTempDir();
     const meeting = await recordedMeeting(lib, { status: 'recording' });
     await expect(setup().queue.enqueue(lib, meeting.id)).rejects.toThrow(transcriptionTexts.stillRecording);
+  });
+
+  it('refuses a meeting whose file is still being copied and does not resume it', async () => {
+    const lib = makeTempDir();
+    const meeting = await recordedMeeting(lib, { status: 'importing', source: 'import' });
+    const t = setup();
+    await expect(t.queue.enqueue(lib, meeting.id)).rejects.toThrow(transcriptionTexts.stillImporting);
+    t.queue.resume(lib, await listMeetings(lib));
+    expect(t.queue.progress()).toEqual([]);
+    expect((await readMeeting(lib, meeting.id)).status).toBe('importing');
   });
 
   it('notes a track that could not be read and keeps the text of the other one', async () => {

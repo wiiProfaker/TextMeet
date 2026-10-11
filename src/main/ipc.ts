@@ -1,4 +1,5 @@
 import { promises as fsp } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import {
   BrowserWindow,
   dialog,
@@ -19,11 +20,14 @@ import {
   type SettingsState,
 } from '../shared/ipc';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
-import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
+import { IMPORT_EXTENSIONS } from '../shared/import';
+import { MeetingIdSchema, RecordedTrackKindSchema } from '../shared/meeting';
 import { SpeakerIdSchema } from '../shared/transcript';
 import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
+import { copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
+import type { Importer } from './import/importer';
 import { listMeetings, meetingDir } from './library/library';
 import { audioSize, deleteAudio, deleteMeeting, type DeleteDeps } from './library/meeting-delete';
 import { editTranscript, renameMeeting, renameSpeaker, TranscriptEditSchema } from './library/meeting-edits';
@@ -58,6 +62,8 @@ export interface IpcDeps {
   libraryChanged(): void;
   search: Pick<SearchIndex, 'refresh' | 'invalidate' | 'remove' | 'search'>;
   deletion: DeleteDeps;
+  exporting: ExportDeps;
+  importer: Pick<Importer, 'addFiles' | 'progress' | 'isBusy'>;
   transcription: {
     enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null, model?: AsrModelId): Promise<void>;
     progress(): TranscriptionProgress[];
@@ -86,7 +92,9 @@ const Bytes = z
   .refine((v) => v.byteLength <= MAX_CHUNK_BYTES, `кусок дорожки больше ${MAX_CHUNK_BYTES} байт`);
 const LIBRARY_LOCKED = 'Во время записи папку библиотеки менять нельзя.';
 // Ответ в окне «Запись остановлена» сохраняется в папку текущей библиотеки — до него папку не меняем.
-const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запись остановлена».';
+const STOP_DIALOG_OPEN = 'Сначала ответьте в окне «Запись остановлена» или «Файл добавлен».';
+// Встречи из файлов дописываются в ту библиотеку, где созданы, — а окно «Файл добавлен» сохраняет ответ в текущую.
+const IMPORT_RUNNING = 'Папку библиотеки можно сменить, когда закончится импорт файлов.';
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
 const MODELS_DOWNLOADING = 'Модели нельзя удалить, пока скачивается модель.';
@@ -103,6 +111,13 @@ const EditTranscriptSchema = z.object({
   transcriptVersion: z.iso.datetime(),
 });
 
+const SaveMeetingSchema = z.object({ meetingId: MeetingIdSchema, format: z.enum(['docx', 'txt']) });
+/** Пути файлов для импорта: полные, не больше 1000 (больше 100 программа отклонит с понятной причиной). */
+const ImportPathsSchema = z
+  .array(z.string().min(1).max(4096).refine((path) => isAbsolute(path), 'нужен полный путь к файлу'))
+  .min(1)
+  .max(1000);
+
 const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
 const TranscribeRequestSchema = z.object({
   meetingId: MeetingIdSchema,
@@ -114,18 +129,18 @@ const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
   [IPC.recorderStarted]: z.object({
     meetingId: MeetingIdSchema,
-    tracks: z.array(z.object({ kind: TrackKindSchema, startedAt: z.number().finite() })).min(1),
+    tracks: z.array(z.object({ kind: RecordedTrackKindSchema, startedAt: z.number().finite() })).min(1),
     micLabel: z.string().max(500),
     systemFailure: FailureSchema.nullable(),
   }),
   [IPC.recorderStartFailed]: z.object({ meetingId: MeetingIdSchema, failure: FailureSchema }),
-  [IPC.recorderChunk]: z.object({ meetingId: MeetingIdSchema, kind: TrackKindSchema, data: Bytes }),
+  [IPC.recorderChunk]: z.object({ meetingId: MeetingIdSchema, kind: RecordedTrackKindSchema, data: Bytes }),
   [IPC.recorderPeaks]: z.object({
     meetingId: MeetingIdSchema,
     mic: z.number().finite(),
     system: z.number().finite().nullable(),
   }),
-  [IPC.recorderTrackEnded]: z.object({ meetingId: MeetingIdSchema, kind: TrackKindSchema }),
+  [IPC.recorderTrackEnded]: z.object({ meetingId: MeetingIdSchema, kind: RecordedTrackKindSchema }),
   [IPC.recorderStopped]: z.object({ meetingId: MeetingIdSchema }),
 } satisfies Record<RecorderMessageChannel, z.ZodType>;
 
@@ -220,6 +235,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.chooseLibraryDir, async (_arg, event) => {
     if (deps.controller.getState().phase !== 'idle') throw new Error(LIBRARY_LOCKED);
     if (deps.controller.getState().stopDialog) throw new Error(STOP_DIALOG_OPEN);
+    if (deps.importer.isBusy()) throw new Error(IMPORT_RUNNING);
     const owner = BrowserWindow.fromWebContents(event.sender);
     const options: Electron.OpenDialogOptions = {
       title: 'Папка библиотеки TextMeet',
@@ -229,9 +245,10 @@ export function registerIpc(deps: IpcDeps): void {
     const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
     const picked = result.filePaths[0];
     if (result.canceled || !picked) return settingsState();
-    // Пока было открыто окно выбора, запись могли начать клавишей или из трея.
+    // Пока было открыто окно выбора, запись могли начать клавишей или из трея, а файлы — перетащить в окно.
     if (deps.controller.getState().phase !== 'idle') throw new Error(LIBRARY_LOCKED);
     if (deps.controller.getState().stopDialog) throw new Error(STOP_DIALOG_OPEN);
+    if (deps.importer.isBusy()) throw new Error(IMPORT_RUNNING);
     await deps.settings.update({ libraryDir: picked });
     return settingsState();
   });
@@ -344,6 +361,31 @@ export function registerIpc(deps: IpcDeps): void {
     deps.search.remove(id);
     deps.libraryChanged();
   });
+
+  handle(IPC.copyMeeting, (arg) => copyMeeting(deps.exporting, MeetingIdSchema.parse(arg)));
+
+  handle(IPC.saveMeeting, (arg) => {
+    const request = SaveMeetingSchema.parse(arg);
+    return saveMeeting(deps.exporting, request.meetingId, request.format);
+  });
+
+  handle(IPC.pickImportFiles, async (_arg, event) => {
+    const owner = BrowserWindow.fromWebContents(event.sender);
+    const options: Electron.OpenDialogOptions = {
+      title: 'Импорт файла',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Аудио и видео', extensions: IMPORT_EXTENSIONS },
+        { name: 'Все файлы', extensions: ['*'] },
+      ],
+    };
+    const result = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    return result.canceled ? [] : result.filePaths;
+  });
+
+  handle(IPC.importFiles, (arg) => deps.importer.addFiles(deps.libraryDir(), ImportPathsSchema.parse(arg)));
+
+  handle(IPC.getImportProgress, () => deps.importer.progress());
 
   handle(IPC.getAppInfo, () => deps.appInfo());
 

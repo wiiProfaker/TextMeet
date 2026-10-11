@@ -17,8 +17,9 @@ import {
   type StopDialogData,
 } from '../../shared/recording';
 import type { Settings } from '../../shared/settings';
-import { fsErrorReason, humanFsError } from '../fs/fs-errors';
-import { audioDir, createMeeting, removeMeetingDir, updateMeeting } from '../library/library';
+import { humanFsError, humanFsReason } from '../fs/fs-errors';
+import { audioDir, createMeeting, meetingDir, removeMeetingDir, updateMeeting } from '../library/library';
+import { exists } from '../library/meeting-delete';
 import type { Logger } from '../logger';
 import {
   micProblem,
@@ -73,7 +74,7 @@ export interface ControllerDeps {
   /** Свести дорожки встречи из этой библиотеки (папку могли сменить, пока шла запись). */
   enqueueMix(libraryDir: string, meetingId: string): void;
   /** Ответ в окне «Запись остановлена» сохранён — встреча уходит в очередь расшифровки (и при «Пропустить»). */
-  enqueueTranscription(libraryDir: string, meetingId: string): void;
+  enqueueTranscription(libraryDir: string, meetingId: string): Promise<void>;
   openTracks?: typeof openTrackFiles;
   timeouts?: { startMs: number; stopMs: number };
 }
@@ -187,12 +188,22 @@ export class RecordingController {
       }));
       saved = true;
     } catch (err) {
-      throw humanFsError('Не удалось сохранить ответ в окне «Запись остановлена»', err);
+      throw humanFsError(`Не удалось сохранить ответ в окне «${this.dialogTitle(answer.meetingId)}»`, err);
     } finally {
       if ((saved || skipped) && this.state.stopDialog?.meetingId === answer.meetingId) this.showNextStopDialog();
     }
     this.deps.libraryChanged();
-    this.deps.enqueueTranscription(libraryDir, answer.meetingId);
+    this.deps
+      .enqueueTranscription(libraryDir, answer.meetingId)
+      .catch((err: unknown) => this.transcriptionNotQueued(libraryDir, answer.meetingId, err))
+      .catch((err: unknown) => this.deps.logger.error('Не удалось сообщить, что расшифровка не началась', err));
+  }
+
+  /** Встречу не удалось поставить в очередь. Её папку удалили — сказать нечего: это сделал сам человек. */
+  private async transcriptionNotQueued(libraryDir: string, meetingId: string, err: unknown): Promise<void> {
+    this.deps.logger.error(`Не удалось поставить встречу ${meetingId} в очередь расшифровки`, err);
+    // Удалена — только если папки нет; недоступная папка (нет прав, сбой диска) — повод сказать.
+    if (await exists(meetingDir(libraryDir, meetingId))) this.deps.notify(notificationTexts.transcribeNotQueued());
   }
 
   start(): Promise<void> {
@@ -488,7 +499,13 @@ export class RecordingController {
       if (session.interrupted) this.deps.notify(notificationTexts.interrupted());
       else if (reason === 'user') this.deps.notify(notificationTexts.stopped(durationSec), true);
       if (reason === 'mic-ended') this.deps.notify(notificationTexts.micEnded());
-      this.resetToIdle(session, { meetingId: meeting.id, title: meeting.title, durationSec });
+      this.resetToIdle(session, {
+        kind: 'recording',
+        meetingId: meeting.id,
+        title: meeting.title,
+        durationSec,
+        fileName: null,
+      });
       this.deps.showMainWindow();
     }
     this.deps.libraryChanged();
@@ -506,7 +523,7 @@ export class RecordingController {
 
   private onDiskError(err: unknown): void {
     this.deps.logger.error('Не удалось записать кусок дорожки на диск', err);
-    this.deps.notify(notificationTexts.stoppedByDisk(fsErrorReason(err)));
+    this.deps.notify(notificationTexts.stoppedByDisk(humanFsReason(err)));
     // Куски, пришедшие до открытия файлов, пишутся ещё во время старта: остановить можно, только когда запись пойдёт.
     if (this.state.phase === 'starting' && this.session) this.session.diskError = true;
     else void this.stop('disk');
@@ -514,7 +531,7 @@ export class RecordingController {
 
   /** meeting.json не обновился: встреча пока числится «идёт запись», её исправит восстановление при запуске. */
   private saveFailed(err: unknown): void {
-    this.deps.notify(notificationTexts.saveFailed(fsErrorReason(err)));
+    this.deps.notify(notificationTexts.saveFailed(humanFsReason(err)));
     this.deps.libraryChanged();
   }
 
@@ -546,10 +563,21 @@ export class RecordingController {
     this.deps.notify(notificationTexts.startFailed(problem), true);
   }
 
+  /** Окно после импорта: сразу, если других окон нет, иначе — в очередь за ними. */
+  queueDialog(dialog: StopDialogData): void {
+    if (this.state.stopDialog) this.waitingDialogs.push(dialog);
+    else this.update({ stopDialog: dialog });
+  }
+
   /** Встречу удалили: её окно «Запись остановлена» больше не нужно — ни открытое, ни ждущее. */
   dropStopDialog(meetingId: string): void {
     this.waitingDialogs = this.waitingDialogs.filter((dialog) => dialog.meetingId !== meetingId);
     if (this.state.stopDialog?.meetingId === meetingId) this.showNextStopDialog();
+  }
+
+  private dialogTitle(meetingId: string): string {
+    const dialog = [this.state.stopDialog, ...this.waitingDialogs].find((d) => d?.meetingId === meetingId);
+    return dialog?.kind === 'import' ? 'Файл добавлен' : 'Запись остановлена';
   }
 
   private showNextStopDialog(): void {

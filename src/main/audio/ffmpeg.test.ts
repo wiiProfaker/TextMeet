@@ -1,7 +1,7 @@
 import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
-import { FFMPEG_CANCELLED, parseProgressDuration, resolveFfmpegPath, runFfmpeg } from './ffmpeg';
+import { FFMPEG_CANCELLED, FfmpegExitError, parseProgressDuration, resolveFfmpegPath, runFfmpeg } from './ffmpeg';
 
 describe('resolveFfmpegPath', () => {
   it('points inside app.asar.unpacked in the installed app', () => {
@@ -52,10 +52,20 @@ describe('runFfmpeg', () => {
     expect(run.durationSec).toBeCloseTo(2, 1);
   });
 
+  it('reports how much sound is done while it works', async () => {
+    const seen: number[] = [];
+    const out = join(makeTempDir(), 'tone.opus');
+    const args = ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=3', '-c:a', 'libopus', '-f', 'ogg', out];
+    const run = await runFfmpeg(resolveFfmpegPath(), args, { onProgress: (seconds) => seen.push(seconds) });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    expect(seen.at(-1)).toBeCloseTo(run.durationSec ?? 0, 3);
+  });
+
   it('rejects with the tail of the ffmpeg log', async () => {
-    await expect(runFfmpeg(resolveFfmpegPath(), ['-i', join(makeTempDir(), 'нет.webm'), '-f', 'null', '-'])).rejects.toThrow(
-      /ffmpeg завершился с кодом \d+: .+/,
-    );
+    const run = runFfmpeg(resolveFfmpegPath(), ['-i', join(makeTempDir(), 'нет.webm'), '-f', 'null', '-']);
+    await expect(run).rejects.toThrow(/ffmpeg завершился с кодом \d+: .+/);
+    await expect(run).rejects.toBeInstanceOf(FfmpegExitError);
   });
 
   it('stops ffmpeg that stays silent too long', async () => {
@@ -83,6 +93,8 @@ describe('runFfmpeg', () => {
   });
 
   it('rejects when the binary cannot be started', async () => {
-    await expect(runFfmpeg(join(makeTempDir(), 'no-ffmpeg.exe'), [])).rejects.toMatchObject({ code: 'ENOENT' });
+    const run = runFfmpeg(join(makeTempDir(), 'no-ffmpeg.exe'), []);
+    await expect(run).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(run).rejects.not.toBeInstanceOf(FfmpegExitError);
   });
 });

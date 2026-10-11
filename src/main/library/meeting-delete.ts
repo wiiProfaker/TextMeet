@@ -11,6 +11,7 @@ export const deleteTexts = {
   recording: 'Эта встреча сейчас записывается — сначала остановите запись.',
   transcribing: 'Аудио нельзя удалить, пока встреча ждёт расшифровки или расшифровывается.',
   mixing: 'Запись ещё готовится к прослушиванию — удалите аудио чуть позже.',
+  importing: 'Звук из файла ещё копируется — удалите встречу целиком или дождитесь конца импорта.',
   noAudio: 'Аудио этой встречи уже удалено.',
 } as const;
 
@@ -27,6 +28,10 @@ export interface DeleteDeps {
     cancel(libraryDir: string, meetingId: string): Promise<void>;
     isPending(libraryDir: string, meetingId: string): boolean;
     enqueue(libraryDir: string, meetingId: string): void;
+  };
+  /** Импорт файла: отмена отвечает, как вернуть файл в очередь (null — встреча не импортировалась). */
+  importer: {
+    cancel(libraryDir: string, meetingId: string): Promise<(() => void) | null>;
   };
   logger: Pick<Logger, 'warn'>;
   /** Убрать окно «Запись остановлена» этой встречи (открытое или ждущее). */
@@ -56,7 +61,7 @@ export async function audioSize(libraryDir: string, meetingId: string): Promise<
 }
 
 /** Папки нет — только по ENOENT/ENOTDIR; любая другая ошибка (занят, нет прав, диск) — «есть», путь удаления её покажет. */
-const exists = (path: string): Promise<boolean> =>
+export const exists = (path: string): Promise<boolean> =>
   fsp.stat(path).then(
     () => true,
     (err: unknown) => {
@@ -70,6 +75,7 @@ export async function deleteAudio(deps: DeleteDeps, meetingId: string): Promise<
   const libraryDir = deps.libraryDir();
   const meeting = await readMeeting(libraryDir, meetingId);
   if (deps.isRecording(meetingId)) throw new Error(deleteTexts.recording);
+  if (meeting.status === 'importing') throw new Error(deleteTexts.importing);
   if (meeting.status === 'queued' || meeting.status === 'transcribing') throw new Error(deleteTexts.transcribing);
   if (deps.mixer.isPending(libraryDir, meetingId)) throw new Error(deleteTexts.mixing);
   if (meeting.audioDeleted) throw new Error(deleteTexts.noAudio);
@@ -108,7 +114,7 @@ async function restoreJobs(deps: DeleteDeps, libraryDir: string, meetingId: stri
 }
 
 /**
- * Папку встречи — в Корзину. Сначала отменяются её расшифровка и сведение (они держат файлы); после переноса
+ * Папку встречи — в Корзину. Сначала отменяются её импорт, расшифровка и сведение (они держат файлы); после переноса
  * убирается её окно «Запись остановлена». Перенос не удался — отменённое ставится обратно, иначе встреча так и висела
  * бы «в очереди» без задачи, а запись — «готовится». Работает и для папки, которую не удалось прочитать. Папки уже нет
  * (убрали в Проводнике, повторный вызов) — встреча считается удалённой.
@@ -117,6 +123,7 @@ export async function deleteMeeting(deps: DeleteDeps, meetingId: string): Promis
   const libraryDir = deps.libraryDir();
   const dir = meetingDir(libraryDir, meetingId);
   if (deps.isRecording(meetingId)) throw new Error(deleteTexts.recording);
+  const restoreImport = await deps.importer.cancel(libraryDir, meetingId);
   await deps.transcription.cancel(libraryDir, meetingId);
   const wasMixing = deps.mixer.isPending(libraryDir, meetingId);
   await deps.mixer.cancel(libraryDir, meetingId);
@@ -126,6 +133,7 @@ export async function deleteMeeting(deps: DeleteDeps, meetingId: string): Promis
     } catch (err) {
       // Папка исчезла за время попыток — удалять нечего.
       if (await exists(dir)) {
+        restoreImport?.();
         await restoreJobs(deps, libraryDir, meetingId, wasMixing);
         throw err;
       }

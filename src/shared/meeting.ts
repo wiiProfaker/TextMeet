@@ -5,8 +5,12 @@ export const MEETING_ID_PATTERN = /^\d{4}-\d{2}-\d{2}_\d{4}_[0-9a-f]{6}$/;
 
 export const MeetingIdSchema = z.string().regex(MEETING_ID_PATTERN);
 export const MeetingSourceSchema = z.enum(['recording', 'import']);
-export const MeetingStatusSchema = z.enum(['recording', 'recorded', 'queued', 'transcribing', 'done', 'error']);
-export const TrackKindSchema = z.enum(['mic', 'system']);
+/** importing — звук из файла ещё копируется в папку встречи (План 5). */
+export const MeetingStatusSchema = z.enum(['importing', 'recording', 'recorded', 'queued', 'transcribing', 'done', 'error']);
+/** file — единственная дорожка встречи из файла (импорт). */
+export const TrackKindSchema = z.enum(['mic', 'system', 'file']);
+/** Дорожки, которые пишет окно записи: дорожка file бывает только у встречи из файла. */
+export const RecordedTrackKindSchema = TrackKindSchema.exclude(['file']);
 
 /** Дорожка записи: файл в папке audio/ и сдвиг её начала от начала самой ранней дорожки. */
 export const TrackSchema = z.object({
@@ -38,6 +42,8 @@ export const MeetingSchema = z.looseObject({
   recovered: z.boolean().default(false),
   /** Аудио удалили (в Корзину), текст остался. Дорожек у такой встречи нет. */
   audioDeleted: z.boolean().default(false),
+  /** Имя исходного файла встречи из файла (без пути); null — встреча записана программой. */
+  sourceFileName: z.string().min(1).max(255).nullable().default(null),
 });
 
 export type Meeting = z.infer<typeof MeetingSchema>;

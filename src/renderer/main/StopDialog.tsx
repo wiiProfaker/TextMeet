@@ -4,9 +4,16 @@ import { errorText } from './errors';
 import { formatDurationWithSeconds } from './format';
 import { keepFocusInside } from './focus';
 import { EMPTY_CHOICE, readChoice } from './participants';
-import { ParticipantsPicker } from './ParticipantsPicker';
+import { FILE_QUESTION, ParticipantsPicker } from './ParticipantsPicker';
 
-/** «Запись остановлена»: название и число участников (подсказка для разделения по голосам). */
+/** Строка под заголовком: «42 мин 15 с · уже сохранена в библиотеке» или «47 мин 12 с · «Созвон.mp4»». */
+function dialogMeta(data: StopDialogData): string {
+  const parts = data.durationSec === null ? [] : [formatDurationWithSeconds(data.durationSec)];
+  parts.push(data.kind === 'import' ? `«${data.fileName ?? 'файл'}»` : 'уже сохранена в библиотеке');
+  return parts.join(' · ');
+}
+
+/** «Запись остановлена» / «Файл добавлен»: название и число участников (подсказка для разделения по голосам). */
 export function StopDialog({ data, onError }: { data: StopDialogData; onError(message: string): void }) {
   const [title, setTitle] = useState(data.title);
   const [participants, setParticipants] = useState(EMPTY_CHOICE);
@@ -57,19 +64,21 @@ export function StopDialog({ data, onError }: { data: StopDialogData; onError(me
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        data-stop-dialog
         tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !saving) void finish(null);
           if (e.key === 'Tab' && dialog.current) keepFocusInside(dialog.current, e);
         }}
       >
-        <h2 id={titleId}>Запись остановлена</h2>
-        <div className="meta">{formatDurationWithSeconds(data.durationSec)} · уже сохранена в библиотеке</div>
+        <h2 id={titleId}>{data.kind === 'import' ? 'Файл добавлен' : 'Запись остановлена'}</h2>
+        <div className="meta">{dialogMeta(data)}</div>
         <label className="lab">
           Название
           <input className="inp" value={title} maxLength={200} onChange={(e) => setTitle(e.currentTarget.value)} />
         </label>
         <ParticipantsPicker
+          question={data.kind === 'import' ? FILE_QUESTION : undefined}
           value={participants}
           onChange={(next) => {
             setParticipants(next);

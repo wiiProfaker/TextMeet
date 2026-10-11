@@ -17,9 +17,9 @@ export function knownFsReason(err: unknown): string | null {
   return (code && REASONS[code]) || null;
 }
 
-/** «нет прав на эту папку» для EACCES; иначе — текст самой ошибки. */
-export function fsErrorReason(err: unknown): string {
-  return knownFsReason(err) ?? (err instanceof Error ? err.message : String(err));
+/** Причина для человека: знакомый код — понятным текстом, незнакомый — общими словами, без текста системы и путей. */
+export function humanFsReason(err: unknown): string {
+  return knownFsReason(err) ?? 'файл занят или недоступен';
 }
 
 /**
@@ -27,5 +27,5 @@ export function fsErrorReason(err: unknown): string {
  * и путей: они остаются в cause (и в журнале).
  */
 export function humanFsError(action: string, err: unknown): Error {
-  return new Error(`${action}: ${knownFsReason(err) ?? 'файл занят или недоступен'}`, { cause: err });
+  return new Error(`${action}: ${humanFsReason(err)}`, { cause: err });
 }

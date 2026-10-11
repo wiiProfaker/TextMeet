@@ -1,6 +1,38 @@
 // Форматирование для людей, общее для main (уведомления, диалоги) и окон.
 const pad = (n: number): string => String(n).padStart(2, '0');
 
+/** Месяцы в родительном падеже: «27 сентября». */
+export const MONTHS_GENITIVE = [
+  'января',
+  'февраля',
+  'марта',
+  'апреля',
+  'мая',
+  'июня',
+  'июля',
+  'августа',
+  'сентября',
+  'октября',
+  'ноября',
+  'декабря',
+];
+
+/** «27 сентября 2026, 16:20» (местное время). */
+export function formatLongDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Время реплики: «1:05», «12:04», «1:02:05». */
+export function formatTimestamp(seconds: number): string {
+  const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
 /** Длительность для списка и уведомлений: «меньше минуты», «42 мин», «1 ч 04 мин». */
 export function formatDurationShort(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return '—';

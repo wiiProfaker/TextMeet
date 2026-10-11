@@ -1,9 +1,9 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fsp, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { RecorderStartCommand, RecordingState } from '../../shared/recording';
+import type { RecorderStartCommand, RecordingState, StopDialogData } from '../../shared/recording';
 import { makeTempDir } from '../../test-support/temp-dir';
-import { audioDir, MEETING_FILE, meetingDir, readMeeting } from '../library/library';
+import { audioDir, createMeeting, MEETING_FILE, meetingDir, readMeeting } from '../library/library';
 import type { Logger } from '../logger';
 import { MIC_ACCESS_DENIED, notificationTexts, RECORDER_BROKEN, RECORDER_NOT_READY, RECORDER_TIMEOUT } from '../texts';
 import { RecordingController, type ControllerDeps } from './controller';
@@ -50,7 +50,7 @@ function harness(overrides: Partial<ControllerDeps> = {}) {
     emitPeaks: vi.fn(),
     libraryChanged: vi.fn(),
     enqueueMix: vi.fn(),
-    enqueueTranscription: vi.fn(),
+    enqueueTranscription: vi.fn(async () => undefined),
     timeouts: { startMs: 300, stopMs: 300 },
     ...overrides,
   };
@@ -159,7 +159,7 @@ describe('RecordingController — normal recording', () => {
       phase: 'idle',
       meetingId: null,
       systemAudioNext: true,
-      stopDialog: { meetingId: command.meetingId, title: recording.title, durationSec: 42.5 },
+      stopDialog: { kind: 'recording', meetingId: command.meetingId, title: recording.title, durationSec: 42.5, fileName: null },
     });
   });
 
@@ -467,6 +467,21 @@ describe('RecordingController — during a recording', () => {
     await vi.waitFor(() => expect(h.state().phase).toBe('idle'));
     expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.stoppedByDisk('на диске закончилось место'));
     expect((await readMeeting(h.lib, command.meetingId)).status).toBe('recorded');
+  });
+
+  it('does not show the system text of an unknown disk error', async () => {
+    let failWrite: (err: unknown) => void = () => undefined;
+    const h = harness({
+      openTracks: async (_dir, _kinds, onError) => {
+        failWrite = onError;
+        return { append: vi.fn(), close: async () => undefined };
+      },
+    });
+    await h.startRecording();
+    failWrite(Object.assign(new Error("UNKNOWN: write 'C:/Users/Ирина/TextMeet/mic.webm'"), { code: 'UNKNOWN' }));
+    await vi.waitFor(() =>
+      expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.stoppedByDisk('файл занят или недоступен')),
+    );
   });
 
   it('stops when the disk fails while the chunks kept during the start are written', async () => {
@@ -835,6 +850,38 @@ describe('RecordingController — stop dialog', () => {
     expect(h.state().stopDialog).toBeNull();
   });
 
+  it('shows the dialog of an added file at once, or after the dialogs already waiting', async () => {
+    const h = harness();
+    const fileDialog = (meetingId: string): StopDialogData => ({
+      kind: 'import',
+      meetingId,
+      title: 'Созвон с Ириной',
+      durationSec: null,
+      fileName: 'Созвон с Ириной.mp4',
+    });
+    h.controller.queueDialog(fileDialog('2026-10-04_1620_aaaaaa'));
+    expect(h.state().stopDialog).toEqual(fileDialog('2026-10-04_1620_aaaaaa'));
+
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    h.controller.queueDialog(fileDialog('2026-10-04_1620_bbbbbb'));
+    expect(h.state().stopDialog?.meetingId).toBe('2026-10-04_1620_aaaaaa');
+    h.controller.dropStopDialog('2026-10-04_1620_aaaaaa');
+    expect(h.state().stopDialog?.meetingId).toBe(command.meetingId);
+    await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Запись', participantsHint: 2 });
+    expect(h.state().stopDialog?.meetingId).toBe('2026-10-04_1620_bbbbbb');
+  });
+
+  it('names the dialog of an added file when its answer cannot be saved', async () => {
+    const h = harness();
+    const meeting = await createMeeting(h.lib, { source: 'import', status: 'recorded' });
+    h.controller.queueDialog({ kind: 'import', meetingId: meeting.id, title: 'a', durationSec: 3, fileName: 'a.mp3' });
+    breakMeetingFile(h.lib, meeting.id);
+    await expect(
+      h.controller.finishStopDialog({ meetingId: meeting.id, title: 'a', participantsHint: 3 }),
+    ).rejects.toThrow(/^Не удалось сохранить ответ в окне «Файл добавлен»/);
+  });
+
   it('drops the dialog of a deleted meeting, open or waiting', async () => {
     const h = harness();
     const ids: string[] = [];
@@ -867,6 +914,51 @@ describe('RecordingController — stop dialog', () => {
 
     expect(h.state().startProblem).toEqual(RECORDER_NOT_READY);
     expect(h.state().stopDialog?.meetingId).toBe(command.meetingId);
+  });
+
+  it('tells how to transcribe by hand when the meeting could not be queued', async () => {
+    const h = harness({ enqueueTranscription: vi.fn(async () => Promise.reject(new Error('очередь'))) });
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    vi.mocked(h.deps.notify).mockClear();
+    await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: 2 });
+    await vi.waitFor(() => expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.transcribeNotQueued()));
+    expect(h.deps.logger.error).toHaveBeenCalled();
+  });
+
+  it('says nothing when the meeting was deleted before it could be queued', async () => {
+    const h = harness({
+      // Встречу удалили, пока ответ сохранялся: очередь её уже не находит.
+      enqueueTranscription: vi.fn(async (lib: string, id: string) => {
+        rmSync(meetingDir(lib, id), { recursive: true, force: true });
+        throw new Error('нет встречи');
+      }),
+    });
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    vi.mocked(h.deps.notify).mockClear();
+    await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: 2 });
+    await vi.waitFor(() => expect(h.deps.logger.error).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(h.deps.notify).not.toHaveBeenCalled();
+  });
+
+  it('still tells when the meeting folder cannot be checked: unavailable is not deleted', async () => {
+    const stat = fsp.stat.bind(fsp);
+    const h = harness({ enqueueTranscription: vi.fn(async () => Promise.reject(new Error('очередь'))) });
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    vi.mocked(h.deps.notify).mockClear();
+    const denied = vi.spyOn(fsp, 'stat').mockImplementation(((path: string, ...rest: unknown[]) =>
+      path === meetingDir(h.lib, command.meetingId)
+        ? Promise.reject(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }))
+        : stat(path, ...(rest as []))) as typeof fsp.stat);
+    try {
+      await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: 2 });
+      await vi.waitFor(() => expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.transcribeNotQueued()));
+    } finally {
+      denied.mockRestore();
+    }
   });
 
   it('closes the dialog on skip even when the answer cannot be saved, and still reports the error', async () => {

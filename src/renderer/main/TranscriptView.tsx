@@ -7,7 +7,8 @@ import { shouldFollow } from './playback';
 import { SegmentText } from './SegmentText';
 import { SpeakerChips } from './SpeakerChips';
 import { SpeakerMenu, type SpeakerOption } from './SpeakerMenu';
-import { formatTimestamp, speakerTone } from './transcription-format';
+import { formatTimestamp } from '../../shared/format';
+import { speakerTone } from './transcription-format';
 
 interface Props {
   transcript: Transcript;

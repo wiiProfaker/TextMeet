@@ -55,6 +55,7 @@ async function setup(patch: Partial<Meeting> = {}) {
         calls.push(`remix ${id}`);
       }),
     },
+    importer: { cancel: vi.fn(async () => null) },
     logger: { warn: vi.fn() },
     dropStopDialog: vi.fn((id: string) => {
       calls.push(`dialog ${id}`);
@@ -142,6 +143,7 @@ describe('deleteAudio', () => {
     ['transcribing', { status: 'transcribing' }, {}, deleteTexts.transcribing],
     ['still mixing', {}, { mixing: true }, deleteTexts.mixing],
     ['without audio already', { audioDeleted: true, tracks: [] }, {}, deleteTexts.noAudio],
+    ['whose file is still being copied', { status: 'importing', source: 'import' }, {}, deleteTexts.importing],
   ] as const)('refuses a meeting %s', async (_name, patch, state, message) => {
     const { lib, meeting, deps } = await setup(patch as Partial<Meeting>);
     vi.mocked(deps.isRecording).mockReturnValue('recording' in state);
@@ -174,6 +176,23 @@ describe('deleteMeeting', () => {
       `remix ${meeting.id}`,
     ]);
     expect(existsSync(meetingDir(lib, meeting.id))).toBe(true);
+  });
+
+  it('stops the import of its file first, and puts the file back when the trash fails', async () => {
+    const { lib, meeting, deps } = await setup({ status: 'importing', source: 'import', tracks: [] });
+    const restore = vi.fn();
+    vi.mocked(deps.importer.cancel).mockResolvedValue(restore);
+    deps.trash = async () => {
+      throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+    };
+    await expect(deleteMeeting(deps, meeting.id)).rejects.toThrow('Не удалось переместить в Корзину');
+    expect(deps.importer.cancel).toHaveBeenCalledWith(lib, meeting.id);
+    expect(restore).toHaveBeenCalledOnce();
+    deps.trash = folderTrash(join(makeTempDir('textmeet-bin-'), 'bin'));
+    restore.mockClear();
+    await deleteMeeting(deps, meeting.id);
+    expect(restore).not.toHaveBeenCalled();
+    expect(existsSync(meetingDir(lib, meeting.id))).toBe(false);
   });
 
   it('does not requeue a meeting that was not waiting for transcription or mixing', async () => {

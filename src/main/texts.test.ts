@@ -133,7 +133,7 @@ describe('transcription texts', () => {
   it('tells how to start transcription by hand when it could not be queued', () => {
     expect(notificationTexts.transcribeNotQueued()).toEqual({
       title: 'Расшифровка не началась',
-      body: 'Запись сохранена. Откройте встречу в TextMeet и нажмите «Расшифровать».',
+      body: 'Встреча сохранена. Откройте её в TextMeet и нажмите «Расшифровать».',
     });
   });
 

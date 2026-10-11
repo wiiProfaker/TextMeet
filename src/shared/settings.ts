@@ -18,6 +18,8 @@ export const SettingsSchema = z.object({
    * из-за одного поля остальные настройки не сбрасываются.
    */
   asrModel: z.enum(ASR_MODEL_IDS).default(DEFAULT_ASR_MODEL).catch(DEFAULT_ASR_MODEL),
+  /** Папка, куда последний раз сохраняли выгрузку встречи; null — «Документы». Испорченная — забывается. */
+  exportDir: z.string().min(1).nullable().default(null).catch(null),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

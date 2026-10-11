@@ -1,25 +1,11 @@
 import type { LaunchAtLoginNotice } from '../../shared/ipc';
 import { entryId, type Meeting, type MeetingListEntry } from '../../shared/meeting';
-import { formatBytes, formatDurationShort } from '../../shared/format';
+import { formatBytes, formatDurationShort, MONTHS_GENITIVE } from '../../shared/format';
+import type { ImportProgress } from '../../shared/import';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { percent } from './transcription-format';
 
 const pad = (n: number): string => String(n).padStart(2, '0');
-
-const MONTHS_GENITIVE = [
-  'января',
-  'февраля',
-  'марта',
-  'апреля',
-  'мая',
-  'июня',
-  'июля',
-  'августа',
-  'сентября',
-  'октября',
-  'ноября',
-  'декабря',
-];
 
 /** 75 → «1:15», 3725 → «1:02:05», неизвестно → «—». Для таймера и плеера. */
 export function formatDuration(seconds: number | null): string {
@@ -52,13 +38,6 @@ export function formatDurationWithSeconds(seconds: number): string {
 export function formatTimeOfDay(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** «27 сентября 2026, 16:20» */
-export function formatLongDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** 1 участник, 2 участника, 5 участников, 21 участник. */
@@ -148,10 +127,19 @@ export interface MeetingNote {
 
 /**
  * Пометка встречи в списке — только если есть о чём сказать. У готовой встречи пометки нет.
- * progress — ход расшифровки этой встречи (если она сейчас расшифровывается).
+ * progress — ход расшифровки этой встречи (если она сейчас расшифровывается), importing — ход её импорта.
  */
-export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress): MeetingNote | null {
+export function meetingNote(
+  meeting: Meeting,
+  progress?: TranscriptionProgress,
+  importing?: ImportProgress,
+): MeetingNote | null {
   switch (meeting.status) {
+    case 'importing':
+      if (importing?.waiting) return { text: 'ждёт импорта', tone: 'accent' };
+      return importing && importing.fraction !== null
+        ? { text: `импорт ${percent(importing.fraction)}%`, tone: 'accent' }
+        : { text: 'импорт…', tone: 'accent' };
     case 'recording':
       return { text: 'идёт запись', tone: 'live' };
     case 'recorded':
@@ -169,12 +157,17 @@ export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress):
         ? { text: `расшифровка ${percent(progress.fraction)}%`, tone: 'accent' }
         : { text: 'расшифровка…', tone: 'accent' };
     case 'error':
+      if (isImportFailure(meeting)) return { text: 'импорт прервался', tone: 'error' };
       // С дорожками ошибка — у расшифровки (запись сохранилась); без них — у самой записи.
       return { text: meeting.tracks.length > 0 ? 'ошибка расшифровки' : 'ошибка', tone: 'error' };
     case 'done':
       return null;
   }
 }
+
+/** Встреча из файла, чей звук так и не скопировался (сбой программы или неудача, после которой папку не убрать). */
+export const isImportFailure = (meeting: Meeting): boolean =>
+  meeting.status === 'error' && meeting.source === 'import' && meeting.tracks.length === 0 && !meeting.audioDeleted;
 
 /** Текст окна «Удалить аудио?»: «Запись (32 мин, 15 МБ) переместится в Корзину…»; размер — когда узнали. */
 export function deleteAudioText(durationSec: number | null, bytes: number | null): string {

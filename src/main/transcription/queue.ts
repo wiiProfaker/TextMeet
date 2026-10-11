@@ -132,6 +132,7 @@ export class TranscriptionQueue {
     try {
       await updateMeeting(libraryDir, meetingId, (m) => {
         if (m.status === 'recording') throw new Error(transcriptionTexts.stillRecording);
+        if (m.status === 'importing') throw new Error(transcriptionTexts.stillImporting);
         if (m.audioDeleted) throw new Error(transcriptionTexts.audioDeleted);
         return {
           ...m,

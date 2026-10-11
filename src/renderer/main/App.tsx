@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppInfo, SettingsState } from '../../shared/ipc';
 import { entryId } from '../../shared/meeting';
 import { IDLE_RECORDING_STATE } from '../../shared/recording';
@@ -6,6 +6,8 @@ import { isSearchable, queryWords } from '../../shared/search-text';
 import { errorText } from './errors';
 import {
   SearchViewContext,
+  useFileDrop,
+  useImportProgress,
   useMeetings,
   useMicrophones,
   useRecordingState,
@@ -13,7 +15,8 @@ import {
   useTranscriptionProgress,
   type SearchView,
 } from './hooks';
-import { SettingsIcon } from './icons';
+import { ImportIcon, SettingsIcon } from './icons';
+import { NO_IMPORT_NOTES, importNotesText, importOutcome, withCopyFailure, type ImportNotes } from './import-format';
 import { LivePane } from './LivePane';
 import { MeetingList } from './MeetingList';
 import { MeetingPane } from './MeetingPane';
@@ -25,14 +28,22 @@ import { StopDialog } from './StopDialog';
 
 type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
 
+/** Бросили файлы без пути на диске (из архива, вложение письма). */
+const NO_FILE_PATH = 'Не удалось получить путь к файлу — перетащите его из папки или нажмите «Импорт файла».';
+/** Причина для файла без пути, брошенного вместе с другими файлами. */
+const NO_PATH_REASON = 'у файла нет пути на диске — перетащите его из папки или нажмите «Импорт файла»';
+
 /** Один и тот же пустой список: новый [] перерисовывал бы каждую реплику открытой встречи. */
 const NO_WORDS: readonly string[] = [];
 
 export function App() {
   const recording = useRecordingState() ?? IDLE_RECORDING_STATE;
+  const latestRecording = useRef(recording);
+  latestRecording.current = recording;
   const { entries, error: listError } = useMeetings();
   const microphones = useMicrophones();
   const progress = useTranscriptionProgress();
+  const imports = useImportProgress();
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -76,10 +87,83 @@ export function App() {
   }, [liveId]);
   // Щелчок по уведомлению «Текст встречи готов» — показать эту встречу.
   useEffect(() => window.textmeet.onShowMeeting((id) => setSelection({ kind: 'meeting', id })), []);
-  const dialogId = recording.stopDialog?.meetingId ?? null;
+  // Что строка ошибки говорит об импорте — до следующего добавления, когда ничего не добавляется. Звук файла не
+  // скопировался уже после того, как встреча появилась (main её убрал): сообщение — к итогу добавления и к прежним
+  // таким сообщениям, а если файлы ещё проверяются, эту встречу не открывать.
+  const importNotes = useRef<ImportNotes>(NO_IMPORT_NOTES);
+  useEffect(
+    () =>
+      window.textmeet.onImportFailed((failure) => {
+        importNotes.current = withCopyFailure(importNotes.current, failure);
+        setError(importNotesText(importNotes.current));
+      }),
+    [],
+  );
+
+  /**
+   * Добавить файлы: первая новая встреча открывается, неудачи (и файлы без пути — pathless) — строкой ошибки слева.
+   * Добавления идут по очереди: файлы, брошенные, пока проверяются прежние, ждут их и не перемешиваются с ними.
+   */
+  const importChain = useRef<Promise<void>>(Promise.resolve());
+  /** Сколько добавлений идёт или ждёт очереди. */
+  const importsInFlight = useRef(0);
+  const importFiles = useCallback((paths: string[], pathless: string[] = []) => {
+    const run = async () => {
+      try {
+        const added = await window.textmeet.importFiles(paths);
+        const noPath = pathless.map((name) => ({ name, reason: NO_PATH_REASON }));
+        const result = { ...added, failed: [...added.failed, ...noPath] };
+        const { open, notes, message } = importOutcome(result, importNotes.current);
+        importNotes.current = notes;
+        // Идёт запись, открыто «Запись остановлена» или окно открытой встречи (подтверждение, «Расшифровать заново») —
+        // не уводим от них: новая встреча и так видна в списке. «Файл добавлен» (окно StopDialog, data-stop-dialog) от
+        // выбора встречи не зависит.
+        const { phase, stopDialog } = latestRecording.current;
+        const busy =
+          phase !== 'idle' ||
+          stopDialog?.kind === 'recording' ||
+          document.querySelector('[aria-modal="true"]:not([data-stop-dialog])') !== null;
+        if (open && !busy) setSelection({ kind: 'meeting', id: open });
+        // Отказов нет — ошибку не трогаем: её мог успеть показать неудачный импорт другого файла.
+        if (message) setError(message);
+      } catch (err) {
+        setError(errorText(err));
+      } finally {
+        importsInFlight.current -= 1;
+      }
+    };
+    // Прежнюю ошибку стираем, только если ничего не добавляется: отказ предыдущего добавления не должен пропасть,
+    // едва появившись.
+    if (importsInFlight.current === 0) {
+      importNotes.current = NO_IMPORT_NOTES;
+      setError(null);
+    }
+    importsInFlight.current += 1;
+    // Очередь не встаёт, даже если добавление неожиданно сорвалось.
+    importChain.current = importChain.current.then(run).catch((err: unknown) => setError(errorText(err)));
+  }, []);
+  const dragging = useFileDrop((paths, pathless) => {
+    if (paths.length > 0) importFiles(paths, pathless);
+    else setError(NO_FILE_PATH);
+  });
+  const [picking, setPicking] = useState(false);
+  // Кнопка занята, только пока открыто окно выбора: добавление идёт в фоне, и его не ждём.
+  const pickFiles = () => {
+    setPicking(true);
+    window.textmeet
+      .pickImportFiles()
+      .then((paths) => {
+        if (paths.length > 0) importFiles(paths);
+      })
+      .catch((err: unknown) => setError(errorText(err)))
+      .finally(() => setPicking(false));
+  };
+  // Окно «Запись остановлена» показывает свою встречу. Окно «Файл добавлен» встречу не переключает: импорт идёт в фоне,
+  // и человек в это время может работать с другой встречей (первая добавленная открывается, когда файлы проверены).
+  const recordingDialogId = recording.stopDialog?.kind === 'recording' ? recording.stopDialog.meetingId : null;
   useEffect(() => {
-    if (dialogId) setSelection({ kind: 'meeting', id: dialogId });
-  }, [dialogId]);
+    if (recordingDialogId) setSelection({ kind: 'meeting', id: recordingDialogId });
+  }, [recordingDialogId]);
 
   const platform = info?.platform ?? 'win32';
   // Клавишу держит другая программа — не показываем её как способ начать и остановить запись.
@@ -116,6 +200,7 @@ export function App() {
         key={entryId(selectedEntry)}
         entry={selectedEntry}
         progress={progress.get(entryId(selectedEntry)) ?? null}
+        importing={imports.get(entryId(selectedEntry)) ?? null}
         onError={setError}
         onDeleted={() => selectNeighbor(entryId(selectedEntry))}
       />
@@ -158,16 +243,14 @@ export function App() {
               recording={recording}
               selectedId={selectedId}
               progress={progress}
+              imports={imports}
               onSelect={(id) => setSelection({ kind: 'meeting', id })}
             />
           )}
           <div className="foot">
-            <button
-              type="button"
-              className="btn grow"
-              onClick={() => window.textmeet.openLibraryDir().catch((err: unknown) => setError(errorText(err)))}
-            >
-              Открыть папку библиотеки
+            <button type="button" className="btn grow" disabled={picking} aria-busy={picking} onClick={pickFiles}>
+              <ImportIcon />
+              Импорт файла
             </button>
             <button
               type="button"
@@ -182,6 +265,15 @@ export function App() {
         </aside>
         {pane}
         {recording.stopDialog && <StopDialog data={recording.stopDialog} onError={setError} />}
+        {dragging && (
+          <div className="shade drop-shade" aria-hidden="true">
+            <div className="drop-frame">
+              <ImportIcon />
+              <b>Отпустите — файлы станут встречами</b>
+              <span>Аудио или видео: mp3, m4a, wav, ogg, mp4, mov, mkv… Из видео берётся только звук.</span>
+            </div>
+          </div>
+        )}
       </div>
     </SearchViewContext.Provider>
   );

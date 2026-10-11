@@ -3,6 +3,7 @@
 // проверка типов. preload работает в песочнице и не может подключать zod и другие пакеты:
 // здесь только константы и типы, из других файлов — только `import type`.
 import type { AsrModelId } from './asr-models';
+import type { ImportFailedEvent, ImportProgress, ImportResult } from './import';
 import type { Meeting, MeetingListEntry } from './meeting';
 import type {
   Peaks,
@@ -58,6 +59,11 @@ export const IPC = {
   downloadModel: 'models:download',
   cancelModelDownload: 'models:cancel-download',
   selectModel: 'models:select',
+  copyMeeting: 'export:copy',
+  saveMeeting: 'export:save',
+  pickImportFiles: 'import:pick',
+  importFiles: 'import:files',
+  getImportProgress: 'import:get-progress',
   // main → главное окно (события).
   recordingState: 'recording:state',
   recordingPeaks: 'recording:peaks',
@@ -67,6 +73,9 @@ export const IPC = {
   modelsChanged: 'models:changed',
   /** Щелчок по уведомлению о расшифровке: показать эту встречу. */
   showMeeting: 'app:show-meeting',
+  importProgress: 'import:progress',
+  /** Звук файла не скопировался: недоделанная встреча убрана. */
+  importFailed: 'import:failed',
   // main → окно записи (команды).
   recorderStart: 'recorder:start',
   recorderStop: 'recorder:stop',
@@ -130,6 +139,19 @@ export interface EditTranscriptRequest {
   transcriptVersion: string;
 }
 
+/** Формат «Сохранить…»: Word или обычный текст. */
+export type ExportFormat = 'docx' | 'txt';
+
+export interface SaveMeetingRequest {
+  meetingId: string;
+  format: ExportFormat;
+}
+
+export interface SaveMeetingResult {
+  /** false — окно сохранения закрыли без сохранения. */
+  saved: boolean;
+}
+
 export interface EditedTranscript {
   meeting: Meeting;
   transcript: Transcript;
@@ -169,6 +191,11 @@ export interface MainInvokeContract {
   [IPC.downloadModel]: { arg: AsrModelId; result: ModelsState };
   [IPC.cancelModelDownload]: { arg: AsrModelId; result: ModelsState };
   [IPC.selectModel]: { arg: AsrModelId; result: ModelsState };
+  [IPC.copyMeeting]: { arg: string; result: void };
+  [IPC.saveMeeting]: { arg: SaveMeetingRequest; result: SaveMeetingResult };
+  [IPC.pickImportFiles]: { arg: void; result: string[] };
+  [IPC.importFiles]: { arg: string[]; result: ImportResult };
+  [IPC.getImportProgress]: { arg: void; result: ImportProgress[] };
 }
 export type MainInvokeChannel = keyof MainInvokeContract;
 export type InvokeArg<C extends MainInvokeChannel> = MainInvokeContract[C]['arg'];
@@ -182,6 +209,8 @@ export interface MainEventContract {
   [IPC.transcriptionProgress]: TranscriptionProgress[];
   [IPC.modelsChanged]: void;
   [IPC.showMeeting]: string;
+  [IPC.importProgress]: ImportProgress[];
+  [IPC.importFailed]: ImportFailedEvent;
 }
 export type MainEventChannel = keyof MainEventContract;
 
@@ -254,12 +283,25 @@ export interface TextMeetApi {
   cancelModelDownload(id: AsrModelId): Promise<ModelsState>;
   /** «Выбрать»: модель для новых встреч. */
   selectModel(id: AsrModelId): Promise<ModelsState>;
+  /** «Скопировать всё»: текст встречи — в буфер обмена (обычный и оформленный). */
+  copyMeeting(meetingId: string): Promise<void>;
+  /** «Сохранить в Word» / «Сохранить как текст»: окно сохранения системы и файл. */
+  saveMeeting(request: SaveMeetingRequest): Promise<SaveMeetingResult>;
+  /** «Импорт файла»: окно выбора файлов системы; пусто — передумали. */
+  pickImportFiles(): Promise<string[]>;
+  /** Добавить файлы: встречи создаются сразу, звук копируется по очереди. */
+  importFiles(paths: string[]): Promise<ImportResult>;
+  getImportProgress(): Promise<ImportProgress[]>;
+  /** Путь перетащенного в окно файла (в песочнице File.path нет). */
+  pathForFile(file: File): string;
   onRecordingState(listener: Listener<RecordingState>): Unsubscribe;
   onPeaks(listener: Listener<Peaks>): Unsubscribe;
   onLibraryChanged(listener: () => void): Unsubscribe;
   onTranscriptionProgress(listener: Listener<TranscriptionProgress[]>): Unsubscribe;
   onModelsChanged(listener: () => void): Unsubscribe;
   onShowMeeting(listener: Listener<string>): Unsubscribe;
+  onImportProgress(listener: Listener<ImportProgress[]>): Unsubscribe;
+  onImportFailed(listener: Listener<ImportFailedEvent>): Unsubscribe;
 }
 
 /** API скрытого окна записи: window.recorder */

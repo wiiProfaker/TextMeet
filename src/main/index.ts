@@ -2,6 +2,8 @@ import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import {
   app,
+  clipboard,
+  ClipboardItem,
   dialog,
   globalShortcut,
   Menu,
@@ -447,6 +449,27 @@ async function start(logger: Logger): Promise<void> {
       mixer,
       logger,
       dropStopDialog: (id) => controller.dropStopDialog(id),
+    },
+    exporting: {
+      libraryDir,
+      chooseSavePath: async (defaultPath, format) => {
+        const options: Electron.SaveDialogOptions = {
+          title: format === 'docx' ? 'Сохранить в Word' : 'Сохранить как текст',
+          defaultPath,
+          filters: [
+            format === 'docx' ? { name: 'Документ Word', extensions: ['docx'] } : { name: 'Текст', extensions: ['txt'] },
+          ],
+        };
+        const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+        const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+        return result.canceled || !result.filePath ? null : result.filePath;
+      },
+      writeClipboard: (data) => clipboard.write([new ClipboardItem({ 'text/plain': data.text, 'text/html': data.html })]),
+      exportDir: () => settings.get().exportDir,
+      rememberExportDir: (dir) => settings.update({ exportDir: dir }),
+      documentsDir: () => app.getPath('documents'),
+      platform: process.platform,
+      logger,
     },
     transcription: queue,
     models,

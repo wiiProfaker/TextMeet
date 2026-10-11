@@ -74,6 +74,8 @@ const api: TextMeetApi = {
   downloadModel: (id) => invoke(IPC.downloadModel, id),
   cancelModelDownload: (id) => invoke(IPC.cancelModelDownload, id),
   selectModel: (id) => invoke(IPC.selectModel, id),
+  copyMeeting: (meetingId) => invoke(IPC.copyMeeting, meetingId),
+  saveMeeting: (request) => invoke(IPC.saveMeeting, request),
   onRecordingState: (listener) => subscribe(IPC.recordingState, listener),
   onPeaks: (listener) => subscribe(IPC.recordingPeaks, listener),
   onLibraryChanged: (listener) => subscribe(IPC.libraryChanged, () => listener()),

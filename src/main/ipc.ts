@@ -22,6 +22,7 @@ import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr
 import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
 import { SpeakerIdSchema } from '../shared/transcript';
 import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
+import { copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import { listMeetings, meetingDir } from './library/library';
@@ -58,6 +59,7 @@ export interface IpcDeps {
   libraryChanged(): void;
   search: Pick<SearchIndex, 'refresh' | 'invalidate' | 'remove' | 'search'>;
   deletion: DeleteDeps;
+  exporting: ExportDeps;
   transcription: {
     enqueue(libraryDir: string, meetingId: string, participantsHint?: number | null, model?: AsrModelId): Promise<void>;
     progress(): TranscriptionProgress[];
@@ -102,6 +104,8 @@ const EditTranscriptSchema = z.object({
   edit: TranscriptEditSchema,
   transcriptVersion: z.iso.datetime(),
 });
+
+const SaveMeetingSchema = z.object({ meetingId: MeetingIdSchema, format: z.enum(['docx', 'txt']) });
 
 const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
 const TranscribeRequestSchema = z.object({
@@ -343,6 +347,13 @@ export function registerIpc(deps: IpcDeps): void {
     }
     deps.search.remove(id);
     deps.libraryChanged();
+  });
+
+  handle(IPC.copyMeeting, (arg) => copyMeeting(deps.exporting, MeetingIdSchema.parse(arg)));
+
+  handle(IPC.saveMeeting, (arg) => {
+    const request = SaveMeetingSchema.parse(arg);
+    return saveMeeting(deps.exporting, request.meetingId, request.format);
   });
 
   handle(IPC.getAppInfo, () => deps.appInfo());

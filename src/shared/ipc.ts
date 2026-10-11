@@ -58,6 +58,8 @@ export const IPC = {
   downloadModel: 'models:download',
   cancelModelDownload: 'models:cancel-download',
   selectModel: 'models:select',
+  copyMeeting: 'export:copy',
+  saveMeeting: 'export:save',
   // main → главное окно (события).
   recordingState: 'recording:state',
   recordingPeaks: 'recording:peaks',
@@ -130,6 +132,19 @@ export interface EditTranscriptRequest {
   transcriptVersion: string;
 }
 
+/** Формат «Сохранить…»: Word или обычный текст. */
+export type ExportFormat = 'docx' | 'txt';
+
+export interface SaveMeetingRequest {
+  meetingId: string;
+  format: ExportFormat;
+}
+
+export interface SaveMeetingResult {
+  /** false — окно сохранения закрыли без сохранения. */
+  saved: boolean;
+}
+
 export interface EditedTranscript {
   meeting: Meeting;
   transcript: Transcript;
@@ -169,6 +184,8 @@ export interface MainInvokeContract {
   [IPC.downloadModel]: { arg: AsrModelId; result: ModelsState };
   [IPC.cancelModelDownload]: { arg: AsrModelId; result: ModelsState };
   [IPC.selectModel]: { arg: AsrModelId; result: ModelsState };
+  [IPC.copyMeeting]: { arg: string; result: void };
+  [IPC.saveMeeting]: { arg: SaveMeetingRequest; result: SaveMeetingResult };
 }
 export type MainInvokeChannel = keyof MainInvokeContract;
 export type InvokeArg<C extends MainInvokeChannel> = MainInvokeContract[C]['arg'];
@@ -254,6 +271,10 @@ export interface TextMeetApi {
   cancelModelDownload(id: AsrModelId): Promise<ModelsState>;
   /** «Выбрать»: модель для новых встреч. */
   selectModel(id: AsrModelId): Promise<ModelsState>;
+  /** «Скопировать всё»: текст встречи — в буфер обмена (обычный и оформленный). */
+  copyMeeting(meetingId: string): Promise<void>;
+  /** «Сохранить в Word» / «Сохранить как текст»: окно сохранения системы и файл. */
+  saveMeeting(request: SaveMeetingRequest): Promise<SaveMeetingResult>;
   onRecordingState(listener: Listener<RecordingState>): Unsubscribe;
   onPeaks(listener: Listener<Peaks>): Unsubscribe;
   onLibraryChanged(listener: () => void): Unsubscribe;

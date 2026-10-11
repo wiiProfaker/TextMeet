@@ -24,6 +24,8 @@ export const copyTexts = {
   missing: 'файл не найден',
   noSpace: 'на диске закончилось место',
   broken: 'файл повреждён или его формат не поддерживается',
+  /** Копия цела, но её держит другая программа (антивирус, индексатор) — переименовать не дали. */
+  locked: 'файл занят другой программой',
 } as const;
 
 const onlySound = (input: string): string[] => ['-i', input, '-map', '0:a:0', '-vn', '-sn', '-dn'];
@@ -55,6 +57,9 @@ export interface CopyOptions {
   onProgress?(seconds: number): void;
   /** Свободное место в папке, байт; null — неизвестно. */
   freeBytes(dir: string): Promise<number | null>;
+  /** Сколько раз пробовать переименовать занятую копию и с какой паузой; по умолчанию — около 2,75 с. */
+  renameAttempts?: number;
+  renameDelayMs?: number;
 }
 
 export interface CopyResult {
@@ -76,15 +81,20 @@ async function failureReason(source: string, dir: string, options: CopyOptions, 
   return copyTexts.broken;
 }
 
-async function renameLocked(from: string, to: string): Promise<void> {
+const isLocked = (err: unknown): boolean => LOCK_CODES.has((err as NodeJS.ErrnoException | null)?.code ?? '');
+
+/** Переименование, пока файл держит другая программа; отмена (встречу удаляют) прекращает попытки. */
+async function renameLocked(from: string, to: string, options: CopyOptions): Promise<void> {
+  const attempts = options.renameAttempts ?? RENAME_ATTEMPTS;
+  const delayMs = options.renameDelayMs ?? RENAME_DELAY_MS;
   for (let attempt = 1; ; attempt++) {
     try {
       await fsp.rename(from, to);
       return;
     } catch (err) {
-      const locked = LOCK_CODES.has((err as NodeJS.ErrnoException | null)?.code ?? '');
-      if (!locked || attempt >= RENAME_ATTEMPTS) throw err;
-      await new Promise((resolve) => setTimeout(resolve, RENAME_DELAY_MS));
+      if (!isLocked(err) || attempt >= attempts || options.signal?.aborted) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      if (options.signal?.aborted) throw err;
     }
   }
 }
@@ -111,13 +121,14 @@ export async function copySourceAudio(
       result = { durationSec: await run(reencodeArgs(source, part)), reencoded: true };
     }
     copied = true;
-    await renameLocked(part, join(audioDir, SOURCE_FILE));
+    await renameLocked(part, join(audioDir, SOURCE_FILE), options);
     return result;
   } catch (err) {
     await fsp.rm(part, { force: true }).catch(() => undefined);
     if (options.signal?.aborted) throw err;
-    // Звук скопирован, файл не дали переименовать: причина — от системы, а не «файл повреждён».
-    if (copied) throw new Error(knownFsReason(err) ?? copyTexts.broken, { cause: err });
+    // Звук скопирован, файл не дали переименовать: причина — от системы, а не «файл повреждён». EPERM и EACCES здесь —
+    // почти всегда антивирус, а не права: ffmpeg только что записал копию в эту же папку.
+    if (copied) throw new Error(isLocked(err) ? copyTexts.locked : (knownFsReason(err) ?? copyTexts.broken), { cause: err });
     throw new Error(await failureReason(source, audioDir, options, err), { cause: err });
   }
 }

@@ -284,10 +284,21 @@ describe('Importer queue', () => {
     const t = setup({ copy, examine: async () => goodFile(null) });
     const [id = ''] = (await t.importer.addFiles(lib, ['a.mp4'])).added;
     await until(() => calls.length === 1);
-    const busy = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
-    calls[0]?.fail(new Error(knownFsReason(busy) ?? '', { cause: busy }));
+    const readOnly = Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' });
+    calls[0]?.fail(new Error(knownFsReason(readOnly) ?? '', { cause: readOnly }));
     await until(() => t.failed.length === 1);
-    expect(t.failed).toEqual([{ meetingId: id, name: 'a.mp4', reason: knownFsReason(busy) }]);
+    expect(t.failed).toEqual([{ meetingId: id, name: 'a.mp4', reason: knownFsReason(readOnly) }]);
+  });
+
+  it('says that the copy is held by another program', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    const [id = ''] = (await t.importer.addFiles(lib, ['a.mp4'])).added;
+    await until(() => calls.length === 1);
+    calls[0]?.fail(new Error(copyTexts.locked));
+    await until(() => t.failed.length === 1);
+    expect(t.failed).toEqual([{ meetingId: id, name: 'a.mp4', reason: copyTexts.locked }]);
   });
 
   it('keeps working after a listener throws, and never deletes a meeting whose sound was copied', async () => {

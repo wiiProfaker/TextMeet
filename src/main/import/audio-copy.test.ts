@@ -118,7 +118,7 @@ describe('copySourceAudio', () => {
       await rename(from, to);
     });
     try {
-      expect((await copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty })).reencoded).toBe(false);
+      expect((await copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty, renameDelayMs: 0 })).reencoded).toBe(false);
     } finally {
       busy.mockRestore();
     }
@@ -126,24 +126,60 @@ describe('copySourceAudio', () => {
     expect(readdirSync(audio)).toEqual([SOURCE_FILE]);
   });
 
-  it('gives up on a file that stays locked without re-encoding, says why plainly and leaves nothing behind', async () => {
+  it.each(['EPERM', 'EBUSY', 'EACCES'])(
+    'gives up on a file that stays locked (%s) without re-encoding, says it is held and leaves nothing behind',
+    async (code) => {
+      const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
+      await phoneRecording(source, 1);
+      const audio = makeTempDir('textmeet-copy-audio-');
+      const busy = vi.spyOn(fsp, 'rename').mockRejectedValue(locked(code));
+      try {
+        // Копия цела — её держит другая программа: ни «файл повреждён», ни «нет прав на эту папку» здесь не правда.
+        const options = { freeBytes: plenty, renameAttempts: 3, renameDelayMs: 0 };
+        await expect(copySourceAudio(ffmpeg, source, audio, options)).rejects.toThrow(copyTexts.locked);
+        expect(busy).toHaveBeenCalledTimes(3);
+      } finally {
+        busy.mockRestore();
+      }
+      expect(soundRuns()).toBe(1);
+      expect(readdirSync(audio)).toEqual([]);
+    },
+  );
+
+  it('names another system reason for a copy that cannot be renamed, without retrying', async () => {
     const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
     await phoneRecording(source, 1);
     const audio = makeTempDir('textmeet-copy-audio-');
-    const busy = vi.spyOn(fsp, 'rename').mockRejectedValue(locked('EBUSY'));
-    const started = Date.now();
+    const readOnly = vi.spyOn(fsp, 'rename').mockRejectedValue(locked('EROFS'));
     try {
-      // Копия цела — её только не дали переименовать: «файл повреждён» здесь неправда.
-      await expect(copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty })).rejects.toThrow(knownFsReason(locked('EBUSY')) ?? '');
-      expect(busy.mock.calls.length).toBeGreaterThan(1);
-      // Защитник проверяет большой файл секунды: ждём не меньше двух.
-      expect(Date.now() - started).toBeGreaterThanOrEqual(2_000);
+      await expect(copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty, renameDelayMs: 0 })).rejects.toThrow(
+        knownFsReason(locked('EROFS')) ?? '',
+      );
+      expect(readOnly).toHaveBeenCalledTimes(1);
+    } finally {
+      readOnly.mockRestore();
+    }
+  });
+
+  it('stops retrying a locked copy when the import is cancelled', async () => {
+    const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
+    await phoneRecording(source, 1);
+    const audio = makeTempDir('textmeet-copy-audio-');
+    const abort = new AbortController();
+    // Встречу удаляют, пока переименование ждёт антивирус.
+    const busy = vi.spyOn(fsp, 'rename').mockImplementation(async () => {
+      abort.abort();
+      throw locked('EPERM');
+    });
+    try {
+      const options = { freeBytes: plenty, signal: abort.signal, renameAttempts: 5, renameDelayMs: 0 };
+      await expect(copySourceAudio(ffmpeg, source, audio, options)).rejects.toThrow();
+      expect(busy).toHaveBeenCalledTimes(1);
     } finally {
       busy.mockRestore();
     }
-    expect(soundRuns()).toBe(1);
     expect(readdirSync(audio)).toEqual([]);
-  }, 15_000);
+  });
 
   it('says the disk is full when ffmpeg ran out of space, even after the partial copy is gone', async () => {
     const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');

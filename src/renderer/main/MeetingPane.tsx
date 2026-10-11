@@ -1,12 +1,12 @@
 import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
-import { formatDurationShort } from '../../shared/format';
+import { formatDurationShort, formatLongDate } from '../../shared/format';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import { transcriptModelTitle, type SpeakerId } from '../../shared/transcript';
 import { hasManualChanges, isStaleEditMessage, type TranscriptEdit } from '../../shared/transcript-edit';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
-import { formatLongDate, participantsText } from './format';
+import { participantsText } from './format';
 import { SearchViewContext, usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, TrashIcon, WarnIcon } from './icons';
 import { MeetingTitle } from './MeetingTitle';

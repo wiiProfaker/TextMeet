@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { formatBytes, formatDownloaded, formatDurationShort, formatMegabytes } from './format';
+import {
+  formatBytes,
+  formatDownloaded,
+  formatDurationShort,
+  formatLongDate,
+  formatMegabytes,
+  formatTimestamp,
+} from './format';
 
 describe('formatDurationShort', () => {
   it.each([
@@ -18,6 +25,26 @@ describe('formatDurationShort', () => {
     expect(formatDurationShort(null)).toBe('—');
     expect(formatDurationShort(-1)).toBe('—');
     expect(formatDurationShort(Number.NaN)).toBe('—');
+  });
+});
+
+describe('formatLongDate', () => {
+  it('formats the long date in local time', () => {
+    expect(formatLongDate(new Date(2026, 8, 27, 16, 5).toISOString())).toBe('27 сентября 2026, 16:05');
+  });
+
+  it('shows a dash for garbage', () => {
+    expect(formatLongDate('вчера')).toBe('—');
+  });
+});
+
+describe('formatTimestamp', () => {
+  it('shows minutes and seconds, and hours when needed', () => {
+    expect(formatTimestamp(0)).toBe('0:00');
+    expect(formatTimestamp(65.9)).toBe('1:05');
+    expect(formatTimestamp(724)).toBe('12:04');
+    expect(formatTimestamp(3725)).toBe('1:02:05');
+    expect(formatTimestamp(Number.NaN)).toBe('0:00');
   });
 });
 

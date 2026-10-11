@@ -7,7 +7,6 @@ import {
   formatClock,
   formatDuration,
   formatDurationWithSeconds,
-  formatLongDate,
   formatTimeOfDay,
   groupByDay,
   hotkeyKeys,
@@ -78,15 +77,12 @@ describe('formatDurationWithSeconds', () => {
 });
 
 describe('dates', () => {
-  it('formats the time of day and the long date in local time', () => {
-    const iso = new Date(2026, 8, 27, 16, 5).toISOString();
-    expect(formatTimeOfDay(iso)).toBe('16:05');
-    expect(formatLongDate(iso)).toBe('27 сентября 2026, 16:05');
+  it('formats the time of day in local time', () => {
+    expect(formatTimeOfDay(new Date(2026, 8, 27, 16, 5).toISOString())).toBe('16:05');
   });
 
   it('shows a dash for garbage', () => {
     expect(formatTimeOfDay('вчера')).toBe('—');
-    expect(formatLongDate('вчера')).toBe('—');
   });
 });
 

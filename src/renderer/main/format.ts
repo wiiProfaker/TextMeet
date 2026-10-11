@@ -1,25 +1,10 @@
 import type { LaunchAtLoginNotice } from '../../shared/ipc';
 import { entryId, type Meeting, type MeetingListEntry } from '../../shared/meeting';
-import { formatBytes, formatDurationShort } from '../../shared/format';
+import { formatBytes, formatDurationShort, MONTHS_GENITIVE } from '../../shared/format';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { percent } from './transcription-format';
 
 const pad = (n: number): string => String(n).padStart(2, '0');
-
-const MONTHS_GENITIVE = [
-  'января',
-  'февраля',
-  'марта',
-  'апреля',
-  'мая',
-  'июня',
-  'июля',
-  'августа',
-  'сентября',
-  'октября',
-  'ноября',
-  'декабря',
-];
 
 /** 75 → «1:15», 3725 → «1:02:05», неизвестно → «—». Для таймера и плеера. */
 export function formatDuration(seconds: number | null): string {
@@ -52,13 +37,6 @@ export function formatDurationWithSeconds(seconds: number): string {
 export function formatTimeOfDay(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? '—' : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-/** «27 сентября 2026, 16:20» */
-export function formatLongDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 /** 1 участник, 2 участника, 5 участников, 21 участник. */

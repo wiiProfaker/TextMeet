@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import {
   barFraction,
-  formatTimestamp,
   percent,
   progressView,
   speakerTone,
@@ -16,16 +15,6 @@ const progress = (patch: Partial<TranscriptionProgress>): TranscriptionProgress 
   fraction: 0.3,
   download: null,
   ...patch,
-});
-
-describe('formatTimestamp', () => {
-  it('shows minutes and seconds, and hours when needed', () => {
-    expect(formatTimestamp(0)).toBe('0:00');
-    expect(formatTimestamp(65.9)).toBe('1:05');
-    expect(formatTimestamp(724)).toBe('12:04');
-    expect(formatTimestamp(3725)).toBe('1:02:05');
-    expect(formatTimestamp(Number.NaN)).toBe('0:00');
-  });
 });
 
 describe('stageText', () => {

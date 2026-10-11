@@ -2,7 +2,8 @@ import { splitByRanges, type TextRange } from '../../shared/search-text';
 import type { SearchMeeting } from '../../shared/search';
 import { searchFoundText, searchMeetingMeta } from './format';
 import type { SearchState } from './hooks';
-import { formatTimestamp, speakerTone } from './transcription-format';
+import { formatTimestamp } from '../../shared/format';
+import { speakerTone } from './transcription-format';
 
 /** Текст с подсвеченными совпадениями. */
 export function Marked({ text, ranges }: { text: string; ranges: readonly TextRange[] }) {

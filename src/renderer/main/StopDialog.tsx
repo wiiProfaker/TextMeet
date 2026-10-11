@@ -64,6 +64,7 @@ export function StopDialog({ data, onError }: { data: StopDialogData; onError(me
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        data-stop-dialog
         tabIndex={-1}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !saving) void finish(null);

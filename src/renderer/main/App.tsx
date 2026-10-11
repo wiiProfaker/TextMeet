@@ -16,7 +16,7 @@ import {
   type SearchView,
 } from './hooks';
 import { ImportIcon, SettingsIcon } from './icons';
-import { importFailedText, importOutcome, type CopyFailures } from './import-format';
+import { NO_IMPORT_NOTES, importNotesText, importOutcome, withCopyFailure, type ImportNotes } from './import-format';
 import { LivePane } from './LivePane';
 import { MeetingList } from './MeetingList';
 import { MeetingPane } from './MeetingPane';
@@ -32,8 +32,6 @@ type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
 const NO_FILE_PATH = 'Не удалось получить путь к файлу — перетащите его из папки или нажмите «Импорт файла».';
 /** Причина для файла без пути, брошенного вместе с другими файлами. */
 const NO_PATH_REASON = 'у файла нет пути на диске — перетащите его из папки или нажмите «Импорт файла»';
-
-const NO_COPY_FAILURES: CopyFailures = { ids: new Set(), texts: [] };
 
 /** Один и тот же пустой список: новый [] перерисовывал бы каждую реплику открытой встречи. */
 const NO_WORDS: readonly string[] = [];
@@ -89,16 +87,15 @@ export function App() {
   }, [liveId]);
   // Щелчок по уведомлению «Текст встречи готов» — показать эту встречу.
   useEffect(() => window.textmeet.onShowMeeting((id) => setSelection({ kind: 'meeting', id })), []);
-  // Звук файла не скопировался уже после того, как встреча появилась (main её убрал). Запоминаем до следующего
-  // добавления: если файлы ещё проверяются, такую встречу не открывать, а сообщение не затирать итогом добавления.
-  const copyFailures = useRef<CopyFailures>(NO_COPY_FAILURES);
+  // Что строка ошибки говорит об импорте — до следующего добавления, когда ничего не добавляется. Звук файла не
+  // скопировался уже после того, как встреча появилась (main её убрал): сообщение — к итогу добавления и к прежним
+  // таким сообщениям, а если файлы ещё проверяются, эту встречу не открывать.
+  const importNotes = useRef<ImportNotes>(NO_IMPORT_NOTES);
   useEffect(
     () =>
       window.textmeet.onImportFailed((failure) => {
-        const text = importFailedText(failure);
-        const { ids, texts } = copyFailures.current;
-        copyFailures.current = { ids: new Set([...ids, failure.meetingId]), texts: [...texts, text] };
-        setError(text);
+        importNotes.current = withCopyFailure(importNotes.current, failure);
+        setError(importNotesText(importNotes.current));
       }),
     [],
   );
@@ -112,18 +109,22 @@ export function App() {
   const importsInFlight = useRef(0);
   const importFiles = useCallback((paths: string[], pathless: string[] = []) => {
     const run = async () => {
-      copyFailures.current = NO_COPY_FAILURES;
       try {
         const added = await window.textmeet.importFiles(paths);
         const noPath = pathless.map((name) => ({ name, reason: NO_PATH_REASON }));
         const result = { ...added, failed: [...added.failed, ...noPath] };
-        const { open, message } = importOutcome(result, copyFailures.current);
-        // Идёт запись или открыто окно (подтверждение, «Расшифровать заново», «Запись остановлена» / «Файл добавлен») —
-        // не уводим от них: новая встреча и так видна в списке.
+        const { open, notes, message } = importOutcome(result, importNotes.current);
+        importNotes.current = notes;
+        // Идёт запись, открыто «Запись остановлена» или окно открытой встречи (подтверждение, «Расшифровать заново») —
+        // не уводим от них: новая встреча и так видна в списке. «Файл добавлен» (окно StopDialog, data-stop-dialog) от
+        // выбора встречи не зависит.
+        const { phase, stopDialog } = latestRecording.current;
         const busy =
-          latestRecording.current.phase !== 'idle' || document.querySelector('[aria-modal="true"]') !== null;
+          phase !== 'idle' ||
+          stopDialog?.kind === 'recording' ||
+          document.querySelector('[aria-modal="true"]:not([data-stop-dialog])') !== null;
         if (open && !busy) setSelection({ kind: 'meeting', id: open });
-        // Всё добавилось — ошибку не трогаем: её мог успеть показать неудачный импорт другого файла.
+        // Отказов нет — ошибку не трогаем: её мог успеть показать неудачный импорт другого файла.
         if (message) setError(message);
       } catch (err) {
         setError(errorText(err));
@@ -133,9 +134,13 @@ export function App() {
     };
     // Прежнюю ошибку стираем, только если ничего не добавляется: отказ предыдущего добавления не должен пропасть,
     // едва появившись.
-    if (importsInFlight.current === 0) setError(null);
+    if (importsInFlight.current === 0) {
+      importNotes.current = NO_IMPORT_NOTES;
+      setError(null);
+    }
     importsInFlight.current += 1;
-    importChain.current = importChain.current.then(run);
+    // Очередь не встаёт, даже если добавление неожиданно сорвалось.
+    importChain.current = importChain.current.then(run).catch((err: unknown) => setError(errorText(err)));
   }, []);
   const dragging = useFileDrop((paths, pathless) => {
     if (paths.length > 0) importFiles(paths, pathless);
@@ -154,7 +159,7 @@ export function App() {
       .finally(() => setPicking(false));
   };
   // Окно «Запись остановлена» показывает свою встречу. Окно «Файл добавлен» встречу не переключает: импорт идёт в фоне,
-  // и человек в это время может работать с другой встречей (первая добавленная и так открылась при добавлении).
+  // и человек в это время может работать с другой встречей (первая добавленная открывается, когда файлы проверены).
   const recordingDialogId = recording.stopDialog?.kind === 'recording' ? recording.stopDialog.meetingId : null;
   useEffect(() => {
     if (recordingDialogId) setSelection({ kind: 'meeting', id: recordingDialogId });

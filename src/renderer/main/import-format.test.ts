@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { importFailedText, importOutcome, importResultText, importView } from './import-format';
+import {
+  NO_IMPORT_NOTES,
+  importFailedText,
+  importNotesText,
+  importOutcome,
+  importResultText,
+  importView,
+  withCopyFailure,
+} from './import-format';
 
 const noSound = { name: 'отчёт.pdf', reason: 'в файле нет звука' };
 
@@ -33,25 +41,40 @@ describe('importResultText', () => {
 });
 
 describe('importOutcome', () => {
-  const noCopy = { ids: new Set<string>(), texts: [] };
-  const copyFailed = { ids: new Set(['a']), texts: ['Не удалось добавить «a.mp4»: на диске закончилось место.'] };
+  const noSpace = { meetingId: 'a', name: 'a.mp4', reason: 'на диске закончилось место' };
+  const noSpaceText = 'Не удалось добавить «a.mp4»: на диске закончилось место.';
+  const refused = 'Добавлено 2 файла из 3. Не удалось добавить «отчёт.pdf»: в файле нет звука.';
 
-  it('opens the first added meeting and says nothing when every file was added', () => {
-    expect(importOutcome({ added: ['a', 'b'], failed: [] }, noCopy)).toEqual({ open: 'a', message: null });
+  it('opens the first added meeting and leaves the error line alone when every file was added', () => {
+    const outcome = importOutcome({ added: ['a', 'b'], failed: [] }, NO_IMPORT_NOTES);
+    expect(outcome.open).toBe('a');
+    expect(outcome.message).toBeNull();
   });
 
   it('does not open a meeting whose sound could not be copied — it is already removed', () => {
-    expect(importOutcome({ added: ['a', 'b'], failed: [] }, copyFailed)).toEqual({ open: 'b', message: null });
-    expect(importOutcome({ added: ['a'], failed: [] }, copyFailed)).toEqual({ open: null, message: null });
+    const notes = withCopyFailure(NO_IMPORT_NOTES, noSpace);
+    expect(importOutcome({ added: ['a', 'b'], failed: [] }, notes).open).toBe('b');
+    expect(importOutcome({ added: ['a'], failed: [] }, notes).open).toBeNull();
   });
 
-  it('keeps the copy failure next to the files that were refused', () => {
-    expect(importOutcome({ added: ['a', 'b'], failed: [noSound] }, copyFailed)).toEqual({
-      open: 'b',
-      message:
-        'Добавлено 2 файла из 3. Не удалось добавить «отчёт.pdf»: в файле нет звука. ' +
-        'Не удалось добавить «a.mp4»: на диске закончилось место.',
-    });
+  it('keeps a copy failure that came while the files were checked next to the refused files', () => {
+    const outcome = importOutcome({ added: ['a', 'b'], failed: [noSound] }, withCopyFailure(NO_IMPORT_NOTES, noSpace));
+    expect(outcome.message).toBe(`${refused} ${noSpaceText}`);
+  });
+
+  it('a copy failure after the result adds to it, and every failed copy is named', () => {
+    const { notes } = importOutcome({ added: ['a', 'b'], failed: [noSound] }, NO_IMPORT_NOTES);
+    const once = withCopyFailure(notes, noSpace);
+    expect(importNotesText(once)).toBe(`${refused} ${noSpaceText}`);
+    const twice = withCopyFailure(once, { meetingId: 'b', name: 'b.mp4', reason: 'файл повреждён' });
+    expect(importNotesText(twice)).toBe(`${refused} ${noSpaceText} Не удалось добавить «b.mp4»: файл повреждён.`);
+  });
+
+  it('a later batch without refusals keeps the earlier refusal', () => {
+    const first = importOutcome({ added: ['a', 'b'], failed: [noSound] }, NO_IMPORT_NOTES);
+    const second = importOutcome({ added: ['c'], failed: [] }, first.notes);
+    expect(second.message).toBeNull();
+    expect(importNotesText(withCopyFailure(second.notes, noSpace))).toBe(`${refused} ${noSpaceText}`);
   });
 });
 

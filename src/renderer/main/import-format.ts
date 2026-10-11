@@ -1,5 +1,5 @@
 // Тексты импорта для окна (решения Плана 5, §2.1–2.2): чистые функции — проверяются модульными тестами.
-import type { ImportFailure, ImportProgress, ImportResult } from '../../shared/import';
+import type { ImportFailedEvent, ImportFailure, ImportProgress, ImportResult } from '../../shared/import';
 import { pluralize } from './format';
 import { percent } from './transcription-format';
 
@@ -28,27 +28,44 @@ export function importResultText(result: ImportResult): string | null {
 /** Звук файла не скопировался (уже после создания встречи). */
 export const importFailedText = (failure: ImportFailure): string => `Не удалось добавить ${failureText(failure)}.`;
 
-/** Встречи, чей звук не скопировался, пока проверялись файлы добавления (main их уже убрал), и показанные сообщения. */
-export interface CopyFailures {
-  ids: ReadonlySet<string>;
-  texts: readonly string[];
+/**
+ * Что строка ошибки говорит об импорте: итог последнего добавления с отказами и все сообщения о нескопированном звуке
+ * после него (копирование идёт в фоне и может не выйти и до итога, и после). failedIds — встречи, чей звук не
+ * скопировался (main их уже убрал).
+ */
+export interface ImportNotes {
+  result: string | null;
+  failedIds: ReadonlySet<string>;
+  copyFailures: readonly string[];
 }
+
+export const NO_IMPORT_NOTES: ImportNotes = { result: null, failedIds: new Set(), copyFailures: [] };
+
+export const importNotesText = (notes: ImportNotes): string =>
+  [notes.result, ...notes.copyFailures].filter((text) => text !== null).join(' ');
+
+/** Звук ещё одного файла не скопировался: его сообщение — к прежним, а не вместо них. */
+export const withCopyFailure = (notes: ImportNotes, failure: ImportFailedEvent): ImportNotes => ({
+  ...notes,
+  failedIds: new Set([...notes.failedIds, failure.meetingId]),
+  copyFailures: [...notes.copyFailures, importFailedText(failure)],
+});
 
 export interface ImportOutcome {
   /** Какую встречу открыть; null — никакую. */
   open: string | null;
-  /** Строка ошибки; null — не трогать (сообщения о нескопированном звуке уже показаны). */
+  notes: ImportNotes;
+  /** Строка ошибки; null — не трогать (отказов нет). */
   message: string | null;
 }
 
-/**
- * Итог добавления для окна: открыть первую добавленную встречу, которая ещё есть, а сообщения о нескопированном
- * звуке не затирать отказами — показать их следом.
- */
-export function importOutcome(result: ImportResult, copyFailures: CopyFailures): ImportOutcome {
-  const open = result.added.find((id) => !copyFailures.ids.has(id)) ?? null;
+/** Итог добавления для окна: открыть первую добавленную встречу, которая ещё есть; отказы — к сообщениям о звуке. */
+export function importOutcome(result: ImportResult, notes: ImportNotes): ImportOutcome {
+  const open = result.added.find((id) => !notes.failedIds.has(id)) ?? null;
   const text = importResultText(result);
-  return { open, message: text ? [text, ...copyFailures.texts].join(' ') : null };
+  if (!text) return { open, notes, message: null };
+  const next = { ...notes, result: text };
+  return { open, notes: next, message: importNotesText(next) };
 }
 
 export interface ImportView {

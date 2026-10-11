@@ -66,7 +66,7 @@ test('a file added with the button becomes a meeting and is transcribed after it
   launched = await launchApp();
   const { app, page, root, libraryDir } = launched;
   const file = join(root, 'Созвон с Ириной.mp4');
-  // Середина дня по UTC: 4 октября в любом часовом поясе.
+  // Утро по UTC: 4 октября в часовых поясах от UTC−9 до UTC+14.
   await videoWithSound(file, 3, '2026-10-04T09:20:05.000000Z');
   await chooseFiles(app, [file]);
 
@@ -175,6 +175,25 @@ test('files added during a recording or with a dialog open do not take its place
   await page.getByRole('button', { name: 'Импорт файла' }).click();
   await expect(list.getByRole('button', { name: /второй/ })).toBeVisible({ timeout: 15_000 });
   await expect(live).toBeVisible();
+});
+
+test('files added while «Файл добавлен» is open still open the first new meeting', async () => {
+  launched = await launchApp();
+  const { app, page, root } = launched;
+  const first = join(root, 'первый.mp4');
+  const second = join(root, 'второй.mp4');
+  await videoWithSound(first, 1);
+  await videoWithSound(second, 1);
+  const list = page.getByRole('navigation', { name: 'Встречи' });
+
+  await chooseFiles(app, [first]);
+  await page.getByRole('button', { name: 'Импорт файла' }).click();
+  await expect(page.getByRole('dialog', { name: 'Файл добавлен' })).toBeVisible({ timeout: 15_000 });
+  await expect(list.getByRole('button', { name: /первый/ })).toHaveAttribute('aria-current', 'true');
+  // Окно «Файл добавлен» не связано с открытой встречей — новая встреча открывается и при нём.
+  await dropFiles(page, [second]);
+  const added = list.getByRole('button', { name: /второй/ });
+  await expect(added).toHaveAttribute('aria-current', 'true', { timeout: 15_000 });
 });
 
 test('a dropped file without a path is reported together with the files dropped with it', async () => {

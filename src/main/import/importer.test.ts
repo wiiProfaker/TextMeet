@@ -6,6 +6,7 @@ import type { Meeting } from '../../shared/meeting';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { videoWithSound } from '../../test-support/media-files';
 import { FFMPEG_CANCELLED, resolveFfmpegPath } from '../audio/ffmpeg';
+import { knownFsReason } from '../fs/fs-errors';
 import { audioDir, createMeeting, listMeetings, readMeeting } from '../library/library';
 import type { Logger } from '../logger';
 import { copyTexts, SOURCE_FILE, type copySourceAudio, type CopyOptions } from './audio-copy';
@@ -244,6 +245,49 @@ describe('Importer queue', () => {
     calls[1]?.finish();
     await until(() => !t.importer.isBusy());
     expect(calls).toHaveLength(2);
+  });
+
+  it('ignores a late second restore of a file that was put back and already copied', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    const [first = ''] = (await t.importer.addFiles(lib, ['a.mp4'])).added;
+    await until(() => calls.length === 1);
+    const [restoreOne, restoreTwo] = await Promise.all([t.importer.cancel(lib, first), t.importer.cancel(lib, first)]);
+    restoreOne?.();
+    await until(() => calls.length === 2);
+    calls[1]?.finish();
+    await until(() => !t.importer.isBusy());
+    // Второе удаление сорвалось позже, когда файл уже скопирован заново.
+    restoreTwo?.();
+    await tick();
+    expect(t.importer.isBusy()).toBe(false);
+    expect(calls).toHaveLength(2);
+  });
+
+  it('a file put back can be put back again after another failed deletion', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    const [first = ''] = (await t.importer.addFiles(lib, ['a.mp4'])).added;
+    await until(() => calls.length === 1);
+    (await t.importer.cancel(lib, first))?.();
+    await until(() => calls.length === 2);
+    (await t.importer.cancel(lib, first))?.();
+    await until(() => calls.length === 3);
+    expect(t.importer.isPending(lib, first)).toBe(true);
+  });
+
+  it('says plainly why the copy could not be saved when the system names it', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    const [id = ''] = (await t.importer.addFiles(lib, ['a.mp4'])).added;
+    await until(() => calls.length === 1);
+    const busy = Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' });
+    calls[0]?.fail(new Error(knownFsReason(busy) ?? '', { cause: busy }));
+    await until(() => t.failed.length === 1);
+    expect(t.failed).toEqual([{ meetingId: id, name: 'a.mp4', reason: knownFsReason(busy) }]);
   });
 
   it('keeps working after a listener throws, and never deletes a meeting whose sound was copied', async () => {

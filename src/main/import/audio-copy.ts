@@ -4,15 +4,19 @@ import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { TRACK_FILES } from '../../shared/recording';
 import { FfmpegExitError, runFfmpeg } from '../audio/ffmpeg';
+import { knownFsReason } from '../fs/fs-errors';
 
 /** Звук встречи из файла в папке audio/. */
 export const SOURCE_FILE = TRACK_FILES.file;
 /** Меньше этого свободного места после неудачи — причина, скорее всего, в нём. */
 const LOW_SPACE_BYTES = 50 * 1024 * 1024;
-/** Свежий файл ненадолго держат антивирус (Защитник Windows) и индексатор: переименование повторяется. */
+/**
+ * Свежий файл ненадолго держат антивирус (Защитник Windows) и индексатор: переименование повторяется — около 2,75 с,
+ * большой файл Защитник проверяет секунды.
+ */
 const LOCK_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
-const RENAME_ATTEMPTS = 5;
-const RENAME_DELAY_MS = 200;
+const RENAME_ATTEMPTS = 12;
+const RENAME_DELAY_MS = 250;
 /** Так ffmpeg пишет о полном диске; к нашей проверке места копия уже удалена, и место снова есть. */
 const NO_SPACE_OUTPUT = /No space left on device/i;
 
@@ -95,6 +99,7 @@ export async function copySourceAudio(
   const part = join(audioDir, `${SOURCE_FILE}.part`);
   const run = async (args: string[]): Promise<number | null> =>
     (await runFfmpeg(ffmpegPath, args, { signal: options.signal, onProgress: options.onProgress })).durationSec;
+  let copied = false;
   try {
     let result: CopyResult;
     try {
@@ -105,11 +110,14 @@ export async function copySourceAudio(
       await fsp.rm(part, { force: true }).catch(() => undefined);
       result = { durationSec: await run(reencodeArgs(source, part)), reencoded: true };
     }
+    copied = true;
     await renameLocked(part, join(audioDir, SOURCE_FILE));
     return result;
   } catch (err) {
     await fsp.rm(part, { force: true }).catch(() => undefined);
     if (options.signal?.aborted) throw err;
+    // Звук скопирован, файл не дали переименовать: причина — от системы, а не «файл повреждён».
+    if (copied) throw new Error(knownFsReason(err) ?? copyTexts.broken, { cause: err });
     throw new Error(await failureReason(source, audioDir, options, err), { cause: err });
   }
 }

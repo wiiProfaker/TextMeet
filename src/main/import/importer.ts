@@ -66,6 +66,8 @@ const sameJob = (job: ImportJob, libraryDir: string, meetingId: string): boolean
 
 export class Importer {
   private readonly queue: ImportJob[] = [];
+  /** Задания, уже возвращённые в очередь после отменённого удаления. */
+  private readonly restored = new WeakSet<ImportJob>();
   private current: CurrentJob | null = null;
   private running = false;
   private disposed = false;
@@ -212,9 +214,11 @@ export class Importer {
   }
 
   private requeue(job: ImportJob): void {
-    // Встречу удаляли дважды, и оба раза не вышло: файл уже вернулся в очередь.
-    if (this.disposed || this.isPending(job.libraryDir, job.meetingId)) return;
-    this.queue.unshift(job);
+    // Встречу удаляли дважды, и оба раза не вышло: файл возвращается один раз — даже если второй отказ пришёл, когда
+    // возвращённый файл уже скопирован. В очередь идёт новое задание: его можно вернуть, если сорвётся и следующее удаление.
+    if (this.disposed || this.restored.has(job) || this.isPending(job.libraryDir, job.meetingId)) return;
+    this.restored.add(job);
+    this.queue.unshift({ ...job });
     this.report();
     this.kick();
   }
@@ -280,7 +284,9 @@ export class Importer {
       }
       this.deps.logger.error(`Не удалось скопировать звук встречи ${meetingId}`, err);
       const message = err instanceof Error ? err.message : '';
-      await this.discard(job, SHOWN_COPY_REASONS.includes(message) ? message : copyTexts.broken);
+      // Своя причина копирования или понятная причина системы (копию не дали сохранить); остальное — «повреждён».
+      const shown = SHOWN_COPY_REASONS.includes(message) || (err instanceof Error && knownFsReason(err.cause) === message);
+      await this.discard(job, shown ? message : copyTexts.broken);
       return 'failed';
     }
     let meeting: Meeting;

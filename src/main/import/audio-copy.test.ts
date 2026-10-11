@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { oddCodecRecording, phoneRecording, videoWithSound } from '../../test-support/media-files';
 import { FFMPEG_CANCELLED, FfmpegExitError, resolveFfmpegPath, runFfmpeg } from '../audio/ffmpeg';
+import { knownFsReason } from '../fs/fs-errors';
 import { copyArgs, copySourceAudio, copyTexts, reencodeArgs, SOURCE_FILE } from './audio-copy';
 import { ffmpegInfo } from './probe';
 
@@ -125,20 +126,24 @@ describe('copySourceAudio', () => {
     expect(readdirSync(audio)).toEqual([SOURCE_FILE]);
   });
 
-  it('gives up on a file that stays locked without re-encoding and leaves nothing behind', async () => {
+  it('gives up on a file that stays locked without re-encoding, says why plainly and leaves nothing behind', async () => {
     const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
     await phoneRecording(source, 1);
     const audio = makeTempDir('textmeet-copy-audio-');
-    const busy = vi.spyOn(fsp, 'rename').mockRejectedValue(locked('EACCES'));
+    const busy = vi.spyOn(fsp, 'rename').mockRejectedValue(locked('EBUSY'));
+    const started = Date.now();
     try {
-      await expect(copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty })).rejects.toThrow(copyTexts.broken);
+      // Копия цела — её только не дали переименовать: «файл повреждён» здесь неправда.
+      await expect(copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty })).rejects.toThrow(knownFsReason(locked('EBUSY')) ?? '');
       expect(busy.mock.calls.length).toBeGreaterThan(1);
+      // Защитник проверяет большой файл секунды: ждём не меньше двух.
+      expect(Date.now() - started).toBeGreaterThanOrEqual(2_000);
     } finally {
       busy.mockRestore();
     }
     expect(soundRuns()).toBe(1);
     expect(readdirSync(audio)).toEqual([]);
-  });
+  }, 15_000);
 
   it('says the disk is full when ffmpeg ran out of space, even after the partial copy is gone', async () => {
     const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');

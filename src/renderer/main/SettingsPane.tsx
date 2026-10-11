@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { AppInfo, SettingsState } from '../../shared/ipc';
+import { AiSettings } from './AiSettings';
 import { errorText } from './errors';
 import { launchAtLoginNoticeText } from './format';
 import { HotkeyField } from './HotkeyField';
@@ -37,7 +38,7 @@ function Toggle({
   );
 }
 
-/** Настройки: запись, расшифровка и общие. Раздел ИИ появится в Плане 6. */
+/** Настройки: запись, расшифровка, ИИ и общие. */
 export function SettingsPane({ state, info, onChange }: Props) {
   const [error, setError] = useState<string | null>(null);
   const microphones = useMicrophones();
@@ -124,6 +125,11 @@ export function SettingsPane({ state, info, onChange }: Props) {
         </section>
 
         <TranscriptionSettings />
+
+        <AiSettings
+          aiPrompt={settings.aiPrompt}
+          save={(prompt) => void run(() => window.textmeet.setAiPrompt(prompt))}
+        />
 
         <section className="sec">
           <h2>Общие</h2>

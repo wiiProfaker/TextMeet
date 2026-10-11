@@ -47,6 +47,7 @@ const api: TextMeetApi = {
   chooseLibraryDir: () => invoke(IPC.chooseLibraryDir),
   setMicrophone: (deviceId) => invoke(IPC.setMicrophone, deviceId),
   setRecordSounds: (enabled) => invoke(IPC.setRecordSounds, enabled),
+  setAiPrompt: (prompt) => invoke(IPC.setAiPrompt, prompt),
   setHotkey: (accelerator) => invoke(IPC.setHotkey, accelerator),
   suspendHotkey: (suspended) => invoke(IPC.suspendHotkey, suspended),
   openLibraryDir: () => invoke(IPC.openLibraryDir),

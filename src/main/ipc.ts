@@ -19,6 +19,7 @@ import {
   type RecorderMessageChannel,
   type SettingsState,
 } from '../shared/ipc';
+import { AiPromptSchema, storedAiPrompt } from '../shared/ai-prompt';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
 import { IMPORT_EXTENSIONS } from '../shared/import';
 import { MeetingIdSchema, RecordedTrackKindSchema } from '../shared/meeting';
@@ -260,6 +261,11 @@ export function registerIpc(deps: IpcDeps): void {
 
   handle(IPC.setRecordSounds, async (arg) => {
     await deps.settings.update({ recordSounds: z.boolean().parse(arg) });
+    return settingsState();
+  });
+
+  handle(IPC.setAiPrompt, async (arg) => {
+    await deps.settings.update({ aiPrompt: storedAiPrompt(AiPromptSchema.parse(arg)) });
     return settingsState();
   });
 

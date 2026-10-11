@@ -12,6 +12,7 @@ describe('SettingsSchema', () => {
       recordSounds: true,
       asrModel: 'gigaam-v3-e2e-rnnt',
       exportDir: null,
+      aiPrompt: null,
     });
   });
 
@@ -42,6 +43,16 @@ describe('SettingsSchema', () => {
   it('forgets a broken export folder without dropping the other settings', () => {
     expect(SettingsSchema.parse({ exportDir: '', recordSounds: false })).toMatchObject({ exportDir: null, recordSounds: false });
     expect(SettingsSchema.parse({ exportDir: 42 }).exportDir).toBeNull();
+  });
+
+  it('keeps an own AI prompt and an empty one', () => {
+    expect(SettingsSchema.parse({ aiPrompt: 'Кратко: о чём договорились?' }).aiPrompt).toBe('Кратко: о чём договорились?');
+    expect(SettingsSchema.parse({ aiPrompt: '' }).aiPrompt).toBe('');
+  });
+
+  it('forgets a broken AI prompt without dropping the other settings', () => {
+    expect(SettingsSchema.parse({ aiPrompt: 42, recordSounds: false })).toMatchObject({ aiPrompt: null, recordSounds: false });
+    expect(SettingsSchema.parse({ aiPrompt: 'я'.repeat(4001) }).aiPrompt).toBeNull();
   });
 
   it('rejects wrong types and empty values', () => {

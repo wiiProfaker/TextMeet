@@ -113,6 +113,35 @@ test('saves a Word file and a text file, starting the second time in the same fo
   });
 });
 
+test('the export menu works from the keyboard and gives the focus back', async () => {
+  launched = await launchWithText();
+  const { page } = launched;
+  const exportButton = page.getByRole('button', { name: /Экспорт/ });
+  await exportButton.click();
+  await expect(page.getByRole('menuitem', { name: 'Скопировать всё' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Сохранить в Word (.docx)…' })).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(page.getByRole('menuitem', { name: 'Сохранить как текст (.txt)…' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Экспорт' })).toBeHidden();
+  await expect(exportButton).toBeFocused();
+});
+
+test('a cancelled save writes nothing and says nothing', async () => {
+  launched = await launchWithText();
+  const { app, page, userDataDir } = launched;
+  await app.evaluate(({ dialog }) => {
+    dialog.showSaveDialog = (async () => ({ canceled: true, filePath: '' })) as typeof dialog.showSaveDialog;
+  });
+  await page.getByRole('button', { name: /Экспорт/ }).click();
+  await page.getByRole('menuitem', { name: 'Сохранить как текст (.txt)…' }).click();
+  await expect(page.getByRole('menu', { name: 'Экспорт' })).toBeHidden();
+  await expect(page.getByRole('alert')).toBeHidden();
+  expect(JSON.parse(await readFile(join(userDataDir, 'settings.json'), 'utf8')).exportDir ?? null).toBeNull();
+});
+
 test('there is nothing to export before the meeting has text', async () => {
   launched = await launchApp({
     meetings: [{ id: ID, json: meetingJson(ID, { title: 'Без текста', status: 'recorded' }) }],

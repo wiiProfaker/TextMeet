@@ -15,6 +15,8 @@ const COPIED_MS = 2000;
 /** Кнопка «Экспорт» в заголовке встречи: «Скопировать всё», «Сохранить в Word», «Сохранить как текст» (лист 15). */
 export function ExportMenu({ meetingId, onError }: Props) {
   const [open, setOpen] = useState(false);
+  /** Сколько раз скопировали: каждое копирование заново показывает «Скопировано» на 2 с. */
+  const [copies, setCopies] = useState(0);
   const [copied, setCopied] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -30,10 +32,11 @@ export function ExportMenu({ meetingId, onError }: Props) {
   }, [open]);
 
   useEffect(() => {
-    if (!copied) return;
+    if (copies === 0) return;
+    setCopied(true);
     const timer = setTimeout(() => setCopied(false), COPIED_MS);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [copies]);
 
   /** Пункт выбран: меню закрывается, фокус — на «Экспорт» (пункт исчезает вместе с меню). */
   const close = () => {
@@ -45,7 +48,7 @@ export function ExportMenu({ meetingId, onError }: Props) {
     close();
     window.textmeet
       .copyMeeting(meetingId)
-      .then(() => setCopied(true))
+      .then(() => setCopies((n) => n + 1))
       .catch((err: unknown) => onError(errorText(err)));
   };
 
@@ -77,9 +80,15 @@ export function ExportMenu({ meetingId, onError }: Props) {
         onClick={() => setOpen(!open)}
       >
         {copied ? <CheckIcon /> : <ExportIcon />}
-        <span aria-live="polite">{copied ? 'Скопировано' : 'Экспорт'}</span>
-        <ChevronIcon />
+        {copied ? 'Скопировано' : 'Экспорт'}
+        <span className="chev">
+          <ChevronIcon />
+        </span>
       </button>
+      {/* Экранному диктору — отдельно от названия кнопки. */}
+      <span className="sr-only" role="status">
+        {copied ? 'Текст встречи скопирован' : ''}
+      </span>
       {open && (
         <div className="menu export-menu" role="menu" aria-label="Экспорт" onKeyDown={keys}>
           <button type="button" className="mi" role="menuitem" onClick={copy}>

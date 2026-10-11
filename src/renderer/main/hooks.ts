@@ -173,9 +173,10 @@ export function useImportProgress(): ReadonlyMap<string, ImportProgress> {
 }
 
 /**
- * Перетаскивание файлов в окно: true, пока над окном файлы (затемнение); отпустили — пути файлов. Счётчик входов:
- * над вложенными элементами dragenter и dragleave приходят парами, и затемнение не мигает. Перетаскивание текста
- * внутри окна (в нём нет файлов) не трогается.
+ * Перетаскивание файлов в окно: true, пока над окном файлы (затемнение); отпустили — пути файлов (пусто — у брошенных
+ * файлов нет пути на диске). Счётчик входов: над вложенными элементами dragenter и dragleave приходят парами, и
+ * затемнение не мигает; уход из окна (relatedTarget нет) и потеря фокуса сбрасывают его, чтобы затемнение не залипло.
+ * Перетаскивание текста внутри окна (в нём нет файлов) не трогается.
  */
 export function useFileDrop(onFiles: (paths: string[]) => void): boolean {
   const [dragging, setDragging] = useState(false);
@@ -195,25 +196,36 @@ export function useFileDrop(onFiles: (paths: string[]) => void): boolean {
       event.preventDefault();
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
     };
+    const reset = () => {
+      depth = 0;
+      setDragging(false);
+    };
     const leave = (event: DragEvent) => {
       if (!hasFiles(event)) return;
-      depth = Math.max(0, depth - 1);
+      depth = event.relatedTarget === null ? 0 : Math.max(0, depth - 1);
       if (depth === 0) setDragging(false);
     };
     const drop = (event: DragEvent) => {
       if (!hasFiles(event)) return;
       event.preventDefault();
-      depth = 0;
-      setDragging(false);
+      reset();
       const files = [...(event.dataTransfer?.files ?? [])];
-      const paths = files.map((file) => window.textmeet.pathForFile(file)).filter((path) => path !== '');
-      if (paths.length > 0) latest.current(paths);
+      const pathOf = (file: File): string => {
+        try {
+          return window.textmeet.pathForFile(file);
+        } catch {
+          return '';
+        }
+      };
+      if (files.length > 0) latest.current(files.map(pathOf).filter((path) => path !== ''));
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragover', over);
     window.addEventListener('dragleave', leave);
     window.addEventListener('drop', drop);
+    window.addEventListener('blur', reset);
     return () => {
+      window.removeEventListener('blur', reset);
       window.removeEventListener('dragenter', enter);
       window.removeEventListener('dragover', over);
       window.removeEventListener('dragleave', leave);

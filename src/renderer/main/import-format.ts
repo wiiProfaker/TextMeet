@@ -40,7 +40,7 @@ export function importView(fileName: string | null, progress: ImportProgress | n
   if (progress?.waiting) {
     return { text: 'Ждёт очереди', note: `${name} — сначала копируются файлы, добавленные раньше`, value: null };
   }
-  if (progress?.fraction == null) return { text: 'Копируем звук из файла', note: name, value: null };
+  if (!progress || progress.fraction === null) return { text: 'Копируем звук из файла', note: name, value: null };
   const value = percent(progress.fraction);
   return { text: 'Копируем звук из файла', note: `${name} · ${value}%`, value };
 }

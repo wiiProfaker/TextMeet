@@ -137,7 +137,7 @@ export function meetingNote(
   switch (meeting.status) {
     case 'importing':
       if (importing?.waiting) return { text: 'ждёт импорта', tone: 'accent' };
-      return importing?.fraction != null
+      return importing && importing.fraction !== null
         ? { text: `импорт ${percent(importing.fraction)}%`, tone: 'accent' }
         : { text: 'импорт…', tone: 'accent' };
     case 'recording':

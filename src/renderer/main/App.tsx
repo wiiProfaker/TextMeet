@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AppInfo, SettingsState } from '../../shared/ipc';
 import { entryId } from '../../shared/meeting';
 import { IDLE_RECORDING_STATE } from '../../shared/recording';
@@ -27,6 +27,9 @@ import { SettingsPane } from './SettingsPane';
 import { StopDialog } from './StopDialog';
 
 type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
+
+/** Бросили файлы без пути на диске (из архива, вложение письма). */
+const NO_FILE_PATH = 'Не удалось получить путь к файлу — перетащите его из папки или нажмите «Импорт файла».';
 
 /** Один и тот же пустой список: новый [] перерисовывал бы каждую реплику открытой встречи. */
 const NO_WORDS: readonly string[] = [];
@@ -83,29 +86,47 @@ export function App() {
   // Звук файла не скопировался уже после того, как встреча появилась.
   useEffect(() => window.textmeet.onImportFailed((failure) => setError(importFailedText(failure))), []);
 
-  /** Добавить файлы: первая новая встреча открывается, неудачи — строкой ошибки слева. */
-  const importFiles = useCallback(async (paths: string[]) => {
-    if (paths.length === 0) return;
-    setError(null);
-    try {
-      const result = await window.textmeet.importFiles(paths);
-      const first = result.added[0];
-      if (first) setSelection({ kind: 'meeting', id: first });
-      setError(importResultText(result));
-    } catch (err) {
-      setError(errorText(err));
-    }
+  /**
+   * Добавить файлы: первая новая встреча открывается, неудачи — строкой ошибки слева. Добавления идут по очереди: файлы,
+   * брошенные, пока проверяются прежние, ждут их и не перемешиваются с ними.
+   */
+  const importChain = useRef<Promise<void>>(Promise.resolve());
+  const importFiles = useCallback((paths: string[]) => {
+    const run = async () => {
+      setError(null);
+      try {
+        const result = await window.textmeet.importFiles(paths);
+        const first = result.added[0];
+        if (first) setSelection({ kind: 'meeting', id: first });
+        // Всё добавилось — ошибку не трогаем: её мог успеть показать неудачный импорт другого файла.
+        const text = importResultText(result);
+        if (text) setError(text);
+      } catch (err) {
+        setError(errorText(err));
+      }
+    };
+    importChain.current = importChain.current.then(run);
+    return importChain.current;
   }, []);
-  const dragging = useFileDrop((paths) => void importFiles(paths));
-  const pickFiles = () =>
+  const dragging = useFileDrop((paths) => {
+    if (paths.length > 0) void importFiles(paths);
+    else setError(NO_FILE_PATH);
+  });
+  const [picking, setPicking] = useState(false);
+  const pickFiles = () => {
+    setPicking(true);
     window.textmeet
       .pickImportFiles()
-      .then(importFiles)
-      .catch((err: unknown) => setError(errorText(err)));
-  const dialogId = recording.stopDialog?.meetingId ?? null;
+      .then((paths) => (paths.length > 0 ? importFiles(paths) : undefined))
+      .catch((err: unknown) => setError(errorText(err)))
+      .finally(() => setPicking(false));
+  };
+  // Окно «Запись остановлена» показывает свою встречу. Окно «Файл добавлен» встречу не переключает: импорт идёт в фоне,
+  // и человек в это время может работать с другой встречей (первая добавленная и так открылась при добавлении).
+  const recordingDialogId = recording.stopDialog?.kind === 'recording' ? recording.stopDialog.meetingId : null;
   useEffect(() => {
-    if (dialogId) setSelection({ kind: 'meeting', id: dialogId });
-  }, [dialogId]);
+    if (recordingDialogId) setSelection({ kind: 'meeting', id: recordingDialogId });
+  }, [recordingDialogId]);
 
   const platform = info?.platform ?? 'win32';
   // Клавишу держит другая программа — не показываем её как способ начать и остановить запись.
@@ -190,7 +211,7 @@ export function App() {
             />
           )}
           <div className="foot">
-            <button type="button" className="btn grow" onClick={() => void pickFiles()}>
+            <button type="button" className="btn grow" disabled={picking} aria-busy={picking} onClick={pickFiles}>
               <ImportIcon />
               Импорт файла
             </button>

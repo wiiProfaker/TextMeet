@@ -75,25 +75,52 @@ test('a file without sound is refused with a plain reason, the others are added'
   expect(await meetingIds(libraryDir)).toHaveLength(1);
 });
 
-test('the window darkens while files are dragged over it and nothing happens without a real file', async () => {
+test('the window darkens while files are dragged over it, not for dragged text', async () => {
   launched = await launchApp();
   const { page } = launched;
   await expect(page.getByText('Пока нет встреч.')).toBeVisible();
-  const drag = (type: 'dragenter' | 'dragleave' | 'drop') =>
-    page.evaluate((eventType) => {
-      const data = new DataTransfer();
-      data.items.add(new File(['x'], 'запись.mp3', { type: 'audio/mpeg' }));
-      document.body.dispatchEvent(new DragEvent(eventType, { dataTransfer: data, bubbles: true, cancelable: true }));
-    }, type);
+  /** Событие перетаскивания над списком встреч; inside — переход между элементами внутри окна. */
+  const drag = (type: 'dragenter' | 'dragleave' | 'drop', what: 'file' | 'text' = 'file', inside = true) =>
+    page.evaluate(
+      ([eventType, kind, within]) => {
+        const data = new DataTransfer();
+        if (kind === 'file') data.items.add(new File(['x'], 'запись.mp3', { type: 'audio/mpeg' }));
+        else data.setData('text/plain', 'кусок текста');
+        const target = document.querySelector('.list') ?? document.body;
+        const relatedTarget = within ? document.body : null;
+        target.dispatchEvent(new DragEvent(eventType, { dataTransfer: data, bubbles: true, cancelable: true, relatedTarget }));
+      },
+      [type, what, inside] as const,
+    );
 
   const overlay = page.getByText('Отпустите — файлы станут встречами');
+  await drag('dragenter', 'text');
+  await expect(overlay).toBeHidden();
   await drag('dragenter');
-  await expect(overlay).toBeVisible();
+  await drag('dragenter');
   await drag('dragleave');
+  await expect(overlay).toBeVisible();
+  // Ушли из окна — затемнение снимается, даже если пары событий не сошлись.
+  await drag('dragleave', 'file', false);
   await expect(overlay).toBeHidden();
-  await drag('dragenter');
-  await drag('drop');
-  await expect(overlay).toBeHidden();
+});
+
+test('a dropped file without a path on disk is explained', async () => {
+  launched = await launchApp();
+  const { page } = launched;
+  await expect(page.getByText('Пока нет встреч.')).toBeVisible();
+  await page.evaluate(() => {
+    // Новые данные у каждого события — как при настоящем перетаскивании.
+    for (const type of ['dragenter', 'drop']) {
+      const data = new DataTransfer();
+      data.items.add(new File(['x'], 'запись.mp3', { type: 'audio/mpeg' }));
+      document.body.dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true }));
+    }
+  });
+  await expect(page.getByRole('alert')).toHaveText(
+    'Не удалось получить путь к файлу — перетащите его из папки или нажмите «Импорт файла».',
+  );
+  await expect(page.getByText('Отпустите — файлы станут встречами')).toBeHidden();
   await expect(page.getByText('Пока нет встреч.')).toBeVisible();
 });
 

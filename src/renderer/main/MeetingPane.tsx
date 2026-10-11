@@ -347,7 +347,7 @@ function MeetingView({
           <div>
             <b>{importFailed ? 'Импорт прервался' : transcribeError ? 'Ошибка расшифровки' : 'Ошибка'}</b>
             <p>
-              {meeting.errorMessage ?? 'Что-то пошло не так.'}
+              {meeting.errorMessage ?? (importFailed ? 'Добавьте файл ещё раз.' : 'Что-то пошло не так.')}
               {importFailed && ' Эту встречу можно удалить: «…» → «Удалить встречу…».'}
             </p>
             {transcribeError && (

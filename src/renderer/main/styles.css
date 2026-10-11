@@ -1298,11 +1298,25 @@ button.chip:hover {
   width: 290px;
 }
 
-.btn .ic + span + .ic {
+.btn .chev {
+  display: inline-flex;
+  margin-left: -2px;
+}
+
+.btn .chev .ic {
   width: 13px;
   height: 13px;
-  margin-left: -2px;
   color: var(--muted);
+}
+
+/* Только для экранного диктора. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* Меню «…» в заголовке встречи — справа под кнопкой. */

@@ -167,6 +167,45 @@ test('a prompt that could not be saved stays in the field, is retried and is rep
   expect(await savedPrompt(userDataDir)).toBeUndefined();
 });
 
+test('a late failure of an older save does not bring the older text back', async () => {
+  launched = await launchWithMeeting();
+  const { app, page } = launched;
+  // Каждое сохранение не удаётся: первое — через 1 с, второе — через 2 с (файл занят), дальше — сразу.
+  await app.evaluate(({ ipcMain }) => {
+    const state = globalThis as { aiCalls?: unknown[]; aiFailed?: number };
+    state.aiCalls = [];
+    state.aiFailed = 0;
+    ipcMain.removeHandler('settings:set-ai-prompt');
+    ipcMain.handle('settings:set-ai-prompt', async (_event, prompt: unknown) => {
+      state.aiCalls?.push(prompt);
+      const delay = [1000, 2000][(state.aiCalls?.length ?? 1) - 1] ?? 0;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      state.aiFailed = (state.aiFailed ?? 0) + 1;
+      throw new Error('Не удалось сохранить запрос для ИИ: файл занят другой программой.');
+    });
+  });
+  const calls = () => app.evaluate(() => (globalThis as { aiCalls?: unknown[] }).aiCalls ?? []);
+  const failed = () => app.evaluate(() => (globalThis as { aiFailed?: number }).aiFailed ?? 0);
+
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
+  await field.fill('Запрос A');
+  // Пауза набора прошла — первое сохранение ушло и ещё не ответило.
+  await expect.poll(async () => (await calls()).length).toBe(1);
+  await field.fill('Запрос AB');
+  await field.blur();
+  await expect.poll(async () => (await calls()).length).toBe(2);
+  await expect.poll(failed, { timeout: 5_000 }).toBe(2);
+  await expect(page.getByRole('main', { name: 'Настройки' }).getByRole('alert')).toBeVisible();
+
+  // Следующий уход из поля отправляет снова последний набранный текст, а не более ранний.
+  await field.focus();
+  await field.blur();
+  await expect.poll(async () => (await calls()).length).toBe(3);
+  expect((await calls())[2]).toBe('Запрос AB');
+  await expect(field).toHaveValue('Запрос AB');
+});
+
 test('a meeting without text has no «Скопировать для ИИ»', async () => {
   const id = '2026-09-28_1430_d4e5f6';
   launched = await launchApp({ meetings: [{ id, json: meetingJson(id, { title: 'Только запись' }) }] });

@@ -31,6 +31,8 @@ export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave
   const pending = useRef<{ value: string | null } | null>(null);
   /** Сколько сохранений ещё не ответило. */
   const inFlight = useRef(0);
+  /** Номер последнего отправленного сохранения: ответ на более раннее не решает, что в поле и что показать. */
+  const lastSent = useRef(0);
   const mounted = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const props = useRef({ save, onSaved, onError, onErrorAfterLeave });
@@ -42,15 +44,19 @@ export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave
   };
 
   const send = useCallback((value: string | null) => {
+    const sent = ++lastSent.current;
     inFlight.current += 1;
     props.current.save(value).then(
       (next) => {
         inFlight.current -= 1;
         props.current.onSaved(next);
-        if (mounted.current) props.current.onError(null);
+        if (sent === lastSent.current && mounted.current) props.current.onError(null);
       },
       (err: unknown) => {
         inFlight.current -= 1;
+        // Уже отправлен более новый текст (или «Вернуть стандартный»): он отвечает за себя сам, а этот, более
+        // ранний, снова не отправляется.
+        if (sent !== lastSent.current) return;
         const message = errorText(err);
         if (!mounted.current) {
           props.current.onErrorAfterLeave(message);

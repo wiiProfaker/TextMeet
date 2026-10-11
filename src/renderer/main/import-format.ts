@@ -10,7 +10,7 @@ const failureText = (failure: ImportFailure): string => `«${failure.name}»: ${
 
 /**
  * Итог добавления файлов для строки ошибки слева; null — всё добавилось. «Не удалось добавить «отчёт.pdf»: в файле
- * нет звука.»; если что-то добавилось — сначала «Добавлено 2 файла из 3.».
+ * нет звука.»; если что-то добавилось — сначала «Добавлено 2 файла из 3.» («Добавлен 1 файл из 2.»).
  */
 export function importResultText(result: ImportResult): string | null {
   const { added, failed } = result;
@@ -20,12 +20,36 @@ export function importResultText(result: ImportResult): string | null {
   const rest = failed.length - LISTED_FAILURES;
   const more = rest > 0 ? ` и ещё ${rest} ${pluralize(rest, 'файл', 'файла', 'файлов')}` : '';
   const files = `${added.length} ${pluralize(added.length, 'файл', 'файла', 'файлов')}`;
-  const head = added.length > 0 ? `Добавлено ${files} из ${total}. ` : '';
+  const verb = pluralize(added.length, 'Добавлен', 'Добавлено', 'Добавлено');
+  const head = added.length > 0 ? `${verb} ${files} из ${total}. ` : '';
   return `${head}Не удалось добавить ${listed}${more}.`;
 }
 
 /** Звук файла не скопировался (уже после создания встречи). */
 export const importFailedText = (failure: ImportFailure): string => `Не удалось добавить ${failureText(failure)}.`;
+
+/** Встречи, чей звук не скопировался, пока проверялись файлы добавления (main их уже убрал), и показанные сообщения. */
+export interface CopyFailures {
+  ids: ReadonlySet<string>;
+  texts: readonly string[];
+}
+
+export interface ImportOutcome {
+  /** Какую встречу открыть; null — никакую. */
+  open: string | null;
+  /** Строка ошибки; null — не трогать (сообщения о нескопированном звуке уже показаны). */
+  message: string | null;
+}
+
+/**
+ * Итог добавления для окна: открыть первую добавленную встречу, которая ещё есть, а сообщения о нескопированном
+ * звуке не затирать отказами — показать их следом.
+ */
+export function importOutcome(result: ImportResult, copyFailures: CopyFailures): ImportOutcome {
+  const open = result.added.find((id) => !copyFailures.ids.has(id)) ?? null;
+  const text = importResultText(result);
+  return { open, message: text ? [text, ...copyFailures.texts].join(' ') : null };
+}
 
 export interface ImportView {
   text: string;

@@ -3,7 +3,7 @@
 // проверка типов. preload работает в песочнице и не может подключать zod и другие пакеты:
 // здесь только константы и типы, из других файлов — только `import type`.
 import type { AsrModelId } from './asr-models';
-import type { ImportFailure, ImportProgress, ImportResult } from './import';
+import type { ImportFailedEvent, ImportProgress, ImportResult } from './import';
 import type { Meeting, MeetingListEntry } from './meeting';
 import type {
   Peaks,
@@ -210,7 +210,7 @@ export interface MainEventContract {
   [IPC.modelsChanged]: void;
   [IPC.showMeeting]: string;
   [IPC.importProgress]: ImportProgress[];
-  [IPC.importFailed]: ImportFailure;
+  [IPC.importFailed]: ImportFailedEvent;
 }
 export type MainEventChannel = keyof MainEventContract;
 
@@ -301,7 +301,7 @@ export interface TextMeetApi {
   onModelsChanged(listener: () => void): Unsubscribe;
   onShowMeeting(listener: Listener<string>): Unsubscribe;
   onImportProgress(listener: Listener<ImportProgress[]>): Unsubscribe;
-  onImportFailed(listener: Listener<ImportFailure>): Unsubscribe;
+  onImportFailed(listener: Listener<ImportFailedEvent>): Unsubscribe;
 }
 
 /** API скрытого окна записи: window.recorder */

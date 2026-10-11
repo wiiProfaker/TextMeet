@@ -173,12 +173,12 @@ export function useImportProgress(): ReadonlyMap<string, ImportProgress> {
 }
 
 /**
- * Перетаскивание файлов в окно: true, пока над окном файлы (затемнение); отпустили — пути файлов (пусто — у брошенных
- * файлов нет пути на диске). Счётчик входов: над вложенными элементами dragenter и dragleave приходят парами, и
- * затемнение не мигает; уход из окна (relatedTarget нет) и потеря фокуса сбрасывают его, чтобы затемнение не залипло.
- * Перетаскивание текста внутри окна (в нём нет файлов) не трогается.
+ * Перетаскивание файлов в окно: true, пока над окном файлы (затемнение); отпустили — пути файлов и имена файлов без
+ * пути на диске (из архива, вложение письма). Счётчик входов: над вложенными элементами dragenter и dragleave
+ * приходят парами, и затемнение не мигает; уход из окна (relatedTarget нет) и потеря фокуса сбрасывают его, чтобы
+ * затемнение не залипло. Перетаскивание текста внутри окна (в нём нет файлов) не трогается.
  */
-export function useFileDrop(onFiles: (paths: string[]) => void): boolean {
+export function useFileDrop(onFiles: (paths: string[], pathless: string[]) => void): boolean {
   const [dragging, setDragging] = useState(false);
   const latest = useRef(onFiles);
   latest.current = onFiles;
@@ -217,7 +217,12 @@ export function useFileDrop(onFiles: (paths: string[]) => void): boolean {
           return '';
         }
       };
-      if (files.length > 0) latest.current(files.map(pathOf).filter((path) => path !== ''));
+      if (files.length === 0) return;
+      const paths = files.map(pathOf);
+      latest.current(
+        paths.filter((path) => path !== ''),
+        files.filter((_, index) => paths[index] === '').map((file) => file.name),
+      );
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragover', over);

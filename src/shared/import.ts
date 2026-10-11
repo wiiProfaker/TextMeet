@@ -24,6 +24,11 @@ export interface ImportFailure {
   reason: string;
 }
 
+/** Звук файла не скопировался уже после того, как его встреча появилась: main её убрал (или оставил с ошибкой). */
+export interface ImportFailedEvent extends ImportFailure {
+  meetingId: string;
+}
+
 export interface ImportResult {
   /** id созданных встреч — по порядку файлов. */
   added: string[];

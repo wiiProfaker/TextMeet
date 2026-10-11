@@ -16,7 +16,7 @@ import {
   type SearchView,
 } from './hooks';
 import { ImportIcon, SettingsIcon } from './icons';
-import { importFailedText, importResultText } from './import-format';
+import { importFailedText, importOutcome, type CopyFailures } from './import-format';
 import { LivePane } from './LivePane';
 import { MeetingList } from './MeetingList';
 import { MeetingPane } from './MeetingPane';
@@ -30,12 +30,18 @@ type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
 
 /** Бросили файлы без пути на диске (из архива, вложение письма). */
 const NO_FILE_PATH = 'Не удалось получить путь к файлу — перетащите его из папки или нажмите «Импорт файла».';
+/** Причина для файла без пути, брошенного вместе с другими файлами. */
+const NO_PATH_REASON = 'у файла нет пути на диске — перетащите его из папки или нажмите «Импорт файла»';
+
+const NO_COPY_FAILURES: CopyFailures = { ids: new Set(), texts: [] };
 
 /** Один и тот же пустой список: новый [] перерисовывал бы каждую реплику открытой встречи. */
 const NO_WORDS: readonly string[] = [];
 
 export function App() {
   const recording = useRecordingState() ?? IDLE_RECORDING_STATE;
+  const latestRecording = useRef(recording);
+  latestRecording.current = recording;
   const { entries, error: listError } = useMeetings();
   const microphones = useMicrophones();
   const progress = useTranscriptionProgress();
@@ -83,41 +89,67 @@ export function App() {
   }, [liveId]);
   // Щелчок по уведомлению «Текст встречи готов» — показать эту встречу.
   useEffect(() => window.textmeet.onShowMeeting((id) => setSelection({ kind: 'meeting', id })), []);
-  // Звук файла не скопировался уже после того, как встреча появилась.
-  useEffect(() => window.textmeet.onImportFailed((failure) => setError(importFailedText(failure))), []);
+  // Звук файла не скопировался уже после того, как встреча появилась (main её убрал). Запоминаем до следующего
+  // добавления: если файлы ещё проверяются, такую встречу не открывать, а сообщение не затирать итогом добавления.
+  const copyFailures = useRef<CopyFailures>(NO_COPY_FAILURES);
+  useEffect(
+    () =>
+      window.textmeet.onImportFailed((failure) => {
+        const text = importFailedText(failure);
+        const { ids, texts } = copyFailures.current;
+        copyFailures.current = { ids: new Set([...ids, failure.meetingId]), texts: [...texts, text] };
+        setError(text);
+      }),
+    [],
+  );
 
   /**
-   * Добавить файлы: первая новая встреча открывается, неудачи — строкой ошибки слева. Добавления идут по очереди: файлы,
-   * брошенные, пока проверяются прежние, ждут их и не перемешиваются с ними.
+   * Добавить файлы: первая новая встреча открывается, неудачи (и файлы без пути — pathless) — строкой ошибки слева.
+   * Добавления идут по очереди: файлы, брошенные, пока проверяются прежние, ждут их и не перемешиваются с ними.
    */
   const importChain = useRef<Promise<void>>(Promise.resolve());
-  const importFiles = useCallback((paths: string[]) => {
+  /** Сколько добавлений идёт или ждёт очереди. */
+  const importsInFlight = useRef(0);
+  const importFiles = useCallback((paths: string[], pathless: string[] = []) => {
     const run = async () => {
-      setError(null);
+      copyFailures.current = NO_COPY_FAILURES;
       try {
-        const result = await window.textmeet.importFiles(paths);
-        const first = result.added[0];
-        if (first) setSelection({ kind: 'meeting', id: first });
+        const added = await window.textmeet.importFiles(paths);
+        const noPath = pathless.map((name) => ({ name, reason: NO_PATH_REASON }));
+        const result = { ...added, failed: [...added.failed, ...noPath] };
+        const { open, message } = importOutcome(result, copyFailures.current);
+        // Идёт запись или открыто окно (подтверждение, «Расшифровать заново», «Запись остановлена» / «Файл добавлен») —
+        // не уводим от них: новая встреча и так видна в списке.
+        const busy =
+          latestRecording.current.phase !== 'idle' || document.querySelector('[aria-modal="true"]') !== null;
+        if (open && !busy) setSelection({ kind: 'meeting', id: open });
         // Всё добавилось — ошибку не трогаем: её мог успеть показать неудачный импорт другого файла.
-        const text = importResultText(result);
-        if (text) setError(text);
+        if (message) setError(message);
       } catch (err) {
         setError(errorText(err));
+      } finally {
+        importsInFlight.current -= 1;
       }
     };
+    // Прежнюю ошибку стираем, только если ничего не добавляется: отказ предыдущего добавления не должен пропасть,
+    // едва появившись.
+    if (importsInFlight.current === 0) setError(null);
+    importsInFlight.current += 1;
     importChain.current = importChain.current.then(run);
-    return importChain.current;
   }, []);
-  const dragging = useFileDrop((paths) => {
-    if (paths.length > 0) void importFiles(paths);
+  const dragging = useFileDrop((paths, pathless) => {
+    if (paths.length > 0) importFiles(paths, pathless);
     else setError(NO_FILE_PATH);
   });
   const [picking, setPicking] = useState(false);
+  // Кнопка занята, только пока открыто окно выбора: добавление идёт в фоне, и его не ждём.
   const pickFiles = () => {
     setPicking(true);
     window.textmeet
       .pickImportFiles()
-      .then((paths) => (paths.length > 0 ? importFiles(paths) : undefined))
+      .then((paths) => {
+        if (paths.length > 0) importFiles(paths);
+      })
       .catch((err: unknown) => setError(errorText(err)))
       .finally(() => setPicking(false));
   };

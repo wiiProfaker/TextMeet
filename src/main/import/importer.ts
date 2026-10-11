@@ -2,7 +2,7 @@
 // по одному файлу за раз. Electron сюда не подключается — окно, сведение и окно «Файл добавлен» внедряются.
 import { promises as fsp } from 'node:fs';
 import { basename, join } from 'node:path';
-import { MAX_IMPORT_FILES, type ImportFailure, type ImportProgress, type ImportResult } from '../../shared/import';
+import { MAX_IMPORT_FILES, type ImportFailedEvent, type ImportProgress, type ImportResult } from '../../shared/import';
 import type { Meeting } from '../../shared/meeting';
 import { knownFsReason } from '../fs/fs-errors';
 import { audioDir, createMeeting, listMeetings, removeMeetingDir, updateMeeting } from '../library/library';
@@ -38,7 +38,7 @@ export interface ImporterDeps {
   /** Звук скопирован: сведение и окно «Файл добавлен». */
   imported(event: { libraryDir: string; meeting: Meeting }): void;
   /** Звук не скопировался: недоделанная встреча убрана, окно покажет ошибку. */
-  failed(failure: ImportFailure): void;
+  failed(failure: ImportFailedEvent): void;
   examine?: typeof examineFile;
   copy?: typeof copySourceAudio;
 }
@@ -317,7 +317,7 @@ export class Importer {
       })).catch((saveErr: unknown) => this.deps.logger.warn(`Ошибка импорта ${meetingId} не записана`, saveErr));
     }
     this.notify(() => this.deps.libraryChanged());
-    this.notify(() => this.deps.failed({ name: basename(job.source), reason }));
+    this.notify(() => this.deps.failed({ meetingId, name: basename(job.source), reason }));
   }
 }
 

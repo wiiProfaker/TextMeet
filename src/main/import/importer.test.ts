@@ -1,7 +1,7 @@
 import { existsSync, promises as fsp, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import type { ImportFailure, ImportProgress } from '../../shared/import';
+import type { ImportFailedEvent, ImportProgress } from '../../shared/import';
 import type { Meeting } from '../../shared/meeting';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { videoWithSound } from '../../test-support/media-files';
@@ -52,7 +52,7 @@ function controlledCopy() {
 
 function setup(over: Partial<ImporterDeps> = {}) {
   const imported: Meeting[] = [];
-  const failed: ImportFailure[] = [];
+  const failed: ImportFailedEvent[] = [];
   const progress: ImportProgress[][] = [];
   const changed = vi.fn();
   const deps: ImporterDeps = {
@@ -189,7 +189,7 @@ describe('Importer queue', () => {
     await until(() => calls.length === 1);
     calls[0]?.fail(new Error(copyTexts.noSpace));
     await until(() => t.failed.length === 1);
-    expect(t.failed).toEqual([{ name: 'Созвон.mp4', reason: copyTexts.noSpace }]);
+    expect(t.failed).toEqual([{ meetingId: id, name: 'Созвон.mp4', reason: copyTexts.noSpace }]);
     expect(existsSync(join(lib, id))).toBe(false);
     expect(t.imported).toEqual([]);
   });
@@ -276,11 +276,11 @@ describe('Importer queue', () => {
     const lib = makeTempDir('textmeet-import-');
     const { copy, calls } = controlledCopy();
     const t = setup({ copy, examine: async () => goodFile(null) });
-    await t.importer.addFiles(lib, ['a.mp4']);
+    const [id = ''] = (await t.importer.addFiles(lib, ['a.mp4'])).added;
     await until(() => calls.length === 1);
     calls[0]?.fail(new Error("spawn C:\\Program Files\\TextMeet\\ffmpeg.exe ENOENT"));
     await until(() => t.failed.length === 1);
-    expect(t.failed).toEqual([{ name: 'a.mp4', reason: copyTexts.broken }]);
+    expect(t.failed).toEqual([{ meetingId: id, name: 'a.mp4', reason: copyTexts.broken }]);
   });
 
   it('a file that finished while it was being cancelled is not put back', async () => {

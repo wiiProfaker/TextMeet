@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { importFailedText, importResultText, importView } from './import-format';
+import { importFailedText, importOutcome, importResultText, importView } from './import-format';
 
 const noSound = { name: 'отчёт.pdf', reason: 'в файле нет звука' };
 
@@ -17,8 +17,11 @@ describe('importResultText', () => {
       'Добавлено 2 файла из 3. Не удалось добавить «отчёт.pdf»: в файле нет звука.',
     );
     expect(importResultText({ added: ['a'], failed: [noSound] })).toBe(
-      'Добавлено 1 файл из 2. Не удалось добавить «отчёт.pdf»: в файле нет звука.',
+      'Добавлен 1 файл из 2. Не удалось добавить «отчёт.pdf»: в файле нет звука.',
     );
+    const many = Array.from({ length: 21 }, (_, i) => String(i));
+    expect(importResultText({ added: many, failed: [noSound] })).toMatch(/^Добавлен 21 файл из 22\. /);
+    expect(importResultText({ added: many.slice(0, 5), failed: [noSound] })).toMatch(/^Добавлено 5 файлов из 6\. /);
   });
 
   it('lists three failures and counts the rest', () => {
@@ -26,6 +29,29 @@ describe('importResultText', () => {
     expect(importResultText({ added: [], failed })).toBe(
       'Не удалось добавить «a.mp3»: файл пустой; «b.mp3»: файл пустой; «c.mp3»: файл пустой и ещё 3 файла.',
     );
+  });
+});
+
+describe('importOutcome', () => {
+  const noCopy = { ids: new Set<string>(), texts: [] };
+  const copyFailed = { ids: new Set(['a']), texts: ['Не удалось добавить «a.mp4»: на диске закончилось место.'] };
+
+  it('opens the first added meeting and says nothing when every file was added', () => {
+    expect(importOutcome({ added: ['a', 'b'], failed: [] }, noCopy)).toEqual({ open: 'a', message: null });
+  });
+
+  it('does not open a meeting whose sound could not be copied — it is already removed', () => {
+    expect(importOutcome({ added: ['a', 'b'], failed: [] }, copyFailed)).toEqual({ open: 'b', message: null });
+    expect(importOutcome({ added: ['a'], failed: [] }, copyFailed)).toEqual({ open: null, message: null });
+  });
+
+  it('keeps the copy failure next to the files that were refused', () => {
+    expect(importOutcome({ added: ['a', 'b'], failed: [noSound] }, copyFailed)).toEqual({
+      open: 'b',
+      message:
+        'Добавлено 2 файла из 3. Не удалось добавить «отчёт.pdf»: в файле нет звука. ' +
+        'Не удалось добавить «a.mp4»: на диске закончилось место.',
+    });
   });
 });
 

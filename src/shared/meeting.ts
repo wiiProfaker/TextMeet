@@ -9,6 +9,8 @@ export const MeetingSourceSchema = z.enum(['recording', 'import']);
 export const MeetingStatusSchema = z.enum(['importing', 'recording', 'recorded', 'queued', 'transcribing', 'done', 'error']);
 /** file — единственная дорожка встречи из файла (импорт). */
 export const TrackKindSchema = z.enum(['mic', 'system', 'file']);
+/** Дорожки, которые пишет окно записи: дорожка file бывает только у встречи из файла. */
+export const RecordedTrackKindSchema = TrackKindSchema.exclude(['file']);
 
 /** Дорожка записи: файл в папке audio/ и сдвиг её начала от начала самой ранней дорожки. */
 export const TrackSchema = z.object({

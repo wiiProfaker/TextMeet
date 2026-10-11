@@ -1,10 +1,19 @@
+import { spawn, type ChildProcess } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { PassThrough } from 'node:stream';
+import { describe, expect, it, vi } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { phoneRecording, videoWithoutSound, videoWithSound } from '../../test-support/media-files';
 import { resolveFfmpegPath } from '../audio/ffmpeg';
 import { examineFile, ffmpegInfo, parseProbe, probeTexts } from './probe';
+
+// Настоящий запуск, но тест может подменить один процесс — зависший.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawn: vi.fn((...args: Parameters<typeof actual.spawn>) => actual.spawn(...args)) };
+});
 
 const ZOOM = `Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'GMT20261004-132005_Recording.mp4':
   Metadata:
@@ -37,6 +46,13 @@ describe('parseProbe', () => {
   it('a raw stream without a known duration', () => {
     const raw = "Input #0, amr, from 'a.amr':\n  Duration: N/A, bitrate: N/A\n  Stream #0:0: Audio: amr_nb (samr), 8000 Hz, mono, flt\n";
     expect(parseProbe(raw)).toEqual({ hasAudio: true, durationSec: null, creationTime: null });
+  });
+
+  it('does not take a metadata value for the duration', () => {
+    const tagged =
+      "Input #0, mp3, from 'a.mp3':\n  Metadata:\n    comment         : Duration: 01:00:00.00\n  Duration: N/A, bitrate: N/A\n" +
+      '  Stream #0:0: Audio: mp3, 44100 Hz, stereo, fltp, 128 kb/s\n';
+    expect(parseProbe(tagged)?.durationSec).toBeNull();
   });
 
   it('a zero duration means an unknown one', () => {
@@ -86,6 +102,15 @@ describe('ffmpegInfo / examineFile', () => {
     const file = join(makeTempDir('textmeet-probe-'), 'a.mp4');
     await videoWithSound(file, 1);
     await expect(ffmpegInfo(ffmpeg, file, 0)).rejects.toThrow('слишком долго');
+  });
+
+  it('gives up on time even when the stopped ffmpeg never closes (a stuck network read)', async () => {
+    const child = Object.assign(new EventEmitter(), { stderr: new PassThrough(), kill: vi.fn(() => true) });
+    vi.mocked(spawn).mockReturnValueOnce(child as unknown as ChildProcess);
+    const started = Date.now();
+    await expect(ffmpegInfo(ffmpeg, 'Z:\\созвон.mp4', 50)).rejects.toThrow('слишком долго');
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
   });
 
   it('fails when ffmpeg itself is missing', async () => {

@@ -20,6 +20,12 @@ describe('pickRecordedAt', () => {
     expect(pickRecordedAt('2027-01-01T00:00:00.000000Z', MODIFIED, NOW)).toEqual(MODIFIED);
   });
 
+  it('skips the date of a device whose clock was reset', () => {
+    expect(pickRecordedAt('2000-01-01T00:00:00.000000Z', MODIFIED, NOW)).toEqual(MODIFIED);
+    expect(pickRecordedAt('2000-01-01T00:07:31.000000Z', MODIFIED, NOW)).toEqual(MODIFIED);
+    expect(pickRecordedAt('2000-01-02T00:00:00.000000Z', MODIFIED, NOW).toISOString()).toBe('2000-01-02T00:00:00.000Z');
+  });
+
   it('allows a clock that is a little fast', () => {
     expect(pickRecordedAt('2026-10-05T20:00:00Z', null, NOW).toISOString()).toBe('2026-10-05T20:00:00.000Z');
   });

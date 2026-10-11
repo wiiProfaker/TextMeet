@@ -39,6 +39,11 @@ describe('SettingsSchema', () => {
     expect(SettingsSchema.parse({ exportDir: '/Users/kirill/Documents' }).exportDir).toBe('/Users/kirill/Documents');
   });
 
+  it('forgets a broken export folder without dropping the other settings', () => {
+    expect(SettingsSchema.parse({ exportDir: '', recordSounds: false })).toMatchObject({ exportDir: null, recordSounds: false });
+    expect(SettingsSchema.parse({ exportDir: 42 }).exportDir).toBeNull();
+  });
+
   it('rejects wrong types and empty values', () => {
     expect(SettingsSchema.safeParse({ launchAtLogin: 'yes' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ libraryDir: '' }).success).toBe(false);
@@ -46,6 +51,5 @@ describe('SettingsSchema', () => {
     expect(SettingsSchema.safeParse({ microphoneId: '' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ recordHotkey: '' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ recordSounds: 1 }).success).toBe(false);
-    expect(SettingsSchema.safeParse({ exportDir: '' }).success).toBe(false);
   });
 });

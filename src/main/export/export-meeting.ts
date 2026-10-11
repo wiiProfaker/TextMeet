@@ -57,10 +57,17 @@ async function fileData(doc: ExportDoc, format: ExportFormat, platform: string):
   return BOM + toPlainText(doc, platform === 'win32' ? '\r\n' : '\n');
 }
 
+/** Папка последнего сохранения, если она ещё есть; иначе (удалена, отключённый диск) — «Документы». */
+async function startDir(deps: ExportDeps): Promise<string> {
+  const last = deps.exportDir();
+  const isFolder = last !== null && (await fsp.stat(last).then((stat) => stat.isDirectory(), () => false));
+  return isFolder ? last : deps.documentsDir();
+}
+
 /** Окно сохранения → файл. Не атомарно: файл, открытый в Word, даёт понятное «файл занят другой программой». */
 export async function saveMeeting(deps: ExportDeps, meetingId: string, format: ExportFormat): Promise<{ saved: boolean }> {
   const doc = await loadDoc(deps.libraryDir(), meetingId);
-  const dir = deps.exportDir() ?? deps.documentsDir();
+  const dir = await startDir(deps);
   const picked = await deps.chooseSavePath(join(dir, exportFileName(doc.title, format)), format);
   if (picked === null) return { saved: false };
   const path = extname(picked).toLowerCase() === `.${format}` ? picked : `${picked}.${format}`;

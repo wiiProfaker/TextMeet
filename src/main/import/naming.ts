@@ -1,8 +1,11 @@
 // Дата и название встречи из файла (решения Плана 5, §4.2).
 import { defaultMeetingTitle } from '../library/naming';
 
-/** Даты раньше этой — заведомо мусор (у MP4 без даты бывает 1904 или 1970 год). */
-const EARLIEST = Date.UTC(2000, 0, 1);
+/**
+ * Даты раньше этой — заведомо мусор: у MP4 без даты бывает 1904 или 1970 год, а устройство со сброшенными часами
+ * пишет 1 января 2000 года (или несколько минут после).
+ */
+const EARLIEST = Date.UTC(2000, 0, 2);
 /** Часы компьютера или телефона могут немного спешить. */
 const FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
 /** Как в проверке meeting.json. */
@@ -13,7 +16,7 @@ const plausible = (time: number, now: Date): boolean =>
 
 /**
  * Когда записан файл: creation_time из самого файла (его пишут телефон и Zoom), иначе время изменения файла, иначе
- * сейчас. Неправдоподобная дата (до 2000 года, в будущем) пропускается.
+ * сейчас. Неправдоподобная дата (до 2 января 2000 года, в будущем) пропускается.
  */
 export function pickRecordedAt(creationTime: string | null, modifiedAt: Date | null, now: Date): Date {
   const created = creationTime === null ? Number.NaN : Date.parse(creationTime);

@@ -44,6 +44,9 @@ export interface FfmpegOptions {
 
 export const FFMPEG_CANCELLED = 'ffmpeg остановлен: работа отменена';
 
+/** ffmpeg запустился и отказался: завершился с ошибкой (а не был отменён, не завис и не запустился вовсе). */
+export class FfmpegExitError extends Error {}
+
 /** Запускает ffmpeg с пониженным приоритетом (не мешать идущей записи); ошибка — с хвостом его вывода. */
 export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: FfmpegOptions = {}): Promise<FfmpegRun> {
   const stallMs = options.stallMs ?? FFMPEG_STALL_MS;
@@ -114,7 +117,7 @@ export function runFfmpeg(ffmpegPath: string, args: readonly string[], options: 
       else if (code === 0) resolve({ durationSec: parseProgressDuration(progress) });
       else {
         const how = code === null ? `сигналом ${killSignal}` : `кодом ${code}`;
-        reject(new Error(`ffmpeg завершился с ${how}: ${errors.trim().split('\n').slice(-3).join(' | ')}`));
+        reject(new FfmpegExitError(`ffmpeg завершился с ${how}: ${errors.trim().split('\n').slice(-3).join(' | ')}`));
       }
     });
   });

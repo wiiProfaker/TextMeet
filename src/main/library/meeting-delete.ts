@@ -61,7 +61,7 @@ export async function audioSize(libraryDir: string, meetingId: string): Promise<
 }
 
 /** Папки нет — только по ENOENT/ENOTDIR; любая другая ошибка (занят, нет прав, диск) — «есть», путь удаления её покажет. */
-const exists = (path: string): Promise<boolean> =>
+export const exists = (path: string): Promise<boolean> =>
   fsp.stat(path).then(
     () => true,
     (err: unknown) => {

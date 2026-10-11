@@ -24,9 +24,17 @@ describe('exportFileName', () => {
   });
 
   it('shortens a long title without cutting a letter in half', () => {
+    expect(exportFileName('Итоги '.repeat(40), 'txt')).toBe(`${'Итоги '.repeat(20).trim()}.txt`);
+    // macOS разрешает 255 байт UTF-8 на имя: эмодзи — 4 байта.
     const name = exportFileName('😀'.repeat(200), 'txt');
-    expect(Array.from(name.replace(/\.txt$/, ''))).toHaveLength(120);
-    expect(name).toBe(`${'😀'.repeat(120)}.txt`);
+    expect(Buffer.byteLength(name, 'utf8')).toBeLessThanOrEqual(255);
+    expect(name).toBe(`${'😀'.repeat(62)}.txt`);
+  });
+
+  it('keeps a long CJK title within 255 bytes for macOS', () => {
+    const name = exportFileName('会议记录'.repeat(40), 'docx');
+    expect(Buffer.byteLength(name, 'utf8')).toBeLessThanOrEqual(255);
+    expect(name).toBe(`${'会议记录'.repeat(40).slice(0, 83)}.docx`);
   });
 
   it('falls back to «Встреча» when nothing is left', () => {

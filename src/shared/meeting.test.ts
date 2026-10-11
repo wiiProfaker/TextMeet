@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { entryId, MEETING_ID_PATTERN, MeetingSchema, type Meeting } from './meeting';
+import { entryId, MEETING_ID_PATTERN, MeetingSchema, RecordedTrackKindSchema, type Meeting } from './meeting';
 
 const valid: Meeting = {
   schemaVersion: 1,
@@ -88,6 +88,14 @@ describe('MeetingSchema', () => {
     ['audioDeleted not a boolean', { audioDeleted: 1 }],
   ])('rejects %s', (_name, patch) => {
     expect(MeetingSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+  });
+});
+
+describe('RecordedTrackKindSchema', () => {
+  it('takes only the tracks the recorder window records', () => {
+    expect(RecordedTrackKindSchema.safeParse('mic').success).toBe(true);
+    expect(RecordedTrackKindSchema.safeParse('system').success).toBe(true);
+    expect(RecordedTrackKindSchema.safeParse('file').success).toBe(false);
   });
 });
 

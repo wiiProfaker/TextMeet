@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fsp, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RecorderStartCommand, RecordingState, StopDialogData } from '../../shared/recording';
@@ -941,6 +941,24 @@ describe('RecordingController — stop dialog', () => {
     await vi.waitFor(() => expect(h.deps.logger.error).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(h.deps.notify).not.toHaveBeenCalled();
+  });
+
+  it('still tells when the meeting folder cannot be checked: unavailable is not deleted', async () => {
+    const stat = fsp.stat.bind(fsp);
+    const h = harness({ enqueueTranscription: vi.fn(async () => Promise.reject(new Error('очередь'))) });
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    vi.mocked(h.deps.notify).mockClear();
+    const denied = vi.spyOn(fsp, 'stat').mockImplementation(((path: string, ...rest: unknown[]) =>
+      path === meetingDir(h.lib, command.meetingId)
+        ? Promise.reject(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }))
+        : stat(path, ...(rest as []))) as typeof fsp.stat);
+    try {
+      await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: 2 });
+      await vi.waitFor(() => expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.transcribeNotQueued()));
+    } finally {
+      denied.mockRestore();
+    }
   });
 
   it('closes the dialog on skip even when the answer cannot be saved, and still reports the error', async () => {

@@ -19,6 +19,7 @@ import {
 import type { Settings } from '../../shared/settings';
 import { humanFsError, humanFsReason } from '../fs/fs-errors';
 import { audioDir, createMeeting, meetingDir, removeMeetingDir, updateMeeting } from '../library/library';
+import { exists } from '../library/meeting-delete';
 import type { Logger } from '../logger';
 import {
   micProblem,
@@ -201,11 +202,8 @@ export class RecordingController {
   /** Встречу не удалось поставить в очередь. Её папку удалили — сказать нечего: это сделал сам человек. */
   private async transcriptionNotQueued(libraryDir: string, meetingId: string, err: unknown): Promise<void> {
     this.deps.logger.error(`Не удалось поставить встречу ${meetingId} в очередь расшифровки`, err);
-    const exists = await fsp.stat(meetingDir(libraryDir, meetingId)).then(
-      () => true,
-      () => false,
-    );
-    if (exists) this.deps.notify(notificationTexts.transcribeNotQueued());
+    // Удалена — только если папки нет; недоступная папка (нет прав, сбой диска) — повод сказать.
+    if (await exists(meetingDir(libraryDir, meetingId))) this.deps.notify(notificationTexts.transcribeNotQueued());
   }
 
   start(): Promise<void> {

@@ -199,7 +199,9 @@ export class Importer {
       return { reason: knownFsReason(err) ?? importTexts.notCreated };
     }
     if (this.disposed) {
-      await removeMeetingDir(libraryDir, meeting.id).catch(() => undefined);
+      await removeMeetingDir(libraryDir, meeting.id).catch((err: unknown) =>
+        this.deps.logger.warn(`Встреча ${meeting.id}, созданная при закрытии программы, не убрана`, err),
+      );
       return { reason: importTexts.quitting };
     }
     this.queue.push({ libraryDir, meetingId: meeting.id, source: path, durationSec: examined.info.durationSec });
@@ -210,7 +212,8 @@ export class Importer {
   }
 
   private requeue(job: ImportJob): void {
-    if (this.disposed) return;
+    // Встречу удаляли дважды, и оба раза не вышло: файл уже вернулся в очередь.
+    if (this.disposed || this.isPending(job.libraryDir, job.meetingId)) return;
     this.queue.unshift(job);
     this.report();
     this.kick();

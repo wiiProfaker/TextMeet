@@ -24,11 +24,14 @@ export interface ExportDoc {
 
 /**
  * Управляющие символы недопустимы в XML — Word счёл бы файл повреждённым. Вертикальная табуляция (её даёт вставка из
- * Word) — перевод строки, остальное убирается; табуляция и переводы строк остаются.
+ * Word) и одинокий \r — перевод строки, остальное убирается; табуляция и переводы строк остаются.
  */
 function cleanText(text: string): string {
-  return text.replace(/\u000b/g, '\n').replace(/[\u0000-\u0008\u000c\u000e-\u001f\u007f]/g, '');
+  return text.replace(/\r\n?|\u000b/g, '\n').replace(/[\u0000-\u0008\u000c\u000e-\u001f\u007f]/g, '');
 }
+
+/** Пустые строки внутри реплики (правка «Раз.⏎⏎Два.») — один перевод строки: в .txt они выглядели бы новым абзацем. */
+const BLANK_LINES = /\n(?:[^\S\n]*\n)+/g;
 
 /** Подряд идущие реплики одного спикера — один абзац; пустые реплики пропускаются. */
 export function buildExportDoc(
@@ -37,7 +40,7 @@ export function buildExportDoc(
 ): ExportDoc {
   const paragraphs: (ExportParagraph & { speakerId: string })[] = [];
   for (const segment of transcript.segments) {
-    const text = cleanText(segment.text).trim();
+    const text = cleanText(segment.text).trim().replace(BLANK_LINES, '\n');
     if (text === '') continue;
     const last = paragraphs.at(-1);
     if (last && last.speakerId === segment.speakerId) {
@@ -67,13 +70,13 @@ export function toPlainText(doc: ExportDoc, eol = '\n'): string {
   const lines = [doc.title, doc.metaLine];
   if (doc.participantsLine) lines.push(doc.participantsLine);
   for (const p of doc.paragraphs) lines.push('', `${p.speaker} [${p.time}]`, p.text);
-  return lines.join('\n').replace(/\r?\n/g, eol) + eol;
+  return lines.join('\n').replace(/\r\n?|\n/g, eol) + eol;
 }
 
 const escapeHtml = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-const htmlLines = (text: string): string => escapeHtml(text).replace(/\r?\n/g, '<br>');
+const htmlLines = (text: string): string => escapeHtml(text).replace(/\r\n?|\n/g, '<br>');
 
 /** Оформленный текст для буфера обмена (вставка в Word, Google Docs): имена жирным, время серым. */
 export function toHtml(doc: ExportDoc): string {

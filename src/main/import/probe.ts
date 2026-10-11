@@ -35,7 +35,8 @@ export function parseProbe(output: string): MediaInfo | null {
   const firstStream = input.search(/^\s*Stream #0:/m);
   // Сведения самого файла — до первой дорожки; у дорожек свои creation_time.
   const head = firstStream === -1 ? input : input.slice(0, firstStream);
-  const duration = /Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)/.exec(head);
+  // С начала строки: строка метаданных («comment : Duration: …») длительностью не считается.
+  const duration = /^\s*Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)/m.exec(head);
   const seconds = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : 0;
   // Нулевая длительность — ffmpeg её не знает (бывает у потоков без оглавления).
   const durationSec = seconds > 0 ? seconds : null;
@@ -55,10 +56,10 @@ export function ffmpegInfo(ffmpegPath: string, file: string, timeoutMs = PROBE_T
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     let output = '';
-    let timedOut = false;
+    // Отказ сразу после kill: на зависшем сетевом чтении процесс может закрыться намного позже.
     const timer = setTimeout(() => {
-      timedOut = true;
       child.kill('SIGKILL');
+      reject(new Error('ffmpeg слишком долго читал сведения о файле'));
     }, timeoutMs);
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
       if (output.length < MAX_OUTPUT_CHARS) output += chunk.slice(0, MAX_OUTPUT_CHARS - output.length);
@@ -67,10 +68,10 @@ export function ffmpegInfo(ffmpegPath: string, file: string, timeoutMs = PROBE_T
       clearTimeout(timer);
       reject(err);
     });
+    // После отказа по времени resolve уже ничего не меняет.
     child.on('close', () => {
       clearTimeout(timer);
-      if (timedOut) reject(new Error('ffmpeg слишком долго читал сведения о файле'));
-      else resolve(output);
+      resolve(output);
     });
   });
 }

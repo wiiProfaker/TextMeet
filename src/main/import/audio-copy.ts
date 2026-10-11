@@ -3,12 +3,18 @@
 import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { TRACK_FILES } from '../../shared/recording';
-import { runFfmpeg } from '../audio/ffmpeg';
+import { FfmpegExitError, runFfmpeg } from '../audio/ffmpeg';
 
 /** Звук встречи из файла в папке audio/. */
 export const SOURCE_FILE = TRACK_FILES.file;
 /** Меньше этого свободного места после неудачи — причина, скорее всего, в нём. */
 const LOW_SPACE_BYTES = 50 * 1024 * 1024;
+/** Свежий файл ненадолго держат антивирус (Защитник Windows) и индексатор: переименование повторяется. */
+const LOCK_CODES = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const RENAME_ATTEMPTS = 5;
+const RENAME_DELAY_MS = 200;
+/** Так ffmpeg пишет о полном диске; к нашей проверке места копия уже удалена, и место снова есть. */
+const NO_SPACE_OUTPUT = /No space left on device/i;
 
 export const copyTexts = {
   missing: 'файл не найден',
@@ -54,7 +60,8 @@ export interface CopyResult {
 }
 
 /** Почему не вышло — для человека; подробности (вывод ffmpeg) остаются в cause. */
-async function failureReason(source: string, dir: string, options: CopyOptions): Promise<string> {
+async function failureReason(source: string, dir: string, options: CopyOptions, err: unknown): Promise<string> {
+  if (err instanceof Error && NO_SPACE_OUTPUT.test(err.message)) return copyTexts.noSpace;
   const sourceExists = await fsp.stat(source).then(
     () => true,
     () => false,
@@ -65,6 +72,19 @@ async function failureReason(source: string, dir: string, options: CopyOptions):
   return copyTexts.broken;
 }
 
+async function renameLocked(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await fsp.rename(from, to);
+      return;
+    } catch (err) {
+      const locked = LOCK_CODES.has((err as NodeJS.ErrnoException | null)?.code ?? '');
+      if (!locked || attempt >= RENAME_ATTEMPTS) throw err;
+      await new Promise((resolve) => setTimeout(resolve, RENAME_DELAY_MS));
+    }
+  }
+}
+
 /** Копирует звук файла в `<audioDir>/source.mka`; при отмене и ошибке недописанного файла не остаётся. */
 export async function copySourceAudio(
   ffmpegPath: string,
@@ -73,25 +93,23 @@ export async function copySourceAudio(
   options: CopyOptions,
 ): Promise<CopyResult> {
   const part = join(audioDir, `${SOURCE_FILE}.part`);
-  const run = async (args: string[]): Promise<number | null> => {
-    try {
-      const { durationSec } = await runFfmpeg(ffmpegPath, args, { signal: options.signal, onProgress: options.onProgress });
-      await fsp.rename(part, join(audioDir, SOURCE_FILE));
-      return durationSec;
-    } catch (err) {
-      await fsp.rm(part, { force: true }).catch(() => undefined);
-      throw err;
-    }
-  };
+  const run = async (args: string[]): Promise<number | null> =>
+    (await runFfmpeg(ffmpegPath, args, { signal: options.signal, onProgress: options.onProgress })).durationSec;
   try {
-    return { durationSec: await run(copyArgs(source, part)), reencoded: false };
-  } catch (copyErr) {
-    if (options.signal?.aborted) throw copyErr;
+    let result: CopyResult;
     try {
-      return { durationSec: await run(reencodeArgs(source, part)), reencoded: true };
-    } catch (err) {
-      if (options.signal?.aborted) throw err;
-      throw new Error(await failureReason(source, audioDir, options), { cause: err });
+      result = { durationSec: await run(copyArgs(source, part)), reencoded: false };
+    } catch (copyErr) {
+      // Перекодировать — только если ffmpeg отказался копировать как есть; не запустился или отменён — незачем.
+      if (!(copyErr instanceof FfmpegExitError)) throw copyErr;
+      await fsp.rm(part, { force: true }).catch(() => undefined);
+      result = { durationSec: await run(reencodeArgs(source, part)), reencoded: true };
     }
+    await renameLocked(part, join(audioDir, SOURCE_FILE));
+    return result;
+  } catch (err) {
+    await fsp.rm(part, { force: true }).catch(() => undefined);
+    if (options.signal?.aborted) throw err;
+    throw new Error(await failureReason(source, audioDir, options, err), { cause: err });
   }
 }

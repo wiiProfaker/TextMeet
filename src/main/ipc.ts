@@ -21,7 +21,7 @@ import {
 } from '../shared/ipc';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
 import { IMPORT_EXTENSIONS } from '../shared/import';
-import { MeetingIdSchema, TrackKindSchema } from '../shared/meeting';
+import { MeetingIdSchema, RecordedTrackKindSchema } from '../shared/meeting';
 import { SpeakerIdSchema } from '../shared/transcript';
 import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
 import { copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
@@ -129,18 +129,18 @@ const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
   [IPC.recorderStarted]: z.object({
     meetingId: MeetingIdSchema,
-    tracks: z.array(z.object({ kind: TrackKindSchema, startedAt: z.number().finite() })).min(1),
+    tracks: z.array(z.object({ kind: RecordedTrackKindSchema, startedAt: z.number().finite() })).min(1),
     micLabel: z.string().max(500),
     systemFailure: FailureSchema.nullable(),
   }),
   [IPC.recorderStartFailed]: z.object({ meetingId: MeetingIdSchema, failure: FailureSchema }),
-  [IPC.recorderChunk]: z.object({ meetingId: MeetingIdSchema, kind: TrackKindSchema, data: Bytes }),
+  [IPC.recorderChunk]: z.object({ meetingId: MeetingIdSchema, kind: RecordedTrackKindSchema, data: Bytes }),
   [IPC.recorderPeaks]: z.object({
     meetingId: MeetingIdSchema,
     mic: z.number().finite(),
     system: z.number().finite().nullable(),
   }),
-  [IPC.recorderTrackEnded]: z.object({ meetingId: MeetingIdSchema, kind: TrackKindSchema }),
+  [IPC.recorderTrackEnded]: z.object({ meetingId: MeetingIdSchema, kind: RecordedTrackKindSchema }),
   [IPC.recorderStopped]: z.object({ meetingId: MeetingIdSchema }),
 } satisfies Record<RecorderMessageChannel, z.ZodType>;
 

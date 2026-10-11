@@ -65,6 +65,13 @@ describe('buildExportDoc', () => {
     expect(doc.paragraphs[0]?.text).toBe('Строка\nвторая.');
   });
 
+  it('keeps one line break where an edited replica has blank lines, so it does not look like a new paragraph', () => {
+    const doc = buildExportDoc(meeting, {
+      segments: [seg(1, 's1', 'Раз.\n\nДва.\r\n \r\n\rТри.\rЧетыре.')],
+    });
+    expect(doc.paragraphs[0]?.text).toBe('Раз.\nДва.\nТри.\nЧетыре.');
+  });
+
   it('a meeting without replicas has no participants and no paragraphs', () => {
     const doc = buildExportDoc(meeting, { segments: [] });
     expect(doc.participantsLine).toBeNull();
@@ -113,6 +120,15 @@ describe('toPlainText', () => {
     const text = toPlainText(doc, '\r\n');
     expect(text).toContain('Понял.\r\nА что с дизайном?\r\n');
     expect(text.replace(/\r\n/g, '')).not.toContain('\n');
+  });
+
+  it('turns a lone carriage return into the line ending too', () => {
+    const lone: ExportDoc = { ...doc, title: 'Созвон\rитоги', paragraphs: [{ speaker: 'Я', time: '0:01', text: 'Раз.\rДва.' }] };
+    const text = toPlainText(lone, '\r\n');
+    expect(text).toContain('Созвон\r\nитоги\r\n');
+    expect(text).toContain('Раз.\r\nДва.\r\n');
+    expect(text.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/);
+    expect(toHtml(lone)).toContain('Раз.<br>Два.');
   });
 
   it('a meeting without replicas is just the title and the date', () => {

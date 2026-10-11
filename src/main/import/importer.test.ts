@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fsp, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ImportFailure, ImportProgress } from '../../shared/import';
@@ -230,6 +230,22 @@ describe('Importer queue', () => {
     expect(calls[2]?.source).toBe('a.mp4');
   });
 
+  it('puts a file back only once when its meeting was deleted twice and both deletions failed', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    const [first = ''] = (await t.importer.addFiles(lib, ['a.mp4'])).added;
+    await until(() => calls.length === 1);
+    const [restoreOne, restoreTwo] = await Promise.all([t.importer.cancel(lib, first), t.importer.cancel(lib, first)]);
+    restoreOne?.();
+    restoreTwo?.();
+    await until(() => calls.length === 2);
+    expect(t.importer.progress().map((p) => p.meetingId)).toEqual([first]);
+    calls[1]?.finish();
+    await until(() => !t.importer.isBusy());
+    expect(calls).toHaveLength(2);
+  });
+
   it('keeps working after a listener throws, and never deletes a meeting whose sound was copied', async () => {
     const lib = makeTempDir('textmeet-import-');
     const { copy, calls } = controlledCopy();
@@ -322,6 +338,29 @@ describe('Importer queue', () => {
     release();
     expect(await adding).toEqual({ added: [], failed: [{ name: 'a.mp4', reason: importTexts.quitting }] });
     expect(await listMeetings(lib)).toEqual([]);
+  });
+
+  it('notes in the log a meeting created while the app was closing that could not be removed', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const logger = quiet();
+    const { importer } = setup({ logger, copy: controlledCopy().copy, examine: async () => goodFile(null) });
+    const mkdir = fsp.mkdir.bind(fsp);
+    // Программу начали закрывать, пока создавалась встреча, а её папку не убрать.
+    const creating = vi.spyOn(fsp, 'mkdir').mockImplementation((async (path: string, options?: unknown) => {
+      if (path.endsWith('audio')) void importer.stop();
+      return mkdir(path, options as Parameters<typeof fsp.mkdir>[1]);
+    }) as typeof fsp.mkdir);
+    const removing = vi.spyOn(fsp, 'rm').mockRejectedValue(Object.assign(new Error('EBUSY'), { code: 'EBUSY' }));
+    try {
+      expect(await importer.addFiles(lib, ['a.mp4'])).toEqual({
+        added: [],
+        failed: [{ name: 'a.mp4', reason: importTexts.quitting }],
+      });
+    } finally {
+      creating.mockRestore();
+      removing.mockRestore();
+    }
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledTimes(1);
   });
 
   it('stopping for the end of a Windows session keeps the unfinished meetings for the next start', async () => {

@@ -115,6 +115,25 @@ describe('saveMeeting', () => {
     expect(offered).toBe(join(last, 'Созвон Ирина бюджет.docx'));
   });
 
+  it('starts in the documents folder when the folder of the last export is gone', async () => {
+    const { lib, id } = await meetingWithText();
+    const gone = join(makeTempDir('textmeet-export-last-'), 'удалена');
+    const notFolder = join(makeTempDir('textmeet-export-last-'), 'файл');
+    writeFileSync(notFolder, 'не папка');
+    for (const last of [gone, notFolder]) {
+      let offered = '';
+      const d = deps(lib, {
+        exportDir: () => last,
+        chooseSavePath: async (defaultPath) => {
+          offered = defaultPath;
+          return null;
+        },
+      });
+      await saveMeeting(d, id, 'txt');
+      expect(offered).toBe(join(d.documentsDir(), 'Созвон Ирина бюджет.txt'));
+    }
+  });
+
   it('writes text with a BOM and Windows line endings on Windows', async () => {
     const { lib, id } = await meetingWithText();
     const target = join(makeTempDir('textmeet-export-txt-'), 'итоги.txt');

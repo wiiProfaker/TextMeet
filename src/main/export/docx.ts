@@ -14,7 +14,7 @@ const PARAGRAPH_GAP = 200;
 
 /** Перевод строки внутри текста — разрыв строки в Word (как Shift+Enter). */
 const lines = (text: string, options: Omit<IRunOptions, 'text' | 'break'> = {}): TextRun[] =>
-  text.split(/\r?\n/).map((line, i) => new TextRun({ ...options, text: line, ...(i > 0 && { break: 1 }) }));
+  text.split(/\r\n?|\n/).map((line, i) => new TextRun({ ...options, text: line, ...(i > 0 && { break: 1 }) }));
 
 export async function toDocx(doc: ExportDoc): Promise<Buffer> {
   const children = [

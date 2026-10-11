@@ -1,13 +1,23 @@
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, promises as fsp, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { oddCodecRecording, phoneRecording, videoWithSound } from '../../test-support/media-files';
-import { FFMPEG_CANCELLED, resolveFfmpegPath } from '../audio/ffmpeg';
+import { FFMPEG_CANCELLED, FfmpegExitError, resolveFfmpegPath, runFfmpeg } from '../audio/ffmpeg';
 import { copyArgs, copySourceAudio, copyTexts, reencodeArgs, SOURCE_FILE } from './audio-copy';
 import { ffmpegInfo } from './probe';
 
+// Настоящий ffmpeg, но видно, сколько раз его запускали.
+vi.mock('../audio/ffmpeg', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../audio/ffmpeg')>();
+  return { ...actual, runFfmpeg: vi.fn((...args: Parameters<typeof actual.runFfmpeg>) => actual.runFfmpeg(...args)) };
+});
+
 const ffmpeg = resolveFfmpegPath();
+const runs = vi.mocked(runFfmpeg);
+/** Сколько раз ffmpeg запускали для звука встречи (тестовые файлы он тоже делает). */
+const soundRuns = (): number => runs.mock.calls.filter(([, args]) => args.includes('-map')).length;
+const locked = (code: string): Error => Object.assign(new Error(`${code}: resource busy or locked`), { code });
 const plenty = async (): Promise<number> => 10 * 1024 ** 3;
 
 describe('copyArgs / reencodeArgs', () => {
@@ -20,6 +30,10 @@ describe('copyArgs / reencodeArgs', () => {
 });
 
 describe('copySourceAudio', () => {
+  beforeEach(() => {
+    runs.mockClear();
+  });
+
   it('copies the sound of a video without the picture', async () => {
     const dir = makeTempDir('textmeet-copy-');
     const source = join(dir, 'созвон.mp4');
@@ -77,7 +91,61 @@ describe('copySourceAudio', () => {
     await expect(copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty, signal: abort.signal })).rejects.toThrow(
       FFMPEG_CANCELLED,
     );
+    expect(soundRuns()).toBe(1);
     expect(existsSync(join(audio, SOURCE_FILE))).toBe(false);
     expect(readdirSync(audio)).toEqual([]);
+  });
+
+  it('does not re-encode when ffmpeg cannot be started', async () => {
+    const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
+    await phoneRecording(source, 1);
+    const audio = makeTempDir('textmeet-copy-audio-');
+    await expect(copySourceAudio(join(audio, 'no-ffmpeg.exe'), source, audio, { freeBytes: plenty })).rejects.toThrow();
+    expect(soundRuns()).toBe(1);
+  });
+
+  it('keeps a good copy while the fresh file is briefly locked', async () => {
+    const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
+    await phoneRecording(source, 1);
+    const audio = makeTempDir('textmeet-copy-audio-');
+    const rename = fsp.rename.bind(fsp);
+    let calls = 0;
+    // Защитник Windows ненадолго держит только что записанный файл.
+    const busy = vi.spyOn(fsp, 'rename').mockImplementation(async (from, to) => {
+      calls += 1;
+      if (calls <= 2) throw locked(calls === 1 ? 'EPERM' : 'EBUSY');
+      await rename(from, to);
+    });
+    try {
+      expect((await copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty })).reencoded).toBe(false);
+    } finally {
+      busy.mockRestore();
+    }
+    expect(soundRuns()).toBe(1);
+    expect(readdirSync(audio)).toEqual([SOURCE_FILE]);
+  });
+
+  it('gives up on a file that stays locked without re-encoding and leaves nothing behind', async () => {
+    const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
+    await phoneRecording(source, 1);
+    const audio = makeTempDir('textmeet-copy-audio-');
+    const busy = vi.spyOn(fsp, 'rename').mockRejectedValue(locked('EACCES'));
+    try {
+      await expect(copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty })).rejects.toThrow(copyTexts.broken);
+      expect(busy.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      busy.mockRestore();
+    }
+    expect(soundRuns()).toBe(1);
+    expect(readdirSync(audio)).toEqual([]);
+  });
+
+  it('says the disk is full when ffmpeg ran out of space, even after the partial copy is gone', async () => {
+    const source = join(makeTempDir('textmeet-copy-'), 'созвон.m4a');
+    await phoneRecording(source, 1);
+    const audio = makeTempDir('textmeet-copy-audio-');
+    const full = new FfmpegExitError('ffmpeg завершился с кодом 1: Error writing trailer: No space left on device');
+    runs.mockRejectedValueOnce(full).mockRejectedValueOnce(full);
+    await expect(copySourceAudio(ffmpeg, source, audio, { freeBytes: plenty })).rejects.toThrow(copyTexts.noSpace);
   });
 });

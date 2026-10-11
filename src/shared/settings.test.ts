@@ -11,6 +11,7 @@ describe('SettingsSchema', () => {
       recordHotkey: null,
       recordSounds: true,
       asrModel: 'gigaam-v3-e2e-rnnt',
+      exportDir: null,
     });
   });
 
@@ -34,6 +35,10 @@ describe('SettingsSchema', () => {
     expect(SettingsSchema.parse({ asrModel: 42 }).asrModel).toBe('gigaam-v3-e2e-rnnt');
   });
 
+  it('keeps the folder of the last export', () => {
+    expect(SettingsSchema.parse({ exportDir: '/Users/kirill/Documents' }).exportDir).toBe('/Users/kirill/Documents');
+  });
+
   it('rejects wrong types and empty values', () => {
     expect(SettingsSchema.safeParse({ launchAtLogin: 'yes' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ libraryDir: '' }).success).toBe(false);
@@ -41,5 +46,6 @@ describe('SettingsSchema', () => {
     expect(SettingsSchema.safeParse({ microphoneId: '' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ recordHotkey: '' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ recordSounds: 1 }).success).toBe(false);
+    expect(SettingsSchema.safeParse({ exportDir: '' }).success).toBe(false);
   });
 });

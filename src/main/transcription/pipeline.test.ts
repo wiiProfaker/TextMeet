@@ -18,7 +18,7 @@ const mic: TrackInput = { kind: 'mic', file: 'mic.webm', offsetSec: 0 };
 const system: TrackInput = { kind: 'system', file: 'system.webm', offsetSec: 0.5 };
 
 interface Setup {
-  audio: Partial<Record<'mic' | 'system', Float32Array>>;
+  audio: Partial<Record<TrackInput['kind'], Float32Array>>;
   turns?: Turn[];
   prints?: (samples: Float32Array) => Float32Array | null;
   threads?: () => number;
@@ -161,6 +161,21 @@ describe('runPipeline', () => {
       ],
     });
     const result = await runPipeline(input({ tracks: [mic], recordedSystem: false, participantsHint: 2, durationSec: 10 }), deps);
+    expect(diarize).toHaveBeenCalledWith(expect.any(Float32Array), 2);
+    expect(result.segments.map((s) => s.speakerId)).toEqual(['s1', 's2']);
+    expect(result.speakers.map((s) => s.kind)).toEqual(['other', 'other']);
+  });
+
+  it('a meeting from a file: everyone on its one track becomes «Спикер N»', async () => {
+    const file: TrackInput = { kind: 'file', file: 'source.mka', offsetSec: 0 };
+    const { deps, diarize } = setup({
+      audio: { file: signal(10, [{ start: 0, end: 2 }, { start: 4, end: 6 }]) },
+      turns: [
+        { start: 0, end: 2, speaker: 0 },
+        { start: 4, end: 6, speaker: 1 },
+      ],
+    });
+    const result = await runPipeline(input({ tracks: [file], recordedSystem: false, participantsHint: 2, durationSec: 10 }), deps);
     expect(diarize).toHaveBeenCalledWith(expect.any(Float32Array), 2);
     expect(result.segments.map((s) => s.speakerId)).toEqual(['s1', 's2']);
     expect(result.speakers.map((s) => s.kind)).toEqual(['other', 'other']);

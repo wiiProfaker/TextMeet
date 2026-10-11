@@ -1,7 +1,8 @@
 // Типы записи, общие для main, окна записи и главного окна. Без zod и пакетов: модуль попадает в preload.
 import type { TrackKind } from './meeting';
 
-export const TRACK_FILES: Record<TrackKind, string> = { mic: 'mic.webm', system: 'system.webm' };
+/** Файл дорожки в папке audio/ по её виду; file — звук встречи из файла (импорт). */
+export const TRACK_FILES: Record<TrackKind, string> = { mic: 'mic.webm', system: 'system.webm', file: 'source.mka' };
 /** Сведение дорожек для прослушивания. */
 export const MIX_FILE = 'mix.opus';
 /** Делений в индикаторе уровня. */

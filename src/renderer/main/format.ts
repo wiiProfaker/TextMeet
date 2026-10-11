@@ -152,6 +152,8 @@ export interface MeetingNote {
  */
 export function meetingNote(meeting: Meeting, progress?: TranscriptionProgress): MeetingNote | null {
   switch (meeting.status) {
+    case 'importing':
+      return { text: 'импорт…', tone: 'accent' };
     case 'recording':
       return { text: 'идёт запись', tone: 'live' };
     case 'recorded':

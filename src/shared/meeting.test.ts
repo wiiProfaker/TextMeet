@@ -16,6 +16,7 @@ const valid: Meeting = {
   tracks: [],
   recovered: false,
   audioDeleted: false,
+  sourceFileName: null,
 };
 
 describe('MEETING_ID_PATTERN', () => {
@@ -36,9 +37,21 @@ describe('MeetingSchema', () => {
     expect(MeetingSchema.parse(valid)).toEqual(valid);
   });
 
-  it('reads a meeting written by the previous version (no tracks, no recovered and audioDeleted flags)', () => {
-    const { tracks: _tracks, recovered: _recovered, audioDeleted: _audioDeleted, ...old } = valid;
+  it('reads a meeting written by the previous version (no tracks, flags and source file name)', () => {
+    const { tracks: _tracks, recovered: _recovered, audioDeleted: _audioDeleted, sourceFileName: _name, ...old } = valid;
     expect(MeetingSchema.parse(old)).toEqual(valid);
+  });
+
+  it('accepts a meeting from a file that is still being copied', () => {
+    const imported = { ...valid, source: 'import', status: 'importing', sourceFileName: 'Созвон с Ириной.mp4' };
+    expect(MeetingSchema.parse(imported)).toEqual(imported);
+    const tracks = [{ kind: 'file', file: 'source.mka', startOffsetMs: 0 }];
+    expect(MeetingSchema.parse({ ...imported, status: 'recorded', tracks }).tracks).toEqual(tracks);
+  });
+
+  it('rejects an empty or too long source file name', () => {
+    expect(MeetingSchema.safeParse({ ...valid, sourceFileName: '' }).success).toBe(false);
+    expect(MeetingSchema.safeParse({ ...valid, sourceFileName: 'a'.repeat(256) }).success).toBe(false);
   });
 
   it('keeps fields it does not know (written by a newer version)', () => {

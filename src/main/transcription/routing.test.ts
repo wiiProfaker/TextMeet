@@ -44,6 +44,13 @@ describe('planTracks', () => {
     expect(planTracks([system], true, 3)).toEqual([{ track: system, role: 'others', diarize: { mode: 'fixed', speakers: 2 } }]);
   });
 
+  it('a meeting from a file: one track for everyone, split by the number of people', () => {
+    const file: TrackInput = { kind: 'file', file: 'source.mka', offsetSec: 0 };
+    expect(planTracks([file], false, 3)).toEqual([{ track: file, role: 'others', diarize: { mode: 'fixed', speakers: 3 } }]);
+    expect(planTracks([file], false, null)[0]?.diarize).toEqual({ mode: 'auto' });
+    expect(planTracks([file], false, 1)[0]?.diarize).toEqual({ mode: 'none' });
+  });
+
   it('nothing to transcribe', () => {
     expect(planTracks([], false, 2)).toEqual([]);
   });

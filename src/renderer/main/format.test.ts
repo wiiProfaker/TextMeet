@@ -35,6 +35,7 @@ const meeting = (id: string, createdAt: Date, patch: Partial<Meeting> = {}): Mee
   tracks: [],
   recovered: false,
   audioDeleted: false,
+  sourceFileName: null,
   ...patch,
 });
 
@@ -181,6 +182,10 @@ describe('meetingNote', () => {
     expect(meetingNote(meeting('a', at, { status: 'queued' }))?.text).toBe('в очереди на расшифровку');
     expect(meetingNote(meeting('a', at, { status: 'transcribing' }))?.text).toBe('расшифровка…');
     expect(meetingNote(meeting('a', at, { status: 'error' }))).toEqual({ text: 'ошибка', tone: 'error' });
+    expect(meetingNote(meeting('a', at, { status: 'importing', source: 'import' }))).toEqual({
+      text: 'импорт…',
+      tone: 'accent',
+    });
   });
 
   it('shows the progress of transcription and its errors', () => {

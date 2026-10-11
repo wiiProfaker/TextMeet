@@ -188,7 +188,7 @@ class Run {
   }
 }
 
-const TRACK_NAMES: Record<TrackKind, string> = { mic: 'микрофон', system: 'звук компьютера' };
+const TRACK_NAMES: Record<TrackKind, string> = { mic: 'микрофон', system: 'звук компьютера', file: 'файл' };
 
 /**
  * Собеседники по порядку первого появления в готовой расшифровке: «Спикер 1» — тот, кто первым что-то сказал.

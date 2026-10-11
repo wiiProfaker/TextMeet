@@ -25,7 +25,7 @@ import { IMPORT_EXTENSIONS } from '../shared/import';
 import { MeetingIdSchema, RecordedTrackKindSchema } from '../shared/meeting';
 import { SpeakerIdSchema } from '../shared/transcript';
 import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
-import { copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
+import { copyForAi, copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import type { Importer } from './import/importer';
@@ -369,6 +369,8 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.copyMeeting, (arg) => copyMeeting(deps.exporting, MeetingIdSchema.parse(arg)));
+
+  handle(IPC.copyForAi, (arg) => copyForAi(deps.exporting, MeetingIdSchema.parse(arg)));
 
   handle(IPC.saveMeeting, (arg) => {
     const request = SaveMeetingSchema.parse(arg);

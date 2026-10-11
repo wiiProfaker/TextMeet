@@ -10,6 +10,26 @@ import { errorText } from './errors';
 import { cleanDeviceLabel } from './format';
 import { nextSpeed } from './playback';
 
+/** Сколько кнопка показывает «Скопировано». */
+const COPIED_MS = 2000;
+
+/**
+ * «Скопировано» на кнопке копирования: true на 2 с после markCopied(); каждое новое копирование снова показывает
+ * «Скопировано» на 2 с.
+ */
+export function useCopiedFlag(): [boolean, () => void] {
+  const [copies, setCopies] = useState(0);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (copies === 0) return;
+    setCopied(true);
+    const timer = setTimeout(() => setCopied(false), COPIED_MS);
+    return () => clearTimeout(timer);
+  }, [copies]);
+  const markCopied = useCallback(() => setCopies((n) => n + 1), []);
+  return [copied, markCopied];
+}
+
 /** Состояние записи из main: сначала запрос, дальше — события. */
 export function useRecordingState(): RecordingState | null {
   const [state, setState] = useState<RecordingState | null>(null);

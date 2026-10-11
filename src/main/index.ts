@@ -491,8 +491,14 @@ async function start(logger: Logger): Promise<void> {
         const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
         return result.canceled || !result.filePath ? null : result.filePath;
       },
-      writeClipboard: (data) => clipboard.write([new ClipboardItem({ 'text/plain': data.text, 'text/html': data.html })]),
+      writeClipboard: (data) =>
+        clipboard.write([
+          new ClipboardItem(
+            data.html === undefined ? { 'text/plain': data.text } : { 'text/plain': data.text, 'text/html': data.html },
+          ),
+        ]),
       exportDir: () => settings.get().exportDir,
+      aiPrompt: () => settings.get().aiPrompt,
       rememberExportDir: (dir) => settings.update({ exportDir: dir }),
       documentsDir: () => app.getPath('documents'),
       platform: process.platform,

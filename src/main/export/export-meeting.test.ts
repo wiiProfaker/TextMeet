@@ -1,11 +1,12 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { DEFAULT_AI_PROMPT } from '../../shared/ai-prompt';
 import type { Transcript } from '../../shared/transcript';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { createMeeting, updateMeeting } from '../library/library';
 import { writeTranscript } from '../library/transcript-store';
-import { copyMeeting, exportTexts, saveMeeting, type ExportDeps } from './export-meeting';
+import { copyForAi, copyMeeting, exportTexts, saveMeeting, type ExportDeps } from './export-meeting';
 
 const transcript: Transcript = {
   schemaVersion: 1,
@@ -35,8 +36,10 @@ async function meetingWithText(text: Transcript | null = transcript): Promise<{ 
   return { lib, id: meeting.id };
 }
 
-function deps(lib: string, over: Partial<ExportDeps> = {}): ExportDeps & { clipboard: { text: string; html: string }[] } {
-  const clipboard: { text: string; html: string }[] = [];
+type Clip = { text: string; html?: string };
+
+function deps(lib: string, over: Partial<ExportDeps> = {}): ExportDeps & { clipboard: Clip[] } {
+  const clipboard: Clip[] = [];
   const out = makeTempDir('textmeet-export-out-');
   return {
     clipboard,
@@ -46,6 +49,7 @@ function deps(lib: string, over: Partial<ExportDeps> = {}): ExportDeps & { clipb
       clipboard.push(data);
     },
     exportDir: () => null,
+    aiPrompt: () => null,
     rememberExportDir: async () => undefined,
     documentsDir: () => out,
     platform: 'win32',
@@ -78,6 +82,46 @@ describe('copyMeeting', () => {
     const { lib, id } = await meetingWithText();
     writeFileSync(join(lib, id, 'transcript.json'), '{ сломано');
     await expect(copyMeeting(deps(lib), id)).rejects.toThrow(exportTexts.unreadable);
+  });
+});
+
+const PLAIN =
+  'Созвон: Ирина / бюджет\n27 сентября 2026, 16:20 · 32 мин\nУчастники: Ирина, Я\n\n' +
+  'Ирина [11:48]\nСмотри, по бюджету. Подрядчиков отдельно.\n\nЯ [12:04]\nПонял.\n';
+
+describe('copyForAi', () => {
+  it('puts the standard prompt, an empty line and the plain text — without html', async () => {
+    const { lib, id } = await meetingWithText();
+    const d = deps(lib);
+    await copyForAi(d, id);
+    expect(d.clipboard).toEqual([{ text: `${DEFAULT_AI_PROMPT}\n\n${PLAIN}` }]);
+  });
+
+  it('takes the own prompt from the settings at the moment of copying', async () => {
+    const { lib, id } = await meetingWithText();
+    let prompt: string | null = 'Что решили?';
+    const d = deps(lib, { aiPrompt: () => prompt });
+    await copyForAi(d, id);
+    prompt = '  Кратко.\r\nПо пунктам.  ';
+    await copyForAi(d, id);
+    expect(d.clipboard.map((c) => c.text)).toEqual([`Что решили?\n\n${PLAIN}`, `Кратко.\nПо пунктам.\n\n${PLAIN}`]);
+  });
+
+  it('copies only the text when the prompt is empty', async () => {
+    const { lib, id } = await meetingWithText();
+    const d = deps(lib, { aiPrompt: () => '' });
+    await copyForAi(d, id);
+    expect(d.clipboard).toEqual([{ text: PLAIN }]);
+  });
+
+  it('refuses a meeting without text and says plainly that the text could not be read', async () => {
+    const empty = await meetingWithText(null);
+    await expect(copyForAi(deps(empty.lib), empty.id)).rejects.toThrow(exportTexts.noText);
+    const { lib, id } = await meetingWithText();
+    writeFileSync(join(lib, id, 'transcript.json'), '{ сломано');
+    const d = deps(lib);
+    await expect(copyForAi(d, id)).rejects.toThrow(exportTexts.unreadable);
+    expect(d.clipboard).toEqual([]);
   });
 });
 

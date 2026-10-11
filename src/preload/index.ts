@@ -76,6 +76,7 @@ const api: TextMeetApi = {
   cancelModelDownload: (id) => invoke(IPC.cancelModelDownload, id),
   selectModel: (id) => invoke(IPC.selectModel, id),
   copyMeeting: (meetingId) => invoke(IPC.copyMeeting, meetingId),
+  copyForAi: (meetingId) => invoke(IPC.copyForAi, meetingId),
   saveMeeting: (request) => invoke(IPC.saveMeeting, request),
   pickImportFiles: () => invoke(IPC.pickImportFiles),
   importFiles: (paths) => invoke(IPC.importFiles, paths),

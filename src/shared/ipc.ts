@@ -61,6 +61,7 @@ export const IPC = {
   cancelModelDownload: 'models:cancel-download',
   selectModel: 'models:select',
   copyMeeting: 'export:copy',
+  copyForAi: 'export:copy-for-ai',
   saveMeeting: 'export:save',
   pickImportFiles: 'import:pick',
   importFiles: 'import:files',
@@ -194,6 +195,7 @@ export interface MainInvokeContract {
   [IPC.cancelModelDownload]: { arg: AsrModelId; result: ModelsState };
   [IPC.selectModel]: { arg: AsrModelId; result: ModelsState };
   [IPC.copyMeeting]: { arg: string; result: void };
+  [IPC.copyForAi]: { arg: string; result: void };
   [IPC.saveMeeting]: { arg: SaveMeetingRequest; result: SaveMeetingResult };
   [IPC.pickImportFiles]: { arg: void; result: string[] };
   [IPC.importFiles]: { arg: string[]; result: ImportResult };
@@ -289,6 +291,8 @@ export interface TextMeetApi {
   selectModel(id: AsrModelId): Promise<ModelsState>;
   /** «Скопировать всё»: текст встречи — в буфер обмена (обычный и оформленный). */
   copyMeeting(meetingId: string): Promise<void>;
+  /** «Скопировать для ИИ»: запрос из настроек и текст встречи — в буфер обмена простым текстом. */
+  copyForAi(meetingId: string): Promise<void>;
   /** «Сохранить в Word» / «Сохранить как текст»: окно сохранения системы и файл. */
   saveMeeting(request: SaveMeetingRequest): Promise<SaveMeetingResult>;
   /** «Импорт файла»: окно выбора файлов системы; пусто — передумали. */

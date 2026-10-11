@@ -10,6 +10,7 @@ import { errorText } from './errors';
 import { isImportFailure, participantsText } from './format';
 import { SearchViewContext, usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, TrashIcon, WarnIcon } from './icons';
+import { ExportMenu } from './ExportMenu';
 import { importView } from './import-format';
 import { MeetingTitle } from './MeetingTitle';
 import { Player } from './Player';
@@ -298,6 +299,8 @@ function MeetingView({
   const transcribeError = meeting.status === 'error' && hasAudio;
   const importFailed = isImportFailure(meeting);
   const actions = transcribeActions(meeting.status, hasAudio, load.kind);
+  // Выгружать есть что, только если в тексте есть хоть одна реплика (прежний текст — и во время расшифровки заново).
+  const canExport = load.kind === 'ready' && load.transcript.segments.some((s) => s.text.trim() !== '');
   // «Повторить» — той же моделью, что не справилась (её id в meeting.json); неизвестная — из настроек.
   const retry = () =>
     window.textmeet
@@ -319,6 +322,7 @@ function MeetingView({
               {actions.header}
             </button>
           )}
+          {canExport && <ExportMenu meetingId={meeting.id} onError={onError} />}
           <MeetingMenu
             meeting={meeting}
             audioBlocked={audioBlocked}

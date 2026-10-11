@@ -1293,6 +1293,18 @@ button.chip:hover {
   background: transparent;
 }
 
+/* Меню «Экспорт» — под кнопкой, шире обычного: в пунктах — формат файла. */
+.export-menu {
+  width: 290px;
+}
+
+.btn .ic + span + .ic {
+  width: 13px;
+  height: 13px;
+  margin-left: -2px;
+  color: var(--muted);
+}
+
 /* Меню «…» в заголовке встречи — справа под кнопкой. */
 .more-wrap {
   position: relative;

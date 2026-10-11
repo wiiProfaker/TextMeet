@@ -394,13 +394,8 @@ async function start(logger: Logger): Promise<void> {
     },
     libraryChanged: () => sendToMain(IPC.libraryChanged),
     enqueueMix: (dir, id) => mixer.enqueue(dir, id),
-    enqueueTranscription: (dir, id) => {
-      // Модель — из настроек на момент ответа в окне «Запись остановлена».
-      queue.enqueue(dir, id, undefined, settings.get().asrModel).catch((err: unknown) => {
-        logger.error(`Не удалось поставить встречу ${id} в очередь расшифровки`, err);
-        notify(notificationTexts.transcribeNotQueued());
-      });
-    },
+    // Модель — из настроек на момент ответа в окне «Запись остановлена» / «Файл добавлен».
+    enqueueTranscription: (dir, id) => queue.enqueue(dir, id, undefined, settings.get().asrModel),
   });
   const imports = new Importer({
     ffmpegPath: () => resolveFfmpegPath(),

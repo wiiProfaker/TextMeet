@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RecorderStartCommand, RecordingState, StopDialogData } from '../../shared/recording';
@@ -50,7 +50,7 @@ function harness(overrides: Partial<ControllerDeps> = {}) {
     emitPeaks: vi.fn(),
     libraryChanged: vi.fn(),
     enqueueMix: vi.fn(),
-    enqueueTranscription: vi.fn(),
+    enqueueTranscription: vi.fn(async () => undefined),
     timeouts: { startMs: 300, stopMs: 300 },
     ...overrides,
   };
@@ -467,6 +467,21 @@ describe('RecordingController — during a recording', () => {
     await vi.waitFor(() => expect(h.state().phase).toBe('idle'));
     expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.stoppedByDisk('на диске закончилось место'));
     expect((await readMeeting(h.lib, command.meetingId)).status).toBe('recorded');
+  });
+
+  it('does not show the system text of an unknown disk error', async () => {
+    let failWrite: (err: unknown) => void = () => undefined;
+    const h = harness({
+      openTracks: async (_dir, _kinds, onError) => {
+        failWrite = onError;
+        return { append: vi.fn(), close: async () => undefined };
+      },
+    });
+    await h.startRecording();
+    failWrite(Object.assign(new Error("UNKNOWN: write 'C:/Users/Ирина/TextMeet/mic.webm'"), { code: 'UNKNOWN' }));
+    await vi.waitFor(() =>
+      expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.stoppedByDisk('файл занят или недоступен')),
+    );
   });
 
   it('stops when the disk fails while the chunks kept during the start are written', async () => {
@@ -899,6 +914,33 @@ describe('RecordingController — stop dialog', () => {
 
     expect(h.state().startProblem).toEqual(RECORDER_NOT_READY);
     expect(h.state().stopDialog?.meetingId).toBe(command.meetingId);
+  });
+
+  it('tells how to transcribe by hand when the meeting could not be queued', async () => {
+    const h = harness({ enqueueTranscription: vi.fn(async () => Promise.reject(new Error('очередь'))) });
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    vi.mocked(h.deps.notify).mockClear();
+    await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: 2 });
+    await vi.waitFor(() => expect(h.deps.notify).toHaveBeenCalledWith(notificationTexts.transcribeNotQueued()));
+    expect(h.deps.logger.error).toHaveBeenCalled();
+  });
+
+  it('says nothing when the meeting was deleted before it could be queued', async () => {
+    const h = harness({
+      // Встречу удалили, пока ответ сохранялся: очередь её уже не находит.
+      enqueueTranscription: vi.fn(async (lib: string, id: string) => {
+        rmSync(meetingDir(lib, id), { recursive: true, force: true });
+        throw new Error('нет встречи');
+      }),
+    });
+    const command = await h.startRecording();
+    await h.stopRecording(command.meetingId);
+    vi.mocked(h.deps.notify).mockClear();
+    await h.controller.finishStopDialog({ meetingId: command.meetingId, title: 'Созвон', participantsHint: 2 });
+    await vi.waitFor(() => expect(h.deps.logger.error).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(h.deps.notify).not.toHaveBeenCalled();
   });
 
   it('closes the dialog on skip even when the answer cannot be saved, and still reports the error', async () => {

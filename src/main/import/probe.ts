@@ -36,7 +36,9 @@ export function parseProbe(output: string): MediaInfo | null {
   // Сведения самого файла — до первой дорожки; у дорожек свои creation_time.
   const head = firstStream === -1 ? input : input.slice(0, firstStream);
   const duration = /Duration: (\d+):(\d{2}):(\d{2}(?:\.\d+)?)/.exec(head);
-  const durationSec = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : null;
+  const seconds = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : 0;
+  // Нулевая длительность — ffmpeg её не знает (бывает у потоков без оглавления).
+  const durationSec = seconds > 0 ? seconds : null;
   const creation = /^\s*creation_time\s*:\s*(\S.*?)\s*$/m.exec(head);
   return {
     hasAudio: /^\s*Stream #0:\S*: Audio:/m.test(input),

@@ -57,6 +57,14 @@ describe('buildExportDoc', () => {
     expect(doc.participantsLine).toBe('Участники: Ирина');
   });
 
+  it('drops control characters that would break a Word file', () => {
+    const doc = buildExportDoc({ ...meeting, title: 'Со\u0001звон' }, {
+      segments: [seg(1, 's1', 'Строка\u000bвторая\u0007.')],
+    });
+    expect(doc.title).toBe('Созвон');
+    expect(doc.paragraphs[0]?.text).toBe('Строка\nвторая.');
+  });
+
   it('a meeting without replicas has no participants and no paragraphs', () => {
     const doc = buildExportDoc(meeting, { segments: [] });
     expect(doc.participantsLine).toBeNull();

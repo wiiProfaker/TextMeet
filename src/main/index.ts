@@ -523,7 +523,7 @@ async function start(logger: Logger): Promise<void> {
     // сама, и без dispose() очередь посчитала бы это сбоем. Остановленная очередь оставляет встречу
     // «расшифровывается» — до следующего запуска.
     transcription?.dispose();
-    void importer?.disposeForQuit();
+    void importer?.stop();
     onSystemEnding();
   });
   windowsCreated = true;

@@ -14,6 +14,7 @@ import { exportFileName } from './file-name';
 export const exportTexts = {
   noText: 'У встречи пока нет текста — выгружать нечего.',
   unreadable: 'Не удалось прочитать текст встречи.',
+  notBuilt: 'Не удалось собрать файл — подробности в журнале.',
 } as const;
 
 export interface ExportDeps {
@@ -63,8 +64,14 @@ export async function saveMeeting(deps: ExportDeps, meetingId: string, format: E
   const picked = await deps.chooseSavePath(join(dir, exportFileName(doc.title, format)), format);
   if (picked === null) return { saved: false };
   const path = extname(picked).toLowerCase() === `.${format}` ? picked : `${picked}.${format}`;
+  let data: Uint8Array | string;
   try {
-    await fsp.writeFile(path, await fileData(doc, format, deps.platform));
+    data = await fileData(doc, format, deps.platform);
+  } catch (err) {
+    throw new Error(exportTexts.notBuilt, { cause: err });
+  }
+  try {
+    await fsp.writeFile(path, data);
   } catch (err) {
     throw humanFsError('Не удалось сохранить файл', err);
   }

@@ -8,6 +8,7 @@ describe('exportFileName', () => {
 
   it('replaces characters that Windows and macOS do not allow in names', () => {
     expect(exportFileName('План: Q4 / бюджет? "черновик" <v2>|*', 'txt')).toBe('План Q4 бюджет черновик v2.txt');
+    expect(exportFileName('Отчёт\\итоги', 'docx')).toBe('Отчёт итоги.docx');
     expect(exportFileName('a\u0000b\tc\nd', 'txt')).toBe('a b c d.txt');
   });
 
@@ -16,8 +17,9 @@ describe('exportFileName', () => {
   });
 
   it('keeps reserved Windows names from turning into devices', () => {
-    expect(exportFileName('CON', 'txt')).toBe('CON_.txt');
-    expect(exportFileName('com1', 'docx')).toBe('com1_.docx');
+    expect(exportFileName('CON', 'txt')).toBe('_CON.txt');
+    expect(exportFileName('com1', 'docx')).toBe('_com1.docx');
+    expect(exportFileName('con.report', 'docx')).toBe('_con.report.docx');
     expect(exportFileName('Console', 'txt')).toBe('Console.txt');
   });
 

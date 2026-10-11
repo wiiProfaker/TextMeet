@@ -22,6 +22,14 @@ export interface ExportDoc {
   paragraphs: ExportParagraph[];
 }
 
+/**
+ * Управляющие символы недопустимы в XML — Word счёл бы файл повреждённым. Вертикальная табуляция (её даёт вставка из
+ * Word) — перевод строки, остальное убирается; табуляция и переводы строк остаются.
+ */
+function cleanText(text: string): string {
+  return text.replace(/\u000b/g, '\n').replace(/[\u0000-\u0008\u000c\u000e-\u001f\u007f]/g, '');
+}
+
 /** Подряд идущие реплики одного спикера — один абзац; пустые реплики пропускаются. */
 export function buildExportDoc(
   meeting: Pick<Meeting, 'title' | 'createdAt' | 'durationSec' | 'speakerNames'>,
@@ -29,7 +37,7 @@ export function buildExportDoc(
 ): ExportDoc {
   const paragraphs: (ExportParagraph & { speakerId: string })[] = [];
   for (const segment of transcript.segments) {
-    const text = segment.text.trim();
+    const text = cleanText(segment.text).trim();
     if (text === '') continue;
     const last = paragraphs.at(-1);
     if (last && last.speakerId === segment.speakerId) {
@@ -38,7 +46,7 @@ export function buildExportDoc(
     }
     paragraphs.push({
       speakerId: segment.speakerId,
-      speaker: speakerLabel(segment.speakerId, meeting.speakerNames),
+      speaker: cleanText(speakerLabel(segment.speakerId, meeting.speakerNames)),
       time: formatTimestamp(segment.start),
       text,
     });
@@ -47,7 +55,7 @@ export function buildExportDoc(
   const meta = [formatLongDate(meeting.createdAt)];
   if (meeting.durationSec !== null) meta.push(formatDurationShort(meeting.durationSec));
   return {
-    title: meeting.title,
+    title: cleanText(meeting.title),
     metaLine: meta.join(' · '),
     participantsLine: participants.length > 0 ? `Участники: ${participants.join(', ')}` : null,
     paragraphs: paragraphs.map(({ speaker, time, text }) => ({ speaker, time, text })),

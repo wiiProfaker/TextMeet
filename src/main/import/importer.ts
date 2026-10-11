@@ -1,12 +1,13 @@
 // Очередь импорта (решения Плана 5, §4.3): файл проверяется, встреча создаётся сразу («импорт…»), звук копируется
 // по одному файлу за раз. Electron сюда не подключается — окно, сведение и окно «Файл добавлен» внедряются.
-import { basename } from 'node:path';
+import { promises as fsp } from 'node:fs';
+import { basename, join } from 'node:path';
 import { MAX_IMPORT_FILES, type ImportFailure, type ImportProgress, type ImportResult } from '../../shared/import';
 import type { Meeting } from '../../shared/meeting';
 import { knownFsReason } from '../fs/fs-errors';
 import { audioDir, createMeeting, listMeetings, removeMeetingDir, updateMeeting } from '../library/library';
 import type { Logger } from '../logger';
-import { copySourceAudio, SOURCE_FILE } from './audio-copy';
+import { copySourceAudio, copyTexts, SOURCE_FILE } from './audio-copy';
 import { fitLength, pickRecordedAt, titleFromFileName } from './naming';
 import { examineFile, probeTexts } from './probe';
 
@@ -17,9 +18,13 @@ export const importTexts = {
   tooMany: `за раз можно добавить до ${MAX_IMPORT_FILES} файлов`,
   notCreated: 'не удалось создать встречу',
   notSaved: 'не удалось сохранить встречу',
+  quitting: 'программа закрывается',
   /** Под заголовком «Импорт прервался» во встрече. */
   interrupted: 'Добавьте файл ещё раз.',
 } as const;
+
+/** Причины неудачи копирования, которые можно показать человеку как есть; остальное — «файл повреждён…». */
+const SHOWN_COPY_REASONS: readonly string[] = Object.values(copyTexts);
 
 export interface ImporterDeps {
   ffmpegPath(): string;
@@ -46,25 +51,43 @@ interface ImportJob {
   durationSec: number | null;
 }
 
+/** Чем кончилась работа над файлом: готово, не вышло (встреча убрана или с ошибкой) или отменено. */
+type Outcome = 'done' | 'failed' | 'cancelled';
+
+interface CurrentJob {
+  job: ImportJob;
+  abort: AbortController;
+  done: Promise<Outcome>;
+  seconds: number | null;
+}
+
 const sameJob = (job: ImportJob, libraryDir: string, meetingId: string): boolean =>
   job.libraryDir === libraryDir && job.meetingId === meetingId;
 
 export class Importer {
   private readonly queue: ImportJob[] = [];
-  private current: { job: ImportJob; abort: AbortController; done: Promise<void>; seconds: number | null } | null = null;
+  private current: CurrentJob | null = null;
   private running = false;
   private disposed = false;
+  /** Идущие addFiles: пока файлы проверяются, импорт тоже идёт (папку библиотеки менять нельзя). */
+  private adding = 0;
 
   constructor(private readonly deps: ImporterDeps) {}
 
   /** Проверить файлы, создать их встречи и поставить звук в очередь копирования. */
   async addFiles(libraryDir: string, paths: readonly string[]): Promise<ImportResult> {
     const result: ImportResult = { added: [], failed: [] };
-    for (const [index, path] of paths.entries()) {
-      const name = basename(path);
-      const outcome = index < MAX_IMPORT_FILES ? await this.addFile(libraryDir, path, name) : { reason: importTexts.tooMany };
-      if (typeof outcome === 'string') result.added.push(outcome);
-      else result.failed.push({ name, reason: outcome.reason });
+    this.adding += 1;
+    try {
+      for (const [index, path] of paths.entries()) {
+        const name = basename(path);
+        const outcome =
+          index < MAX_IMPORT_FILES ? await this.addFile(libraryDir, path, name) : { reason: importTexts.tooMany };
+        if (typeof outcome === 'string') result.added.push(outcome);
+        else result.failed.push({ name, reason: outcome.reason });
+      }
+    } finally {
+      this.adding -= 1;
     }
     return result;
   }
@@ -92,12 +115,13 @@ export class Importer {
   }
 
   isBusy(): boolean {
-    return this.current !== null || this.queue.length > 0;
+    return this.adding > 0 || this.current !== null || this.queue.length > 0;
   }
 
   /**
    * Встречу удаляют: снять из очереди или остановить копирование и дождаться, пока ffmpeg отпустит файлы. Ответ —
-   * как вернуть файл в очередь (первым), если удалить встречу не выйдет; null — встреча не импортировалась.
+   * как вернуть файл в очередь (первым), если удалить встречу не выйдет; null — возвращать нечего: встреча не
+   * импортировалась или её импорт успел закончиться, пока его останавливали.
    */
   async cancel(libraryDir: string, meetingId: string): Promise<(() => void) | null> {
     const waiting = this.queue.findIndex((job) => sameJob(job, libraryDir, meetingId));
@@ -110,26 +134,37 @@ export class Importer {
     const current = this.current;
     if (!current || !sameJob(current.job, libraryDir, meetingId)) return null;
     current.abort.abort();
-    await current.done;
-    return () => this.requeue(current.job);
+    return (await current.done) === 'cancelled' ? () => this.requeue(current.job) : null;
+  }
+
+  /**
+   * Windows завершает сеанс: остановить импорт (новые файлы не берутся, копирование прерывается) без уборки — на неё
+   * нет времени, недоделанные встречи разберёт следующий запуск.
+   */
+  async stop(): Promise<void> {
+    await this.halt();
   }
 
   /** Выход из программы: остановить копирование и убрать недоделанные встречи — исходные файлы на месте. */
   async disposeForQuit(): Promise<void> {
+    for (const job of await this.halt()) {
+      await removeMeetingDir(job.libraryDir, job.meetingId).catch((err: unknown) =>
+        this.deps.logger.warn(`Недоделанная встреча ${job.meetingId} не убрана при выходе`, err),
+      );
+    }
+  }
+
+  /** Остановка; ответ — недоделанные файлы (законченный за время остановки файл в их число не входит). */
+  private async halt(): Promise<ImportJob[]> {
     this.disposed = true;
     const jobs = [...this.queue];
     this.queue.length = 0;
     const current = this.current;
     if (current) {
-      jobs.unshift(current.job);
       current.abort.abort();
-      await current.done;
+      if ((await current.done) === 'cancelled') jobs.unshift(current.job);
     }
-    for (const job of jobs) {
-      await removeMeetingDir(job.libraryDir, job.meetingId).catch((err: unknown) =>
-        this.deps.logger.warn(`Недоделанная встреча ${job.meetingId} не убрана при выходе`, err),
-      );
-    }
+    return jobs;
   }
 
   /** id созданной встречи или причина отказа. */
@@ -146,6 +181,8 @@ export class Importer {
       this.deps.logger.info(`Файл ${name} не добавлен: ${examined.reason}`);
       return { reason: examined.reason };
     }
+    // Пока файл проверялся, программу начали закрывать: встречу уже не создаём.
+    if (this.disposed) return { reason: importTexts.quitting };
     const recordedAt = pickRecordedAt(examined.info.creationTime, examined.modifiedAt, this.deps.now());
     let meeting: Meeting;
     try {
@@ -161,8 +198,12 @@ export class Importer {
       this.deps.logger.error(`Не удалось создать встречу для файла ${name}`, err);
       return { reason: knownFsReason(err) ?? importTexts.notCreated };
     }
+    if (this.disposed) {
+      await removeMeetingDir(libraryDir, meeting.id).catch(() => undefined);
+      return { reason: importTexts.quitting };
+    }
     this.queue.push({ libraryDir, meetingId: meeting.id, source: path, durationSec: examined.info.durationSec });
-    this.deps.libraryChanged();
+    this.notify(() => this.deps.libraryChanged());
     this.report();
     this.kick();
     return meeting.id;
@@ -181,61 +222,81 @@ export class Importer {
     void this.drain();
   }
 
+  /** Очередь не встаёт ни от какой ошибки: отказ одного файла — только запись в журнал. */
   private async drain(): Promise<void> {
-    for (let job = this.queue.shift(); job !== undefined && !this.disposed; job = this.queue.shift()) {
-      const abort = new AbortController();
-      const current = { job, abort, done: Promise.resolve(), seconds: null as number | null };
-      this.current = current;
-      this.report();
-      current.done = this.importOne(job, abort.signal, (seconds) => {
-        current.seconds = seconds;
+    try {
+      for (let job = this.queue.shift(); job !== undefined && !this.disposed; job = this.queue.shift()) {
+        const abort = new AbortController();
+        const current: CurrentJob = { job, abort, done: Promise.resolve<Outcome>('cancelled'), seconds: null };
+        this.current = current;
         this.report();
-      });
-      await current.done;
+        current.done = this.importOne(job, abort.signal, (seconds) => {
+          current.seconds = seconds;
+          this.report();
+        }).catch((err: unknown) => {
+          this.deps.logger.error(`Импорт встречи ${job.meetingId} закончился ошибкой`, err);
+          return 'failed' as const;
+        });
+        await current.done;
+        this.current = null;
+        this.report();
+      }
+    } finally {
       this.current = null;
-      this.report();
+      this.running = false;
     }
-    this.running = false;
   }
 
   private report(): void {
-    this.deps.progressChanged(this.progress());
+    this.notify(() => this.deps.progressChanged(this.progress()));
   }
 
-  private async importOne(job: ImportJob, signal: AbortSignal, onProgress: (seconds: number) => void): Promise<void> {
+  /** Сообщение наружу (окну, сведению): его сбой не должен ни остановить очередь, ни удалить готовую встречу. */
+  private notify(send: () => void): void {
+    try {
+      send();
+    } catch (err) {
+      this.deps.logger.error('Сообщение об импорте не доставлено', err);
+    }
+  }
+
+  private async importOne(job: ImportJob, signal: AbortSignal, onProgress: (seconds: number) => void): Promise<Outcome> {
     const { libraryDir, meetingId } = job;
     const copy = this.deps.copy ?? copySourceAudio;
-    let reason: string;
+    let result;
     try {
-      const result = await copy(this.deps.ffmpegPath(), job.source, audioDir(libraryDir, meetingId), {
+      result = await copy(this.deps.ffmpegPath(), job.source, audioDir(libraryDir, meetingId), {
         signal,
         onProgress,
         freeBytes: this.deps.freeBytes,
       });
-      try {
-        const meeting = await updateMeeting(libraryDir, meetingId, (m) => ({
-          ...m,
-          status: 'recorded',
-          tracks: [{ kind: 'file', file: SOURCE_FILE, startOffsetMs: 0 }],
-          durationSec: m.durationSec ?? result.durationSec,
-        }));
-        this.deps.logger.info(`Импорт готов: ${meetingId}${result.reencoded ? ' (звук перекодирован)' : ''}`);
-        this.deps.libraryChanged();
-        this.deps.imported({ libraryDir, meeting });
-        return;
-      } catch (err) {
-        this.deps.logger.error(`Звук встречи ${meetingId} скопирован, но встреча не сохранилась`, err);
-        reason = knownFsReason(err) ?? importTexts.notSaved;
-      }
     } catch (err) {
       if (signal.aborted) {
         this.deps.logger.info(`Импорт отменён: ${meetingId}`);
-        return;
+        return 'cancelled';
       }
       this.deps.logger.error(`Не удалось скопировать звук встречи ${meetingId}`, err);
-      reason = err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : '';
+      await this.discard(job, SHOWN_COPY_REASONS.includes(message) ? message : copyTexts.broken);
+      return 'failed';
     }
-    await this.discard(job, reason);
+    let meeting: Meeting;
+    try {
+      meeting = await updateMeeting(libraryDir, meetingId, (m) => ({
+        ...m,
+        status: 'recorded',
+        tracks: [{ kind: 'file', file: SOURCE_FILE, startOffsetMs: 0 }],
+        durationSec: m.durationSec ?? result.durationSec,
+      }));
+    } catch (err) {
+      this.deps.logger.error(`Звук встречи ${meetingId} скопирован, но встреча не сохранилась`, err);
+      await this.discard(job, knownFsReason(err) ?? importTexts.notSaved);
+      return 'failed';
+    }
+    this.deps.logger.info(`Импорт готов: ${meetingId}${result.reencoded ? ' (звук перекодирован)' : ''}`);
+    this.notify(() => this.deps.libraryChanged());
+    this.notify(() => this.deps.imported({ libraryDir, meeting }));
+    return 'done';
   }
 
   /** Неудача: папка недоделанной встречи убирается (в ней только наша неполная копия); не вышло — встреча с ошибкой. */
@@ -252,14 +313,14 @@ export class Importer {
         errorMessage: `Не удалось добавить файл: ${reason}.`,
       })).catch((saveErr: unknown) => this.deps.logger.warn(`Ошибка импорта ${meetingId} не записана`, saveErr));
     }
-    this.deps.libraryChanged();
-    this.deps.failed({ name: basename(job.source), reason });
+    this.notify(() => this.deps.libraryChanged());
+    this.notify(() => this.deps.failed({ name: basename(job.source), reason }));
   }
 }
 
 /**
  * При запуске: встречи «импорт…», которых нет в очереди, — импорт прервался сбоем. Встреча остаётся с понятной
- * ошибкой: её можно удалить и добавить файл ещё раз.
+ * ошибкой (её можно удалить и добавить файл ещё раз), недописанная копия звука удаляется — она бывает большой.
  */
 export async function recoverInterruptedImports(
   libraryDir: string,
@@ -276,6 +337,9 @@ export async function recoverInterruptedImports(
       );
       recovered.push(id);
       logger.warn(`Импорт встречи ${id} прервался — встреча помечена ошибкой`);
+      await fsp
+        .rm(join(audioDir(libraryDir, id), `${SOURCE_FILE}.part`), { force: true })
+        .catch((err: unknown) => logger.warn(`Недописанная копия звука встречи ${id} не удалена`, err));
     } catch (err) {
       logger.error(`Не удалось отметить прерванный импорт ${id}`, err);
     }

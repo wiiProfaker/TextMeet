@@ -4,9 +4,9 @@
 const MAX_NAME_CHARS = 120;
 const FALLBACK_NAME = 'Встреча';
 /** Запрещённые в именах файлов Windows (на macOS — «/» и «:») и управляющие символы. */
-const FORBIDDEN = /[<>:"/\|?*\u0000-\u001f\u007f]/g;
-/** Имена устройств Windows: файл «CON.txt» создать нельзя. */
-const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const FORBIDDEN = /[<>:"/\\|?*\u0000-\u001f\u007f]/g;
+/** Имена устройств Windows: файл «CON.txt» или «con.report.docx» создать нельзя — важна часть до первой точки. */
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
 
 const trimEnds = (name: string): string => name.replace(/^[.\s]+|[.\s]+$/g, '');
 
@@ -15,6 +15,6 @@ export function exportFileName(title: string, ext: 'docx' | 'txt'): string {
   // По символам, а не по UTF-16: эмодзи не режется пополам.
   name = trimEnds(Array.from(name).slice(0, MAX_NAME_CHARS).join(''));
   if (name === '') name = FALLBACK_NAME;
-  if (RESERVED.test(name)) name = `${name}_`;
+  if (RESERVED.test(name)) name = `_${name}`;
   return `${name}.${ext}`;
 }

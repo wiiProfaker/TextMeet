@@ -39,6 +39,10 @@ describe('parseProbe', () => {
     expect(parseProbe(raw)).toEqual({ hasAudio: true, durationSec: null, creationTime: null });
   });
 
+  it('a zero duration means an unknown one', () => {
+    expect(parseProbe(ZOOM.replace('Duration: 00:47:12.34', 'Duration: 00:00:00.00'))?.durationSec).toBeNull();
+  });
+
   it('not a media file', () => {
     expect(parseProbe('[in#0 @ 0x1] Error opening input: Invalid data found when processing input\n')).toBeNull();
     expect(parseProbe('')).toBeNull();

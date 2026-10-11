@@ -194,7 +194,8 @@ export class RecordingController {
     this.deps.libraryChanged();
     this.deps
       .enqueueTranscription(libraryDir, answer.meetingId)
-      .catch((err: unknown) => this.transcriptionNotQueued(libraryDir, answer.meetingId, err));
+      .catch((err: unknown) => this.transcriptionNotQueued(libraryDir, answer.meetingId, err))
+      .catch((err: unknown) => this.deps.logger.error('Не удалось сообщить, что расшифровка не началась', err));
   }
 
   /** Встречу не удалось поставить в очередь. Её папку удалили — сказать нечего: это сделал сам человек. */

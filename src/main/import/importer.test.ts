@@ -230,6 +230,111 @@ describe('Importer queue', () => {
     expect(calls[2]?.source).toBe('a.mp4');
   });
 
+  it('keeps working after a listener throws, and never deletes a meeting whose sound was copied', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({
+      copy,
+      examine: async () => goodFile(null),
+      imported: () => {
+        throw new Error('окно закрыто');
+      },
+      failed: () => {
+        throw new Error('окно закрыто');
+      },
+    });
+    const [first = '', second = '', third = ''] = (await t.importer.addFiles(lib, ['a.mp4', 'b.mp4', 'c.mp4'])).added;
+    await until(() => calls.length === 1);
+    calls[0]?.finish();
+    await until(() => calls.length === 2);
+    expect((await readMeeting(lib, first)).status).toBe('recorded');
+    calls[1]?.fail(new Error(copyTexts.broken));
+    await until(() => calls.length === 3);
+    expect(existsSync(join(lib, second))).toBe(false);
+    calls[2]?.finish();
+    await until(() => !t.importer.isBusy());
+    expect((await readMeeting(lib, third)).status).toBe('recorded');
+  });
+
+  it('shows only known copy reasons; anything else is a broken file', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    await t.importer.addFiles(lib, ['a.mp4']);
+    await until(() => calls.length === 1);
+    calls[0]?.fail(new Error("spawn C:\\Program Files\\TextMeet\\ffmpeg.exe ENOENT"));
+    await until(() => t.failed.length === 1);
+    expect(t.failed).toEqual([{ name: 'a.mp4', reason: copyTexts.broken }]);
+  });
+
+  it('a file that finished while it was being cancelled is not put back', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    let restore: (() => void) | null | undefined;
+    const t = setup({
+      copy,
+      examine: async () => goodFile(null),
+      // Удаление пришло, когда звук уже скопирован и встреча вот-вот станет «записано».
+      imported: ({ libraryDir, meeting }) => {
+        void t.importer.cancel(libraryDir, meeting.id).then((r) => {
+          restore = r;
+        });
+      },
+    });
+    await t.importer.addFiles(lib, ['a.mp4']);
+    await until(() => calls.length === 1);
+    calls[0]?.finish();
+    await until(() => restore !== undefined);
+    expect(restore).toBeNull();
+  });
+
+  it('counts files being checked as a running import', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    let release: () => void = () => undefined;
+    const t = setup({
+      copy: controlledCopy().copy,
+      examine: () =>
+        new Promise<Examined>((resolve) => {
+          release = () => resolve({ ok: false, reason: probeTexts.noAudio });
+        }),
+    });
+    const adding = t.importer.addFiles(lib, ['a.mp4']);
+    await tick();
+    expect(t.importer.isBusy()).toBe(true);
+    release();
+    await adding;
+    expect(t.importer.isBusy()).toBe(false);
+  });
+
+  it('creates no meeting for a file checked while the app was closing', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    let release: () => void = () => undefined;
+    const t = setup({
+      copy: controlledCopy().copy,
+      examine: () =>
+        new Promise<Examined>((resolve) => {
+          release = () => resolve(goodFile(null));
+        }),
+    });
+    const adding = t.importer.addFiles(lib, ['a.mp4']);
+    await tick();
+    await t.importer.disposeForQuit();
+    release();
+    expect(await adding).toEqual({ added: [], failed: [{ name: 'a.mp4', reason: importTexts.quitting }] });
+    expect(await listMeetings(lib)).toEqual([]);
+  });
+
+  it('stopping for the end of a Windows session keeps the unfinished meetings for the next start', async () => {
+    const lib = makeTempDir('textmeet-import-');
+    const { copy, calls } = controlledCopy();
+    const t = setup({ copy, examine: async () => goodFile(null) });
+    const ids = (await t.importer.addFiles(lib, ['a.mp4', 'b.mp4'])).added;
+    await until(() => calls.length === 1);
+    await t.importer.stop();
+    for (const id of ids) expect((await readMeeting(lib, id)).status).toBe('importing');
+    expect(t.importer.isBusy()).toBe(false);
+  });
+
   it('removes unfinished meetings when the app quits', async () => {
     const lib = makeTempDir('textmeet-import-');
     const { copy, calls } = controlledCopy();
@@ -262,7 +367,9 @@ describe('recoverInterruptedImports', () => {
     const crashed = await createMeeting(lib, { source: 'import', status: 'importing', sourceFileName: 'a.mp4' });
     const running = await createMeeting(lib, { source: 'import', status: 'importing', sourceFileName: 'b.mp4' });
     const done = await createMeeting(lib, { source: 'import', status: 'done' });
+    writeFileSync(join(audioDir(lib, crashed.id), `${SOURCE_FILE}.part`), 'недописано');
     const recovered = await recoverInterruptedImports(lib, quiet(), (id) => id === running.id);
+    expect(existsSync(join(audioDir(lib, crashed.id), `${SOURCE_FILE}.part`))).toBe(false);
     expect(recovered).toEqual([crashed.id]);
     expect(await readMeeting(lib, crashed.id)).toMatchObject({
       status: 'error',

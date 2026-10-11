@@ -1,14 +1,16 @@
 import { useCallback, useContext, useMemo, useRef, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort, formatLongDate } from '../../shared/format';
+import type { ImportProgress } from '../../shared/import';
 import type { Meeting, MeetingListEntry } from '../../shared/meeting';
 import { transcriptModelTitle, type SpeakerId } from '../../shared/transcript';
 import { hasManualChanges, isStaleEditMessage, type TranscriptEdit } from '../../shared/transcript-edit';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
-import { participantsText } from './format';
+import { isImportFailure, participantsText } from './format';
 import { SearchViewContext, usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, TrashIcon, WarnIcon } from './icons';
+import { importView } from './import-format';
 import { MeetingTitle } from './MeetingTitle';
 import { Player } from './Player';
 import { segmentAt } from './playback';
@@ -22,6 +24,8 @@ interface Props {
   entry: MeetingListEntry;
   /** Ход расшифровки этой встречи, если она в очереди или расшифровывается. */
   progress: TranscriptionProgress | null;
+  /** Ход импорта этой встречи, если её звук ещё копируется. */
+  importing: ImportProgress | null;
   onError(message: string): void;
   /** Встречу удалили — выбрать соседнюю. */
   onDeleted(): void;
@@ -70,12 +74,12 @@ function DeleteFolder({ id, onDeleted }: { id: string; onDeleted(): void }) {
   );
 }
 
-function ProgressBar({ value, wide }: { value: number; wide?: boolean }) {
+function ProgressBar({ value, wide, label = 'Ход расшифровки' }: { value: number; wide?: boolean; label?: string }) {
   return (
     <div
       className={wide ? 'prog wide' : 'prog'}
       role="progressbar"
-      aria-label="Ход расшифровки"
+      aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={value}
@@ -104,6 +108,22 @@ function ProgressStrip({ view }: { view: ProgressView }) {
       {view.value !== null && <ProgressBar value={view.value} />}
       {view.note && <span>{view.note}</span>}
       <span className="later">Текст заменится, когда новая расшифровка закончится.</span>
+    </div>
+  );
+}
+
+/** Звук из файла ещё копируется — вместо текста ход импорта (лист 13 макета). */
+function ImportBlock({ fileName, progress }: { fileName: string | null; progress: ImportProgress | null }) {
+  const view = importView(fileName, progress);
+  return (
+    <div className="empty-note">
+      <b role="status">{view.text}</b>
+      <span>{view.note}</span>
+      {view.value !== null && <ProgressBar value={view.value} wide label="Ход импорта" />}
+      <span className="small">
+        Видео не копируется, исходный файл остаётся на месте. Потом спросим, сколько человек на записи, и начнём
+        расшифровку.
+      </span>
     </div>
   );
 }
@@ -234,6 +254,7 @@ function Body({
 function MeetingView({
   entry,
   progress,
+  importing,
   onError,
   onDeleted,
 }: Props & { entry: Extract<MeetingListEntry, { kind: 'ok' }> }) {
@@ -267,6 +288,7 @@ function MeetingView({
   const canPlay = mixReady && !playback.failed;
   const meta = [formatLongDate(meeting.createdAt), formatDurationShort(meeting.durationSec)];
   if (meeting.participantsHint !== null) meta.push(participantsText(meeting.participantsHint));
+  if (meeting.source === 'import') meta.push('из файла');
   if (load.kind === 'ready') meta.push(`Текст: ${transcriptModelTitle(load.transcript)}`);
   if (meeting.audioDeleted) meta.push('аудио удалено');
   const hasAudio = meeting.tracks.length > 0;
@@ -274,6 +296,7 @@ function MeetingView({
   // Текст уже есть (он виден, пока новый не готов) — в окне предупреждаем, что он заменится.
   const hasText = load.kind === 'ready';
   const transcribeError = meeting.status === 'error' && hasAudio;
+  const importFailed = isImportFailure(meeting);
   const actions = transcribeActions(meeting.status, hasAudio, load.kind);
   // «Повторить» — той же моделью, что не справилась (её id в meeting.json); неизвестная — из настроек.
   const retry = () =>
@@ -318,8 +341,11 @@ function MeetingView({
         <div className="banner" role="alert">
           <WarnIcon />
           <div>
-            <b>{transcribeError ? 'Ошибка расшифровки' : 'Ошибка'}</b>
-            <p>{meeting.errorMessage ?? 'Что-то пошло не так.'}</p>
+            <b>{importFailed ? 'Импорт прервался' : transcribeError ? 'Ошибка расшифровки' : 'Ошибка'}</b>
+            <p>
+              {meeting.errorMessage ?? 'Что-то пошло не так.'}
+              {importFailed && ' Эту встречу можно удалить: «…» → «Удалить встречу…».'}
+            </p>
             {transcribeError && (
               <div className="acts">
                 <button type="button" className="btn" onClick={() => void retry()}>
@@ -330,17 +356,21 @@ function MeetingView({
           </div>
         </div>
       )}
-      <Body
-        meeting={meeting}
-        load={load}
-        busy={busy}
-        progress={progress}
-        playback={playback}
-        canPlay={canPlay}
-        onEdit={edit}
-        onError={onError}
-        onTranscribe={actions.body ? () => setDialog(true) : null}
-      />
+      {meeting.status === 'importing' ? (
+        <ImportBlock fileName={meeting.sourceFileName} progress={importing} />
+      ) : (
+        <Body
+          meeting={meeting}
+          load={load}
+          busy={busy}
+          progress={progress}
+          playback={playback}
+          canPlay={canPlay}
+          onEdit={edit}
+          onError={onError}
+          onTranscribe={actions.body ? () => setDialog(true) : null}
+        />
+      )}
       {mixReady ? (
         <Player meetingId={meeting.id} playback={playback} />
       ) : (
@@ -359,6 +389,7 @@ function MeetingView({
           replacesText={hasText}
           losesEdits={hasManualChanges(load.kind === 'ready' ? load.transcript : null, meeting.speakerNames)}
           participantsHint={meeting.participantsHint}
+          fromFile={meeting.source === 'import'}
           onClose={() => setDialog(false)}
         />
       )}
@@ -367,7 +398,7 @@ function MeetingView({
 }
 
 /** Выбранная встреча: создаётся, не прочиталась или прочитана. */
-export function MeetingPane({ entry, progress, onError, onDeleted }: Props) {
+export function MeetingPane({ entry, progress, importing, onError, onDeleted }: Props) {
   if (entry.kind === 'creating') {
     return (
       <main className="pane" aria-label="Встреча">
@@ -397,5 +428,7 @@ export function MeetingPane({ entry, progress, onError, onDeleted }: Props) {
       </main>
     );
   }
-  return <MeetingView entry={entry} progress={progress} onError={onError} onDeleted={onDeleted} />;
+  return (
+    <MeetingView entry={entry} progress={progress} importing={importing} onError={onError} onDeleted={onDeleted} />
+  );
 }

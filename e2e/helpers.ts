@@ -66,6 +66,40 @@ export async function toneWebm(file: string, seconds: number): Promise<void> {
   ]);
 }
 
+/** Видео со звуком, как запись созвона; creationTime — дата записи в самом файле. */
+export async function videoWithSound(file: string, seconds: number, creationTime?: string): Promise<void> {
+  if (!ffmpegPath) throw new Error('ffmpeg для этой системы не найден');
+  await run(ffmpegPath, [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-f',
+    'lavfi',
+    '-i',
+    `testsrc=size=160x120:rate=5:duration=${seconds}`,
+    '-f',
+    'lavfi',
+    '-i',
+    `sine=frequency=440:duration=${seconds}`,
+    '-c:v',
+    'mpeg4',
+    '-c:a',
+    'aac',
+    ...(creationTime ? ['-metadata', `creation_time=${creationTime}`] : []),
+    '-f',
+    'mp4',
+    file,
+  ]);
+}
+
+/** Окно выбора файлов программы «выбирает» эти файлы (настоящее системное окно в тестах некому закрыть). */
+export async function chooseFiles(app: ElectronApplication, paths: string[]): Promise<void> {
+  await app.evaluate(({ dialog }, files) => {
+    dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: files })) as typeof dialog.showOpenDialog;
+  }, paths);
+}
+
 export function meetingJson(id: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     schemaVersion: 1,

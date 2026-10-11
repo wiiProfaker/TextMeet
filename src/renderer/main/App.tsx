@@ -6,6 +6,8 @@ import { isSearchable, queryWords } from '../../shared/search-text';
 import { errorText } from './errors';
 import {
   SearchViewContext,
+  useFileDrop,
+  useImportProgress,
   useMeetings,
   useMicrophones,
   useRecordingState,
@@ -13,7 +15,8 @@ import {
   useTranscriptionProgress,
   type SearchView,
 } from './hooks';
-import { SettingsIcon } from './icons';
+import { ImportIcon, SettingsIcon } from './icons';
+import { importFailedText, importResultText } from './import-format';
 import { LivePane } from './LivePane';
 import { MeetingList } from './MeetingList';
 import { MeetingPane } from './MeetingPane';
@@ -33,6 +36,7 @@ export function App() {
   const { entries, error: listError } = useMeetings();
   const microphones = useMicrophones();
   const progress = useTranscriptionProgress();
+  const imports = useImportProgress();
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -76,6 +80,28 @@ export function App() {
   }, [liveId]);
   // Щелчок по уведомлению «Текст встречи готов» — показать эту встречу.
   useEffect(() => window.textmeet.onShowMeeting((id) => setSelection({ kind: 'meeting', id })), []);
+  // Звук файла не скопировался уже после того, как встреча появилась.
+  useEffect(() => window.textmeet.onImportFailed((failure) => setError(importFailedText(failure))), []);
+
+  /** Добавить файлы: первая новая встреча открывается, неудачи — строкой ошибки слева. */
+  const importFiles = useCallback(async (paths: string[]) => {
+    if (paths.length === 0) return;
+    setError(null);
+    try {
+      const result = await window.textmeet.importFiles(paths);
+      const first = result.added[0];
+      if (first) setSelection({ kind: 'meeting', id: first });
+      setError(importResultText(result));
+    } catch (err) {
+      setError(errorText(err));
+    }
+  }, []);
+  const dragging = useFileDrop((paths) => void importFiles(paths));
+  const pickFiles = () =>
+    window.textmeet
+      .pickImportFiles()
+      .then(importFiles)
+      .catch((err: unknown) => setError(errorText(err)));
   const dialogId = recording.stopDialog?.meetingId ?? null;
   useEffect(() => {
     if (dialogId) setSelection({ kind: 'meeting', id: dialogId });
@@ -116,6 +142,7 @@ export function App() {
         key={entryId(selectedEntry)}
         entry={selectedEntry}
         progress={progress.get(entryId(selectedEntry)) ?? null}
+        importing={imports.get(entryId(selectedEntry)) ?? null}
         onError={setError}
         onDeleted={() => selectNeighbor(entryId(selectedEntry))}
       />
@@ -158,16 +185,14 @@ export function App() {
               recording={recording}
               selectedId={selectedId}
               progress={progress}
+              imports={imports}
               onSelect={(id) => setSelection({ kind: 'meeting', id })}
             />
           )}
           <div className="foot">
-            <button
-              type="button"
-              className="btn grow"
-              onClick={() => window.textmeet.openLibraryDir().catch((err: unknown) => setError(errorText(err)))}
-            >
-              Открыть папку библиотеки
+            <button type="button" className="btn grow" onClick={() => void pickFiles()}>
+              <ImportIcon />
+              Импорт файла
             </button>
             <button
               type="button"
@@ -182,6 +207,15 @@ export function App() {
         </aside>
         {pane}
         {recording.stopDialog && <StopDialog data={recording.stopDialog} onError={setError} />}
+        {dragging && (
+          <div className="shade drop-shade" aria-hidden="true">
+            <div className="drop-frame">
+              <ImportIcon />
+              <b>Отпустите — файлы станут встречами</b>
+              <span>Аудио или видео: mp3, m4a, wav, ogg, mp4, mov, mkv… Из видео берётся только звук.</span>
+            </div>
+          </div>
+        )}
       </div>
     </SearchViewContext.Provider>
   );

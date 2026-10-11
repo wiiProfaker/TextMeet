@@ -1,4 +1,5 @@
 import { entryId, type MeetingListEntry } from '../../shared/meeting';
+import type { ImportProgress } from '../../shared/import';
 import type { RecordingState } from '../../shared/recording';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { formatDurationShort } from '../../shared/format';
@@ -12,6 +13,8 @@ interface Props {
   selectedId: string | null;
   /** Ход расшифровки по встречам. */
   progress: ReadonlyMap<string, TranscriptionProgress>;
+  /** Ход импорта по встречам. */
+  imports: ReadonlyMap<string, ImportProgress>;
   onSelect(id: string): void;
 }
 
@@ -21,6 +24,7 @@ function Item({
   elapsed,
   selected,
   progress,
+  importing,
   onSelect,
 }: {
   entry: MeetingListEntry;
@@ -28,6 +32,7 @@ function Item({
   elapsed: number;
   selected: boolean;
   progress: TranscriptionProgress | undefined;
+  importing: ImportProgress | undefined;
   onSelect(): void;
 }) {
   let title: string;
@@ -38,7 +43,9 @@ function Item({
     meta = live
       ? formatTimeOfDay(entry.meeting.createdAt)
       : `${formatTimeOfDay(entry.meeting.createdAt)} · ${formatDurationShort(entry.meeting.durationSec)}`;
-    note = live ? { text: `● идёт запись · ${formatClock(elapsed)}`, tone: 'live' } : meetingNote(entry.meeting, progress);
+    note = live
+      ? { text: `● идёт запись · ${formatClock(elapsed)}`, tone: 'live' }
+      : meetingNote(entry.meeting, progress, importing);
   } else if (entry.kind === 'creating') {
     title = 'Новая встреча';
     meta = '';
@@ -61,7 +68,7 @@ function Item({
 }
 
 /** Список встреч по дням, новые сверху. */
-export function MeetingList({ entries, error, recording, selectedId, progress, onSelect }: Props) {
+export function MeetingList({ entries, error, recording, selectedId, progress, imports, onSelect }: Props) {
   const liveId = recording.phase !== 'idle' ? recording.meetingId : null;
   const now = useNow(liveId !== null);
   const elapsed = recording.startedAt === null ? 0 : (now - recording.startedAt) / 1000;
@@ -77,7 +84,7 @@ export function MeetingList({ entries, error, recording, selectedId, progress, o
       )}
       {entries?.length === 0 && (
         <p className="empty-list">
-          Пока нет встреч. Нажмите «Начать запись» — встреча появится здесь.
+          Пока нет встреч. Нажмите «Начать запись» или перетащите сюда запись — встреча появится здесь.
         </p>
       )}
       {groupByDay(entries ?? [], new Date()).map((group) => (
@@ -93,6 +100,7 @@ export function MeetingList({ entries, error, recording, selectedId, progress, o
                 elapsed={elapsed}
                 selected={id === selectedId}
                 progress={progress.get(id)}
+                importing={imports.get(id)}
                 onSelect={() => onSelect(id)}
               />
             );

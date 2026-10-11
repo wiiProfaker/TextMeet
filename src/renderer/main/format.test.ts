@@ -184,6 +184,19 @@ describe('meetingNote', () => {
     });
   });
 
+  it('shows the progress of an import and an import that broke off', () => {
+    const importing = meeting('a', at, { status: 'importing', source: 'import' });
+    expect(meetingNote(importing, undefined, { meetingId: 'a', fraction: 0.354, waiting: false })?.text).toBe('импорт 35%');
+    expect(meetingNote(importing, undefined, { meetingId: 'a', fraction: null, waiting: false })?.text).toBe('импорт…');
+    expect(meetingNote(importing, undefined, { meetingId: 'a', fraction: null, waiting: true })?.text).toBe('ждёт импорта');
+    expect(meetingNote(meeting('a', at, { status: 'error', source: 'import' }))).toEqual({
+      text: 'импорт прервался',
+      tone: 'error',
+    });
+    const tracks = [{ kind: 'file' as const, file: 'source.mka', startOffsetMs: 0 }];
+    expect(meetingNote(meeting('a', at, { status: 'error', source: 'import', tracks }))?.text).toBe('ошибка расшифровки');
+  });
+
   it('shows the progress of transcription and its errors', () => {
     const tracks = [{ kind: 'mic' as const, file: 'mic.webm', startOffsetMs: 0 }];
     const progress = { meetingId: 'a', stage: 'others' as const, fraction: 0.624, download: null };

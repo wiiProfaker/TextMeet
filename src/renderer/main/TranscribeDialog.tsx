@@ -6,7 +6,7 @@ import { keepFocusInside } from './focus';
 import { ChevronIcon, WarnIcon } from './icons';
 import { modelChoiceLabel } from './model-catalog';
 import { choiceFor, readChoice } from './participants';
-import { ParticipantsPicker } from './ParticipantsPicker';
+import { FILE_QUESTION, ParticipantsPicker } from './ParticipantsPicker';
 
 interface Props {
   meetingId: string;
@@ -18,11 +18,21 @@ interface Props {
   losesEdits: boolean;
   /** Число участников, указанное раньше (выбрано заранее). */
   participantsHint: number | null;
+  /** Встреча из файла: спрашиваем, сколько человек говорит на записи («Я» не выделяется). */
+  fromFile: boolean;
   onClose(): void;
 }
 
 /** «Расшифровать» / «Расшифровать заново»: модель (по умолчанию — из настроек), число участников и запуск. */
-export function TranscribeDialog({ meetingId, again, replacesText, losesEdits, participantsHint, onClose }: Props) {
+export function TranscribeDialog({
+  meetingId,
+  again,
+  replacesText,
+  losesEdits,
+  participantsHint,
+  fromFile,
+  onClose,
+}: Props) {
   const [participants, setParticipants] = useState(() => choiceFor(participantsHint));
   const [models, setModels] = useState<ModelsState | null>(null);
   /** null — пока не выбрали сами: модель из настроек. */
@@ -115,6 +125,7 @@ export function TranscribeDialog({ meetingId, again, replacesText, losesEdits, p
           </div>
         )}
         <ParticipantsPicker
+          question={fromFile ? FILE_QUESTION : undefined}
           value={participants}
           onChange={(next) => {
             setParticipants(next);

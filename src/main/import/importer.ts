@@ -17,7 +17,8 @@ export const importTexts = {
   tooMany: `за раз можно добавить до ${MAX_IMPORT_FILES} файлов`,
   notCreated: 'не удалось создать встречу',
   notSaved: 'не удалось сохранить встречу',
-  interrupted: 'Импорт прервался. Добавьте файл ещё раз.',
+  /** Под заголовком «Импорт прервался» во встрече. */
+  interrupted: 'Добавьте файл ещё раз.',
 } as const;
 
 export interface ImporterDeps {

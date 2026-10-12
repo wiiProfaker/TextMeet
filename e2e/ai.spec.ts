@@ -180,6 +180,25 @@ test('a prompt that could not be saved stays in the field, is retried and is rep
   expect(await savedPrompt(userDataDir)).toBeUndefined();
 });
 
+test('a prompt that could not be saved is still in the field after visiting another tab', async () => {
+  launched = await launchWithMeeting();
+  const { app, page } = launched;
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('settings:set-ai-prompt');
+    ipcMain.handle('settings:set-ai-prompt', () => {
+      throw new Error('Не удалось сохранить запрос для ИИ: диск недоступен.');
+    });
+  });
+  await openSettings(page, 'ИИ');
+  const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
+  await field.fill('Новый запрос');
+  await field.blur();
+  await expect(page.getByRole('main', { name: 'Настройки' }).getByRole('alert')).toBeVisible();
+  await page.getByRole('tab', { name: 'Общие' }).click();
+  await page.getByRole('tab', { name: 'ИИ' }).click();
+  await expect(field).toHaveValue('Новый запрос');
+});
+
 test('a late failure of an older save does not bring the older text back', async () => {
   launched = await launchWithMeeting();
   const { app, page } = launched;

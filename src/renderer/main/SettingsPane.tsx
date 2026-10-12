@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppInfo, SettingsState } from '../../shared/ipc';
 import { AiSettings } from './AiSettings';
 import { errorText } from './errors';
@@ -21,6 +21,19 @@ interface Props {
 }
 
 const tabId = (tab: SettingsTab): string => `settings-tab-${tab}`;
+const panelId = (tab: SettingsTab): string => `settings-panel-${tab}`;
+
+/**
+ * Вкладка настроек. На странице все четыре, видна одна: набранный запрос, каталог моделей и сообщения в нём не
+ * теряются при переключении.
+ */
+function Panel({ id, current, children }: { id: SettingsTab; current: SettingsTab; children: ReactNode }) {
+  return (
+    <section className="sec tab-panel" id={panelId(id)} role="tabpanel" aria-labelledby={tabId(id)} hidden={id !== current}>
+      {children}
+    </section>
+  );
+}
 
 function Toggle({
   checked,
@@ -101,7 +114,7 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
               className="tab"
               role="tab"
               aria-selected={t.id === tab}
-              aria-controls="settings-panel"
+              aria-controls={panelId(t.id)}
               tabIndex={t.id === tab ? 0 : -1}
               onClick={() => onTabChange(t.id)}
             >
@@ -110,117 +123,113 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
           ))}
         </div>
 
-        <section className="sec tab-panel" id="settings-panel" role="tabpanel" aria-labelledby={tabId(tab)}>
-          {tab === 'record' && (
-            <>
-              <div className="fld">
-                <div className="lb">Микрофон</div>
-                <div className="ctl">
-                  <span className="selw">
-                    <select
-                      aria-label="Микрофон"
-                      value={settings.microphoneId ?? ''}
-                      onChange={(e) => {
-                        const deviceId = e.currentTarget.value || null;
-                        setInstantly({ microphoneId: deviceId }, () => window.textmeet.setMicrophone(deviceId));
-                      }}
-                    >
-                      <option value="">
-                        Как в системе{microphones.defaultLabel ? ` — ${microphones.defaultLabel}` : ''}
-                      </option>
-                      {microphones.devices.map((d) => (
-                        <option key={d.deviceId} value={d.deviceId}>
-                          {d.label}
-                        </option>
-                      ))}
-                      {savedMissing && <option value={settings.microphoneId ?? ''}>Выбранный микрофон (не подключён)</option>}
-                    </select>
-                    <ChevronIcon />
-                  </span>
-                  <small>
-                    {savedMissing
-                      ? 'Выбранный микрофон сейчас не подключён — запись пойдёт с микрофона, выбранного в системе.'
-                      : 'Если сменить микрофон в системе, TextMeet возьмёт новый со следующей записи.'}
-                  </small>
-                </div>
-              </div>
-              <div className="fld">
-                <div className="lb">Горячая клавиша записи</div>
-                <HotkeyField state={state} platform={platform} onChange={onChange} />
-              </div>
-              <div className="fld tight">
-                <div className="lb">Звуковой сигнал</div>
-                <div className="ctl">
-                  <Toggle
-                    checked={settings.recordSounds}
-                    label="Короткий звук при начале и остановке записи"
-                    onChange={(value) => setInstantly({ recordSounds: value }, () => window.textmeet.setRecordSounds(value))}
-                  />
-                </div>
-              </div>
-            </>
-          )}
+        <Panel id="record" current={tab}>
+          <div className="fld">
+            <div className="lb">Микрофон</div>
+            <div className="ctl">
+              <span className="selw">
+                <select
+                  aria-label="Микрофон"
+                  value={settings.microphoneId ?? ''}
+                  onChange={(e) => {
+                    const deviceId = e.currentTarget.value || null;
+                    setInstantly({ microphoneId: deviceId }, () => window.textmeet.setMicrophone(deviceId));
+                  }}
+                >
+                  <option value="">
+                    Как в системе{microphones.defaultLabel ? ` — ${microphones.defaultLabel}` : ''}
+                  </option>
+                  {microphones.devices.map((d) => (
+                    <option key={d.deviceId} value={d.deviceId}>
+                      {d.label}
+                    </option>
+                  ))}
+                  {savedMissing && <option value={settings.microphoneId ?? ''}>Выбранный микрофон (не подключён)</option>}
+                </select>
+                <ChevronIcon />
+              </span>
+              <small>
+                {savedMissing
+                  ? 'Выбранный микрофон сейчас не подключён — запись пойдёт с микрофона, выбранного в системе.'
+                  : 'Если сменить микрофон в системе, TextMeet возьмёт новый со следующей записи.'}
+              </small>
+            </div>
+          </div>
+          <div className="fld">
+            <div className="lb">Горячая клавиша записи</div>
+            <HotkeyField state={state} platform={platform} active={tab === 'record'} onChange={onChange} />
+          </div>
+          <div className="fld tight">
+            <div className="lb">Звуковой сигнал</div>
+            <div className="ctl">
+              <Toggle
+                checked={settings.recordSounds}
+                label="Короткий звук при начале и остановке записи"
+                onChange={(value) => setInstantly({ recordSounds: value }, () => window.textmeet.setRecordSounds(value))}
+              />
+            </div>
+          </div>
+        </Panel>
 
-          {tab === 'transcription' && <TranscriptionSettings />}
+        <Panel id="transcription" current={tab}>
+          <TranscriptionSettings />
+        </Panel>
 
-          {tab === 'ai' && (
-            <AiSettings
-              aiPrompt={settings.aiPrompt}
-              save={(prompt) => window.textmeet.setAiPrompt(prompt)}
-              onSaved={onChange}
-              onError={setError}
-              onErrorAfterLeave={onError}
-            />
-          )}
+        <Panel id="ai" current={tab}>
+          <AiSettings
+            aiPrompt={settings.aiPrompt}
+            save={(prompt) => window.textmeet.setAiPrompt(prompt)}
+            onSaved={onChange}
+            onError={setError}
+            onErrorAfterLeave={onError}
+          />
+        </Panel>
 
-          {tab === 'general' && (
-            <>
-              <div className="fld">
-                <div className="lb">Папка библиотеки</div>
-                <div className="ctl">
-                  <span className="path" data-testid="library-dir">
-                    {state.libraryDir}
-                  </span>
-                  <div className="hr">
-                    <button type="button" className="btn" onClick={() => void run(() => window.textmeet.chooseLibraryDir())}>
-                      Изменить…
-                    </button>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => window.textmeet.openLibraryDir().catch((err: unknown) => setError(errorText(err)))}
-                    >
-                      Открыть папку
-                    </button>
-                  </div>
-                </div>
+        <Panel id="general" current={tab}>
+          <div className="fld">
+            <div className="lb">Папка библиотеки</div>
+            <div className="ctl">
+              <span className="path" data-testid="library-dir">
+                {state.libraryDir}
+              </span>
+              <div className="hr">
+                <button type="button" className="btn" onClick={() => void run(() => window.textmeet.chooseLibraryDir())}>
+                  Изменить…
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => window.textmeet.openLibraryDir().catch((err: unknown) => setError(errorText(err)))}
+                >
+                  Открыть папку
+                </button>
               </div>
-              <div className="fld tight">
-                <div className="lb">Автозапуск</div>
-                <div className="ctl">
-                  <Toggle
-                    checked={settings.launchAtLogin}
-                    label="Запускать TextMeet при входе в систему"
-                    hint="Программа стартует свёрнутой в трей, чтобы горячая клавиша работала сразу."
-                    onChange={(value) =>
-                      setInstantly({ launchAtLogin: value }, () => window.textmeet.setLaunchAtLogin(value))
-                    }
-                  />
-                  {notice && (
-                    <p className="notice" data-testid="launch-notice">
-                      {notice}
-                    </p>
-                  )}
-                </div>
-              </div>
-              {info && (
-                <footer className="about">
-                  TextMeet {info.version} · журнал ошибок: {info.logFile}
-                </footer>
+            </div>
+          </div>
+          <div className="fld tight">
+            <div className="lb">Автозапуск</div>
+            <div className="ctl">
+              <Toggle
+                checked={settings.launchAtLogin}
+                label="Запускать TextMeet при входе в систему"
+                hint="Программа стартует свёрнутой в трей, чтобы горячая клавиша работала сразу."
+                onChange={(value) =>
+                  setInstantly({ launchAtLogin: value }, () => window.textmeet.setLaunchAtLogin(value))
+                }
+              />
+              {notice && (
+                <p className="notice" data-testid="launch-notice">
+                  {notice}
+                </p>
               )}
-            </>
+            </div>
+          </div>
+          {info && (
+            <footer className="about">
+              TextMeet {info.version} · журнал ошибок: {info.logFile}
+            </footer>
           )}
-        </section>
+        </Panel>
       </div>
     </main>
   );

@@ -126,13 +126,13 @@ test('settings are split into tabs, switched with the arrow keys and remembered 
   await expect(tab('Запись')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByRole('tabpanel', { name: 'Запись' })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Микрофон' })).toBeVisible();
-  await expect(page.getByTestId('library-dir')).toHaveCount(0);
+  await expect(page.getByTestId('library-dir')).toBeHidden();
 
   await tab('Общие').click();
   await expect(tab('Общие')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('library-dir')).toBeVisible();
   await expect(page.getByText(/журнал ошибок/)).toBeVisible();
-  await expect(page.getByRole('combobox', { name: 'Микрофон' })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Микрофон' })).toBeHidden();
 
   // Стрелки — по кругу: с «Общие» вправо — «Запись», затем дважды влево — «ИИ».
   await page.keyboard.press('ArrowRight');

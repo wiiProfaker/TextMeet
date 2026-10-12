@@ -8,11 +8,13 @@ import { WarnIcon } from './icons';
 interface Props {
   state: SettingsState;
   platform: string;
+  /** Вкладка «Запись» открыта; false — ввод новой комбинации отменяется. */
+  active: boolean;
   onChange(next: SettingsState): void;
 }
 
 /** «Горячая клавиша записи»: показ, ввод новой комбинации, сброс. */
-export function HotkeyField({ state, platform, onChange }: Props) {
+export function HotkeyField({ state, platform, active, onChange }: Props) {
   const [capturing, setCapturing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -25,6 +27,13 @@ export function HotkeyField({ state, platform, onChange }: Props) {
     void window.textmeet.suspendHotkey(true);
     return () => void window.textmeet.suspendHotkey(false);
   }, [capturing]);
+
+  // Ушли на другую вкладку настроек, не закончив ввод: действующая клавиша возвращается.
+  useEffect(() => {
+    if (active) return;
+    setCapturing(false);
+    setMessage(null);
+  }, [active]);
 
   // Окно закрыли (оно прячется в трей), не закончив ввод: иначе действующая клавиша так и осталась бы снятой.
   useEffect(() => {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AiPromptSchema } from './ai-prompt';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL } from './asr-models';
 
 // Новые поля добавляются с .default(...) — старый settings.json читается без миграции.
@@ -20,6 +21,11 @@ export const SettingsSchema = z.object({
   asrModel: z.enum(ASR_MODEL_IDS).default(DEFAULT_ASR_MODEL).catch(DEFAULT_ASR_MODEL),
   /** Папка, куда последний раз сохраняли выгрузку встречи; null — «Документы». Испорченная — забывается. */
   exportDir: z.string().min(1).nullable().default(null).catch(null),
+  /**
+   * «Запрос для ИИ»: null — стандартный (shared/ai-prompt.ts), '' — без запроса, иначе — свой текст. Испорченный
+   * (не строка, длиннее 4000 символов) — забывается.
+   */
+  aiPrompt: AiPromptSchema.default(null).catch(null),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

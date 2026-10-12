@@ -10,6 +10,7 @@ import { errorText } from './errors';
 import { isImportFailure, participantsText } from './format';
 import { SearchViewContext, usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, TrashIcon, WarnIcon } from './icons';
+import { CopyForAiButton } from './CopyForAiButton';
 import { ExportMenu } from './ExportMenu';
 import { importView } from './import-format';
 import { MeetingTitle } from './MeetingTitle';
@@ -322,6 +323,7 @@ function MeetingView({
               {actions.header}
             </button>
           )}
+          {canExport && <CopyForAiButton meetingId={meeting.id} onError={onError} />}
           {canExport && <ExportMenu meetingId={meeting.id} onError={onError} />}
           <MeetingMenu
             meeting={meeting}

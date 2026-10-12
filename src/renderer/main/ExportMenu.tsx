@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { ExportFormat } from '../../shared/ipc';
 import { errorText } from './errors';
+import { useCopiedFlag } from './hooks';
 import { CheckIcon, ChevronIcon, CopyIcon, ExportIcon, FileIcon } from './icons';
 import { menuFocusStep } from './menu-keys';
 
@@ -9,15 +10,10 @@ interface Props {
   onError(message: string): void;
 }
 
-/** Сколько кнопка показывает «Скопировано». */
-const COPIED_MS = 2000;
-
 /** Кнопка «Экспорт» в заголовке встречи: «Скопировать всё», «Сохранить в Word», «Сохранить как текст» (лист 15). */
 export function ExportMenu({ meetingId, onError }: Props) {
   const [open, setOpen] = useState(false);
-  /** Сколько раз скопировали: каждое копирование заново показывает «Скопировано» на 2 с. */
-  const [copies, setCopies] = useState(0);
-  const [copied, setCopied] = useState(false);
+  const [copied, markCopied] = useCopiedFlag();
   const wrap = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
 
@@ -31,13 +27,6 @@ export function ExportMenu({ meetingId, onError }: Props) {
     return () => document.removeEventListener('pointerdown', onDown);
   }, [open]);
 
-  useEffect(() => {
-    if (copies === 0) return;
-    setCopied(true);
-    const timer = setTimeout(() => setCopied(false), COPIED_MS);
-    return () => clearTimeout(timer);
-  }, [copies]);
-
   /** Пункт выбран: меню закрывается, фокус — на «Экспорт» (пункт исчезает вместе с меню). */
   const close = () => {
     button.current?.focus();
@@ -48,7 +37,7 @@ export function ExportMenu({ meetingId, onError }: Props) {
     close();
     window.textmeet
       .copyMeeting(meetingId)
-      .then(() => setCopies((n) => n + 1))
+      .then(markCopied)
       .catch((err: unknown) => onError(errorText(err)));
   };
 

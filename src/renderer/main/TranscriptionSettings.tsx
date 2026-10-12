@@ -6,7 +6,7 @@ import { errorText } from './errors';
 import { catalogErrorsAfter, catalogErrorText, catalogSections, NO_CATALOG_ERRORS } from './model-catalog';
 import { ModelCard, type ModelCardActions } from './ModelCard';
 
-/** Настройки → «Расшифровка»: каталог моделей (решения Плана 7, §2) и общие модели голосов. */
+/** Вкладка настроек «Расшифровка»: каталог моделей (решения Плана 7, §2) и общие модели голосов. */
 export function TranscriptionSettings() {
   const [models, setModels] = useState<ModelsState | null>(null);
   const [errors, setErrors] = useState(NO_CATALOG_ERRORS);
@@ -78,8 +78,7 @@ export function TranscriptionSettings() {
     );
 
   return (
-    <section className="sec">
-      <h2>Расшифровка</h2>
+    <>
       <div className="fld">
         <div className="lb">Модель</div>
         <div className="ctl">
@@ -126,6 +125,6 @@ export function TranscriptionSettings() {
           </div>
         </div>
       )}
-    </section>
+    </>
   );
 }

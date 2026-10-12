@@ -19,12 +19,13 @@ import {
   type RecorderMessageChannel,
   type SettingsState,
 } from '../shared/ipc';
+import { AiPromptSchema, storedAiPrompt } from '../shared/ai-prompt';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
 import { IMPORT_EXTENSIONS } from '../shared/import';
 import { MeetingIdSchema, RecordedTrackKindSchema } from '../shared/meeting';
 import { SpeakerIdSchema } from '../shared/transcript';
 import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
-import { copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
+import { copyForAi, copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
 import type { Importer } from './import/importer';
@@ -98,6 +99,7 @@ const IMPORT_RUNNING = 'Папку библиотеки можно сменит�
 const MEETING_DIR_MISSING = 'Папка встречи не найдена — возможно, её удалили.';
 const MODELS_BUSY = 'Модели нельзя удалить, пока идёт расшифровка.';
 const MODELS_DOWNLOADING = 'Модели нельзя удалить, пока скачивается модель.';
+const AI_PROMPT_NOT_SAVED = 'Не удалось сохранить запрос для ИИ';
 
 const RenameMeetingSchema = z.object({ meetingId: MeetingIdSchema, title: z.string().max(200) });
 const RenameSpeakerSchema = z.object({
@@ -263,6 +265,16 @@ export function registerIpc(deps: IpcDeps): void {
     return settingsState();
   });
 
+  handle(IPC.setAiPrompt, async (arg) => {
+    const aiPrompt = storedAiPrompt(AiPromptSchema.parse(arg));
+    try {
+      await deps.settings.update({ aiPrompt });
+    } catch (err) {
+      throw humanFsError(AI_PROMPT_NOT_SAVED, err);
+    }
+    return settingsState();
+  });
+
   handle(IPC.setHotkey, async (arg) => {
     const next = z.string().min(1).max(100).nullable().parse(arg);
     const result = deps.hotkeys.change(next);
@@ -363,6 +375,8 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.copyMeeting, (arg) => copyMeeting(deps.exporting, MeetingIdSchema.parse(arg)));
+
+  handle(IPC.copyForAi, (arg) => copyForAi(deps.exporting, MeetingIdSchema.parse(arg)));
 
   handle(IPC.saveMeeting, (arg) => {
     const request = SaveMeetingSchema.parse(arg);

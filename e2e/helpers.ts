@@ -139,6 +139,12 @@ export function mainWindow(app: ElectronApplication): Promise<Page> {
   return windowByPage(app, '/main/index.html');
 }
 
+/** Настройки на нужной вкладке (без вкладки — та, что откроется сама). */
+export async function openSettings(page: Page, tab?: 'Запись' | 'Расшифровка' | 'ИИ' | 'Общие'): Promise<void> {
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  if (tab) await page.getByRole('tablist', { name: 'Разделы настроек' }).getByRole('tab', { name: tab }).click();
+}
+
 export function recorderWindow(app: ElectronApplication): Promise<Page> {
   return windowByPage(app, '/recorder/index.html');
 }

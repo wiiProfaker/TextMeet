@@ -32,6 +32,7 @@ export const IPC = {
   chooseLibraryDir: 'settings:choose-library-dir',
   setMicrophone: 'settings:set-microphone',
   setRecordSounds: 'settings:set-record-sounds',
+  setAiPrompt: 'settings:set-ai-prompt',
   setHotkey: 'settings:set-hotkey',
   suspendHotkey: 'settings:suspend-hotkey',
   openLibraryDir: 'library:open-dir',
@@ -60,6 +61,7 @@ export const IPC = {
   cancelModelDownload: 'models:cancel-download',
   selectModel: 'models:select',
   copyMeeting: 'export:copy',
+  copyForAi: 'export:copy-for-ai',
   saveMeeting: 'export:save',
   pickImportFiles: 'import:pick',
   importFiles: 'import:files',
@@ -164,6 +166,7 @@ export interface MainInvokeContract {
   [IPC.chooseLibraryDir]: { arg: void; result: SettingsState };
   [IPC.setMicrophone]: { arg: string | null; result: SettingsState };
   [IPC.setRecordSounds]: { arg: boolean; result: SettingsState };
+  [IPC.setAiPrompt]: { arg: string | null; result: SettingsState };
   [IPC.setHotkey]: { arg: string | null; result: HotkeyChange };
   [IPC.suspendHotkey]: { arg: boolean; result: void };
   [IPC.openLibraryDir]: { arg: void; result: void };
@@ -192,6 +195,7 @@ export interface MainInvokeContract {
   [IPC.cancelModelDownload]: { arg: AsrModelId; result: ModelsState };
   [IPC.selectModel]: { arg: AsrModelId; result: ModelsState };
   [IPC.copyMeeting]: { arg: string; result: void };
+  [IPC.copyForAi]: { arg: string; result: void };
   [IPC.saveMeeting]: { arg: SaveMeetingRequest; result: SaveMeetingResult };
   [IPC.pickImportFiles]: { arg: void; result: string[] };
   [IPC.importFiles]: { arg: string[]; result: ImportResult };
@@ -244,6 +248,8 @@ export interface TextMeetApi {
   chooseLibraryDir(): Promise<SettingsState>;
   setMicrophone(deviceId: string | null): Promise<SettingsState>;
   setRecordSounds(enabled: boolean): Promise<SettingsState>;
+  /** «Запрос для ИИ»: null — стандартный, '' — без запроса. */
+  setAiPrompt(prompt: string | null): Promise<SettingsState>;
   /** null — вернуть комбинацию по умолчанию. */
   setHotkey(accelerator: string | null): Promise<HotkeyChange>;
   /** Пока в настройках вводят новую комбинацию, действующая снимается. */
@@ -285,6 +291,8 @@ export interface TextMeetApi {
   selectModel(id: AsrModelId): Promise<ModelsState>;
   /** «Скопировать всё»: текст встречи — в буфер обмена (обычный и оформленный). */
   copyMeeting(meetingId: string): Promise<void>;
+  /** «Скопировать для ИИ»: запрос из настроек и текст встречи — в буфер обмена простым текстом. */
+  copyForAi(meetingId: string): Promise<void>;
   /** «Сохранить в Word» / «Сохранить как текст»: окно сохранения системы и файл. */
   saveMeeting(request: SaveMeetingRequest): Promise<SaveMeetingResult>;
   /** «Импорт файла»: окно выбора файлов системы; пусто — передумали. */

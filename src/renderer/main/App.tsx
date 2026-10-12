@@ -24,6 +24,7 @@ import { RecordPanel } from './RecordPanel';
 import { SearchBox } from './SearchBox';
 import { SearchResults } from './SearchResults';
 import { SettingsPane } from './SettingsPane';
+import { DEFAULT_SETTINGS_TAB, type SettingsTab } from './settings-tabs';
 import { StopDialog } from './StopDialog';
 
 type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
@@ -47,6 +48,8 @@ export function App() {
   const [settings, setSettings] = useState<SettingsState | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
+  /** Вкладка настроек: при следующем открытии настроек — та же, пока программа запущена. */
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>(DEFAULT_SETTINGS_TAB);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [focus, setFocus] = useState<SearchView['focus']>(null);
@@ -189,7 +192,16 @@ export function App() {
 
   let pane;
   if (selection?.kind === 'settings') {
-    pane = settings ? <SettingsPane state={settings} info={info} onChange={setSettings} /> : null;
+    pane = settings ? (
+      <SettingsPane
+        state={settings}
+        info={info}
+        onChange={setSettings}
+        onError={setError}
+        tab={settingsTab}
+        onTabChange={setSettingsTab}
+      />
+    ) : null;
   } else if (selectedId !== null && selectedId === liveId) {
     const title = selectedEntry?.kind === 'ok' ? selectedEntry.meeting.title : 'Новая встреча';
     pane = <LivePane state={recording} title={title} hotkey={hotkey} platform={platform} onError={setError} />;

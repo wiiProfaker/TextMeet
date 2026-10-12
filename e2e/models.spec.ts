@@ -3,7 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { launchApp, meetingJson, pollMeetingJson, type LaunchedApp } from './helpers';
+import { launchApp, meetingJson, openSettings, pollMeetingJson, type LaunchedApp } from './helpers';
 
 test.describe.configure({ timeout: 60_000 });
 
@@ -21,7 +21,7 @@ test('the catalog downloads, cancels, selects and deletes models', async () => {
   // Шаг «скачивания» долгий: проверки «ждут» и «Отменить» успевают и на медленной машине.
   launched = await launchApp({ downloadStepMs: 1500 });
   const { page, userDataDir } = launched;
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'Расшифровка');
 
   const selected = page.getByRole('group', { name: 'Выбрана' });
   await expect(selected.getByRole('article', { name: 'GigaAM v3' })).toBeVisible();

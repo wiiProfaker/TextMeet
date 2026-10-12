@@ -6,6 +6,7 @@ import {
   holdTranscription,
   launchApp,
   meetingJson,
+  openSettings,
   pollMeetingJson,
   readMeetingJson,
   toneWebm,
@@ -199,8 +200,8 @@ test('after a failed re-run the old text stays and another number of participant
 test('settings show the transcription model and that it is not downloaded yet', async () => {
   launched = await launchApp();
   const { page } = launched;
-  await page.getByRole('button', { name: 'Настройки' }).click();
-  await expect(page.getByRole('heading', { name: 'Расшифровка' })).toBeVisible();
+  await openSettings(page, 'Расшифровка');
+  await expect(page.getByRole('tabpanel', { name: 'Расшифровка' })).toBeVisible();
   const selected = page.getByRole('group', { name: 'Выбрана' });
   await expect(selected.getByRole('article', { name: 'GigaAM v3' })).toBeVisible();
   await expect(selected).toContainText('Скачается при первой расшифровке.');

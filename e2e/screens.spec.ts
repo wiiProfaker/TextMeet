@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
-import { launchApp, meetingJson, type LaunchedApp } from './helpers';
+import { launchApp, meetingJson, openSettings, type LaunchedApp } from './helpers';
 
 let launched: LaunchedApp | null = null;
 
@@ -65,7 +65,7 @@ test('settings show the library folder and save the switches', async () => {
   launched = await launchApp();
   const { page, libraryDir, userDataDir } = launched;
   const settingsFile = async () => JSON.parse(await readFile(join(userDataDir, 'settings.json'), 'utf8'));
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'Общие');
 
   await expect(page.getByTestId('library-dir')).toHaveText(libraryDir);
   // Тесты запускают версию для разработки — автозапуск в системе не прописывается.
@@ -76,6 +76,7 @@ test('settings show the library folder and save the switches', async () => {
   await autostart.click();
   await expect.poll(async () => (await settingsFile()).launchAtLogin).toBe(false);
 
+  await page.getByRole('tab', { name: 'Запись' }).click();
   await page.getByRole('switch', { name: 'Короткий звук при начале и остановке записи' }).click();
   await expect.poll(async () => (await settingsFile()).recordSounds).toBe(false);
 });
@@ -106,17 +107,55 @@ test('changing the library folder switches the meeting list', async () => {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
   }, otherDir);
 
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'Общие');
   await page.getByRole('button', { name: 'Изменить…' }).click();
   await expect(page.getByTestId('library-dir')).toHaveText(otherDir);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(page.getByText('Во второй папке')).toBeVisible();
 });
 
+test('settings are split into tabs, switched with the arrow keys and remembered while the app runs', async () => {
+  const id = '2026-09-27_1000_ffffff';
+  launched = await launchApp({ meetings: [{ id, json: meetingJson(id, { title: 'Планёрка' }) }] });
+  const { page } = launched;
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  const tabs = page.getByRole('tablist', { name: 'Разделы настроек' });
+  const tab = (name: string) => tabs.getByRole('tab', { name });
+  await expect(tabs.getByRole('tab')).toHaveText(['Запись', 'Расшифровка', 'ИИ', 'Общие']);
+  // Сначала — «Запись»: видна только она.
+  await expect(tab('Запись')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel', { name: 'Запись' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Микрофон' })).toBeVisible();
+  await expect(page.getByTestId('library-dir')).toHaveCount(0);
+
+  await tab('Общие').click();
+  await expect(tab('Общие')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('library-dir')).toBeVisible();
+  await expect(page.getByText(/журнал ошибок/)).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Микрофон' })).toHaveCount(0);
+
+  // Стрелки — по кругу: с «Общие» вправо — «Запись», затем дважды влево — «ИИ».
+  await page.keyboard.press('ArrowRight');
+  await expect(tab('Запись')).toBeFocused();
+  await expect(tab('Запись')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowLeft');
+  await page.keyboard.press('ArrowLeft');
+  await expect(tab('ИИ')).toBeFocused();
+  await expect(page.getByRole('textbox', { name: 'Запрос для ИИ' })).toBeVisible();
+  // В строке вкладок клавиша Tab ведёт к выбранной вкладке, остальные — по стрелкам.
+  await expect(tab('Запись')).toHaveAttribute('tabindex', '-1');
+  await expect(tab('ИИ')).toHaveAttribute('tabindex', '0');
+
+  // Ушли на встречу и вернулись — та же вкладка.
+  await page.getByRole('navigation', { name: 'Встречи' }).getByRole('button', { name: /Планёрка/ }).click();
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  await expect(tab('ИИ')).toHaveAttribute('aria-selected', 'true');
+});
+
 test('broken settings fall back to defaults and are kept aside', async () => {
   launched = await launchApp({ settings: '{oops' });
   const { page, userDataDir, homeDir } = launched;
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'Общие');
   await expect(page.getByTestId('library-dir')).toHaveText(join(homeDir, 'TextMeet'));
   const files = await readdir(userDataDir);
   expect(files.some((f) => f.startsWith('settings.json.broken-'))).toBe(true);

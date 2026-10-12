@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { DEFAULT_AI_PROMPT } from '../src/shared/ai-prompt';
-import { launchApp, meetingJson, type LaunchedApp } from './helpers';
+import { launchApp, meetingJson, openSettings, type LaunchedApp } from './helpers';
 
 let launched: LaunchedApp | null = null;
 
@@ -69,7 +69,7 @@ const savedPrompt = async (userDataDir: string): Promise<unknown> =>
 test('the AI prompt starts as the standard one, saves itself and goes back to the standard', async () => {
   launched = await launchWithMeeting();
   const { page, userDataDir } = launched;
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'ИИ');
   const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
   await expect(field).toHaveValue(DEFAULT_AI_PROMPT);
   const reset = page.getByRole('button', { name: 'Вернуть стандартный' });
@@ -92,10 +92,23 @@ test('the AI prompt starts as the standard one, saves itself and goes back to th
   await expect.poll(() => savedPrompt(userDataDir)).toBeNull();
 });
 
+test('a prompt typed right before switching to another settings tab is saved', async () => {
+  launched = await launchWithMeeting();
+  const { page, userDataDir } = launched;
+  await openSettings(page, 'ИИ');
+  await page.getByRole('textbox', { name: 'Запрос для ИИ' }).fill('Только решения.');
+  // Сразу на другую вкладку, не уводя фокус из поля щелчком.
+  await page.getByRole('tab', { name: 'Общие' }).dispatchEvent('click');
+  await expect(page.getByTestId('library-dir')).toBeVisible();
+  await expect.poll(() => savedPrompt(userDataDir)).toBe('Только решения.');
+  await page.getByRole('tab', { name: 'ИИ' }).click();
+  await expect(page.getByRole('textbox', { name: 'Запрос для ИИ' })).toHaveValue('Только решения.');
+});
+
 test('a prompt typed right before leaving the settings is saved and shown again', async () => {
   launched = await launchWithMeeting();
   const { page, userDataDir } = launched;
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'ИИ');
   await page.getByRole('textbox', { name: 'Запрос для ИИ' }).fill('Список задач, по пунктам.');
   // Сразу на встречу — раньше, чем пройдёт пауза набора, и не уводя фокус из поля щелчком: набранное отправляется,
   // когда страница настроек закрывается.
@@ -106,7 +119,7 @@ test('a prompt typed right before leaving the settings is saved and shown again'
   await expect(page.getByLabel('Текст встречи')).toContainText('Смотри, по бюджету.');
   await expect.poll(() => savedPrompt(userDataDir)).toBe('Список задач, по пунктам.');
 
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'ИИ');
   await expect(page.getByRole('textbox', { name: 'Запрос для ИИ' })).toHaveValue('Список задач, по пунктам.');
 });
 
@@ -126,7 +139,7 @@ test('copies with the own prompt, and only the text when the prompt is empty', a
   launched = await launchWithMeeting();
   const { app, page } = launched;
   const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'ИИ');
   await field.fill('Что решили по бюджету?');
   // Сразу на встречу и копировать: копия ждёт сохранения запроса, набранного перед уходом из настроек.
   await openMeeting(page);
@@ -134,7 +147,7 @@ test('copies with the own prompt, and only the text when the prompt is empty', a
   await expect(page.getByRole('button', { name: 'Скопировано' })).toBeVisible();
   expect((await clipboardNow(app)).text).toBe(`Что решили по бюджету?\n\n${EXPECTED_TEXT}`);
 
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'ИИ');
   await field.fill('');
   await openMeeting(page);
   await page.getByRole('button', { name: 'Скопировать для ИИ' }).click();
@@ -152,7 +165,7 @@ test('a prompt that could not be saved stays in the field, is retried and is rep
       throw new Error('Не удалось сохранить запрос для ИИ: диск недоступен.');
     });
   });
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'ИИ');
   const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
   await field.fill('Новый запрос');
   await field.blur();
@@ -187,7 +200,7 @@ test('a late failure of an older save does not bring the older text back', async
   const calls = () => app.evaluate(() => (globalThis as { aiCalls?: unknown[] }).aiCalls ?? []);
   const failed = () => app.evaluate(() => (globalThis as { aiFailed?: number }).aiFailed ?? 0);
 
-  await page.getByRole('button', { name: 'Настройки' }).click();
+  await openSettings(page, 'ИИ');
   const field = page.getByRole('textbox', { name: 'Запрос для ИИ' });
   await field.fill('Запрос A');
   // Пауза набора прошла — первое сохранение ушло и ещё не ответило.

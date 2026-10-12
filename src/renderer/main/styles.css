@@ -770,6 +770,40 @@ textarea:focus-visible {
   font-weight: 600;
 }
 
+/* Вкладки настроек: строка названий, выбранная подчёркнута; под ней — одна вкладка. */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--line);
+  max-width: 760px;
+}
+
+.tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 12px 9px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.sec.tab-panel {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 8px;
+}
+
 .fld {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);

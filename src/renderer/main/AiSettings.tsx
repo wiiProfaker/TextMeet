@@ -19,8 +19,8 @@ interface Props {
 }
 
 /**
- * Настройки → «ИИ» (решения Плана 6, §2.2): «Запрос для ИИ». Кнопки «Сохранить» нет: текст уходит в main через
- * полсекунды после последней набранной буквы, при уходе из поля и при уходе со страницы настроек. Не сохранилось —
+ * Вкладка настроек «ИИ» (решения Плана 6, §2.2): «Запрос для ИИ». Кнопки «Сохранить» нет: текст уходит в main через
+ * полсекунды после последней набранной буквы, при уходе из поля и при уходе с вкладки или из настроек. Не сохранилось —
  * текст остаётся в поле, и следующий уход из поля пробует снова.
  */
 export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave }: Props) {
@@ -109,33 +109,30 @@ export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave
   };
 
   return (
-    <section className="sec">
-      <h2>ИИ</h2>
-      <div className="fld">
-        <div className="lb">Запрос для ИИ</div>
-        <div className="ctl">
-          <textarea
-            ref={field}
-            className="ta"
-            aria-label="Запрос для ИИ"
-            aria-describedby={hintId}
-            rows={8}
-            maxLength={AI_PROMPT_MAX}
-            value={text}
-            onChange={(e) => change(e.currentTarget.value)}
-            onBlur={flush}
-          />
-          <small id={hintId}>
-            Добавляется перед текстом встречи, когда вы нажимаете «Скопировать для ИИ». Вставьте скопированное в
-            Claude, ChatGPT или другой чат.
-          </small>
-          {text !== DEFAULT_AI_PROMPT && (
-            <button type="button" className="lnk" onClick={reset}>
-              Вернуть стандартный
-            </button>
-          )}
-        </div>
+    <div className="fld">
+      <div className="lb">Запрос для ИИ</div>
+      <div className="ctl">
+        <textarea
+          ref={field}
+          className="ta"
+          aria-label="Запрос для ИИ"
+          aria-describedby={hintId}
+          rows={8}
+          maxLength={AI_PROMPT_MAX}
+          value={text}
+          onChange={(e) => change(e.currentTarget.value)}
+          onBlur={flush}
+        />
+        <small id={hintId}>
+          Добавляется перед текстом встречи, когда вы нажимаете «Скопировать для ИИ». Вставьте скопированное в
+          Claude, ChatGPT или другой чат.
+        </small>
+        {text !== DEFAULT_AI_PROMPT && (
+          <button type="button" className="lnk" onClick={reset}>
+            Вернуть стандартный
+          </button>
+        )}
       </div>
-    </section>
+    </div>
   );
 }

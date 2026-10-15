@@ -3,8 +3,9 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
-    // Тесты на настоящих моделях — отдельно: npm run test:models (vitest.models.config.ts).
-    exclude: ['**/node_modules/**', 'src/**/*.int.test.ts'],
+    // Тесты на настоящих моделях — отдельно: npm run test:models (vitest.models.config.ts) и npm run test:llm
+    // (vitest.llm.config.ts).
+    exclude: ['**/node_modules/**', 'src/**/*.int.test.ts', 'src/**/*.llm.test.ts'],
     environment: 'node',
     coverage: {
       provider: 'v8',

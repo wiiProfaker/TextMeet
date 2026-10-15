@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { expect, test } from '@playwright/test';
 import { launchApp, waitForRecorder, type LaunchedApp } from './helpers';
 
@@ -37,4 +39,15 @@ test('the packaged app records, mixes with its bundled ffmpeg and runs the trans
   await expect.poll(() => existsSync(join(libraryDir, id!, 'transcript.json')), { timeout: 30_000 }).toBe(true);
   const log = await readFile(join(userDataDir, 'logs', 'textmeet.log'), 'utf8');
   expect(log).toMatch(/Процесс расшифровки запущен \(поддельные движки, sherpa-onnx \d/);
+});
+
+test('the packaged app carries the engine for summaries, and it starts', async () => {
+  test.skip(!executablePath, 'проверяется только собранная программа (TEXTMEET_PACKAGED_APP)');
+  test.setTimeout(90_000);
+  launched = await launchApp({ executablePath });
+  const resources = await launched.app.evaluate(() => process.resourcesPath);
+  const server = join(resources, 'llama', process.platform === 'win32' ? 'llama-server.exe' : 'llama-server');
+  // Сервер запускается из собранной программы со всеми своими библиотеками (на Mac — подписанными).
+  const { stdout, stderr } = await promisify(execFile)(server, ['--version']);
+  expect(`${stdout}${stderr}`).toContain('build 11588');
 });

@@ -33,11 +33,14 @@ jobs:
       - run: npm run build
       - run: npx playwright test
 
+      # Движок итогов (llama.cpp) — в resources/llama собранной программы.
+      - run: npm run fetch:llama
+
       - name: Package (Windows)
         if: runner.os == 'Windows'
         run: npx electron-builder --win --publish never
 
-      # Собранная программа пишет и сводит дорожки своим ffmpeg (из app.asar.unpacked).
+      # Собранная программа пишет и сводит дорожки своим ffmpeg (из app.asar.unpacked) и запускает свой движок итогов.
       - name: Check the packaged app (Windows)
         if: runner.os == 'Windows'
         run: npx playwright test e2e/packaged.spec.ts
@@ -51,8 +54,8 @@ jobs:
           APP="$(find release -maxdepth 2 -name 'TextMeet.app' -type d | head -n 1)"
           echo "App: $APP"
           # Неподписанное arm64-приложение macOS не запускает — подписываем ad-hoc, как в спайке.
-          # ffmpeg (сведение дорожек) лежит в app.asar.unpacked и тоже должен быть подписан.
-          find "$APP" \( -name '*.node' -o -name '*.dylib' -o -name 'ffmpeg' \) -type f -exec codesign --force --sign - {} \;
+          # ffmpeg (сведение дорожек) лежит в app.asar.unpacked, движок итогов — в Resources/llama: их тоже подписываем.
+          find "$APP" \( -name '*.node' -o -name '*.dylib' -o -name 'ffmpeg' -o -name 'llama-server' \) -type f -exec codesign --force --sign - {} \;
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --verbose=2 "$APP"
           # Собранная программа пишет и сводит дорожки своим подписанным ffmpeg.

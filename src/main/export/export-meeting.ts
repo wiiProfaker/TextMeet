@@ -2,9 +2,11 @@
 // берётся из файлов встречи на диске — с правками и именами спикеров.
 import { promises as fsp } from 'node:fs';
 import { dirname, extname, join } from 'node:path';
+import type { AiSummary } from '../../shared/ai';
 import { resolveAiPrompt, withAiPrompt } from '../../shared/ai-prompt';
 import { buildExportDoc, toHtml, toPlainText, type ExportDoc } from '../../shared/export-doc';
 import type { ExportFormat } from '../../shared/ipc';
+import { readAi } from '../ai/ai-store';
 import { humanFsError } from '../fs/fs-errors';
 import { readMeeting } from '../library/library';
 import { readTranscript } from '../library/transcript-store';
@@ -40,13 +42,32 @@ export interface ExportDeps {
 /** Метка BOM: старый Блокнот и другие программы Windows узнают по ней UTF-8 (кириллицу). */
 const BOM = '﻿';
 
-/** Встреча для выгрузки и для модели итогов: текст с правками и именами спикеров; нет текста — понятная ошибка. */
-export async function loadExportDoc(libraryDir: string, meetingId: string): Promise<ExportDoc> {
+/** Итоги для выгрузки; файла нет или он не читается — выгрузка без итогов (текст встречи важнее). */
+async function summaryOf(libraryDir: string, meetingId: string, logger?: Pick<Logger, 'warn'>): Promise<AiSummary | null> {
+  try {
+    return (await readAi(libraryDir, meetingId)).doc.summary;
+  } catch (err) {
+    logger?.warn('Итоги встречи не прочитались — выгрузка без них', err);
+    return null;
+  }
+}
+
+/**
+ * Встреча для выгрузки и для модели итогов: текст с правками и именами спикеров; нет текста — понятная ошибка.
+ * withSummary — с итогами в начале (Word, .txt, «Скопировать всё»); модели и «Скопировать для ИИ» — без них.
+ */
+export async function loadExportDoc(
+  libraryDir: string,
+  meetingId: string,
+  withSummary = false,
+  logger?: Pick<Logger, 'warn'>,
+): Promise<ExportDoc> {
   let doc: ExportDoc | null;
   try {
     const meeting = await readMeeting(libraryDir, meetingId);
     const transcript = await readTranscript(libraryDir, meetingId);
-    doc = transcript ? buildExportDoc(meeting, transcript) : null;
+    const summary = withSummary ? await summaryOf(libraryDir, meetingId, logger) : null;
+    doc = transcript ? buildExportDoc(meeting, transcript, summary) : null;
   } catch (err) {
     throw new Error(exportTexts.unreadable, { cause: err });
   }
@@ -55,7 +76,7 @@ export async function loadExportDoc(libraryDir: string, meetingId: string): Prom
 }
 
 export async function copyMeeting(deps: ExportDeps, meetingId: string): Promise<void> {
-  const doc = await loadExportDoc(deps.libraryDir(), meetingId);
+  const doc = await loadExportDoc(deps.libraryDir(), meetingId, true, deps.logger);
   await deps.writeClipboard({ text: toPlainText(doc), html: toHtml(doc) });
 }
 
@@ -80,7 +101,7 @@ async function startDir(deps: ExportDeps): Promise<string> {
 
 /** Окно сохранения → файл. Не атомарно: файл, открытый в Word, даёт понятное «файл занят другой программой». */
 export async function saveMeeting(deps: ExportDeps, meetingId: string, format: ExportFormat): Promise<{ saved: boolean }> {
-  const doc = await loadExportDoc(deps.libraryDir(), meetingId);
+  const doc = await loadExportDoc(deps.libraryDir(), meetingId, true, deps.logger);
   const dir = await startDir(deps);
   const picked = await deps.chooseSavePath(join(dir, exportFileName(doc.title, format)), format);
   if (picked === null) return { saved: false };

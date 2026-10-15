@@ -1,12 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { AiFailure, AiJob, AiMeetingView, AiQuestion, AiStartResult } from '../../shared/ai';
-import { AI_QUESTION_MAX } from '../../shared/ai';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { AI_QUESTION_MAX, aiCaption, type AiFailure, type AiJob, type AiMeetingView, type AiQuestion, type AiStartResult } from '../../shared/ai';
 import { aiPlainText } from '../../shared/ai-markdown';
 import {
   AI_FOOT,
   aiBlockVisible,
   aiBusyText,
-  aiCaption,
   aiFinishedText,
   aiStageText,
   ASK_PLACEHOLDER,
@@ -42,6 +40,10 @@ export interface AiPanel {
   collapse(): void;
   /** «Закрыть» у «Модель не скачана». */
   close(): void;
+  /** Развернуть блок и показать его (переход из найденного). */
+  reveal(): void;
+  /** Растёт с каждым reveal(): блок прокручивается в поле зрения. */
+  revealed: number;
   deleteQuestion(questionId: string): void;
 }
 
@@ -55,6 +57,7 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
   const [opened, setOpened] = useState(false);
   const [noModel, setNoModel] = useState(false);
   const [collapsed, setCollapsed] = useState(() => collapsedMeetings.has(meetingId));
+  const [revealed, setRevealed] = useState(0);
   const job = state.job?.meetingId === meetingId ? state.job : null;
   const other = state.job && state.job.meetingId !== meetingId ? state.job : null;
   const failure = state.failures.find((f) => f.meetingId === meetingId) ?? null;
@@ -67,11 +70,15 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     [meetingId],
   );
 
-  const expand = () => {
+  const expand = useCallback(() => {
     collapsedMeetings.delete(meetingId);
     setCollapsed(false);
     setOpened(true);
-  };
+  }, [meetingId]);
+  const reveal = useCallback(() => {
+    expand();
+    setRevealed((n) => n + 1);
+  }, [expand]);
 
   const start = async (run: () => Promise<AiStartResult>): Promise<boolean> => {
     expand();
@@ -110,6 +117,8 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
       setNoModel(false);
       setOpened(false);
     },
+    reveal,
+    revealed,
     deleteQuestion: (questionId) => {
       window.textmeet
         .deleteAiQuestion({ meetingId, questionId })
@@ -226,6 +235,7 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
   const [confirm, setConfirm] = useState(false);
   const [announcement, setAnnouncement] = useState('');
   const previousJob = useRef<AiJob | null>(null);
+  const section = useRef<HTMLElement>(null);
   const { view, job, other, failure } = panel;
 
   // По окончании ответа — «Итоги готовы» / «Ответ готов» экранному диктору (поток текста ему не читается).
@@ -234,6 +244,11 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
     previousJob.current = job;
     if (text) setAnnouncement(text);
   }, [job, failure]);
+
+  // Перешли из найденного — блок прокручивается в поле зрения.
+  useEffect(() => {
+    if (panel.revealed > 0) section.current?.scrollIntoView({ block: 'nearest' });
+  }, [panel.revealed]);
 
   if (!panel.visible) return null;
   const summary = view?.doc.summary ?? null;
@@ -258,7 +273,7 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
   else if (summary) caption = aiCaption(summary);
 
   return (
-    <section className="ai" aria-label="Итоги встречи" aria-busy={job ? true : undefined}>
+    <section ref={section} className="ai" aria-label="Итоги встречи" aria-busy={job ? true : undefined}>
       <div className="ai-h">
         <b>Итоги встречи</b>
         {caption && <span>{caption}</span>}

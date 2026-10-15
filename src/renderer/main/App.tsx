@@ -247,10 +247,10 @@ export function App() {
           {searching ? (
             <SearchResults
               state={search}
-              selected={focus ? { meetingId: focus.meetingId, segmentId: focus.segmentId } : null}
-              onOpen={(id, segmentId) => {
+              selected={focus ? { meetingId: focus.meetingId, segmentId: focus.segmentId, aiKey: focus.aiKey } : null}
+              onOpen={(id, segmentId, aiKey) => {
                 setSelection({ kind: 'meeting', id });
-                setFocus((prev) => ({ meetingId: id, segmentId, nonce: (prev?.nonce ?? 0) + 1 }));
+                setFocus((prev) => ({ meetingId: id, segmentId, aiKey: aiKey ?? null, nonce: (prev?.nonce ?? 0) + 1 }));
               }}
             />
           ) : (

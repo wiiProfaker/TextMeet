@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_AI_DOC, type AiFailure, type AiJob, type AiMeetingView } from '../../shared/ai';
-import { aiBlockVisible, aiBusyText, aiCaption, aiFinishedText, aiStageText } from './ai-block';
+import { aiCaption, EMPTY_AI_DOC, type AiFailure, type AiJob, type AiMeetingView } from '../../shared/ai';
+import { aiBlockVisible, aiBusyText, aiFinishedText, aiStageText } from './ai-block';
 
 const job = (over: Partial<AiJob> = {}): AiJob => ({
   meetingId: 'm',

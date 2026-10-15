@@ -1,7 +1,6 @@
 // Блок «Итоги встречи» (решения Плана 9, §2.2; листы 18–20 макета): подписи и когда блок виден. Чистые функции —
 // проверяются модульными тестами.
-import type { AiAnswerStatus, AiFailure, AiJob, AiJobStage, AiMeetingView } from '../../shared/ai';
-import { formatStamp } from '../../shared/format';
+import type { AiFailure, AiJob, AiJobStage, AiMeetingView } from '../../shared/ai';
 
 export const ASK_PLACEHOLDER = 'Свой вопрос к встрече — например, что решили по срокам?';
 /** Пока пишутся итоги этой встречи, спросить нельзя. */
@@ -15,13 +14,6 @@ export function aiStageText(stage: AiJobStage): string | null {
   if (stage === 'loading') return 'Готовим модель…';
   if (stage === 'reading') return 'Читаем встречу…';
   return null;
-}
-
-/** Подпись итогов или ответа: «Qwen3.5 9B · 27.09, 16:55»; остановленный — с «· остановлено». */
-export function aiCaption(record: { modelTitle: string; createdAt: string; status: AiAnswerStatus }, withYear = false): string {
-  const parts = [record.modelTitle, formatStamp(record.createdAt, withYear)];
-  if (record.status === 'stopped') parts.push('остановлено');
-  return parts.join(' · ');
 }
 
 /** Модель занята другой встречей: блок называет её. */

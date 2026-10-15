@@ -376,7 +376,12 @@ async function start(logger: Logger): Promise<void> {
     now: () => new Date(),
     logger,
     changed: (state) => sendToMain(IPC.aiState, state),
-    saved: (id) => sendToMain(IPC.aiChanged, id),
+    saved: (id) => {
+      // Слова итогов и ответов сразу ищутся.
+      searchIndex.invalidate(id);
+      searchIndex.refresh().catch((err: unknown) => logger.warn('Поиск не обновился', err));
+      sendToMain(IPC.aiChanged, id);
+    },
   });
   aiRunner = ai;
   const queue = new TranscriptionQueue({

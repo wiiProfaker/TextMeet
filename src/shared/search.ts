@@ -15,15 +15,28 @@ export interface SearchHit {
   ranges: TextRange[];
 }
 
+/** Совпадение в итогах встречи или в ответе на свой вопрос (решения Плана 9, §2.3). */
+export interface SearchAiHit {
+  /** «summary» — итоги; «q:<id>» — ответ на вопрос с этим id. */
+  key: string;
+  /** Подпись вместо времени реплики: «Итоги», «Ответ на «…»». */
+  label: string;
+  /** Отрывок вокруг совпадения. */
+  text: string;
+  ranges: TextRange[];
+}
+
 export interface SearchMeeting {
   meetingId: string;
   title: string;
   /** Совпадения в названии; пусто — название не совпало. */
   titleRanges: TextRange[];
   createdAt: string;
-  /** Сколько реплик встречи найдено всего. */
+  /** Сколько совпадений во встрече всего: реплики, итоги, ответы. */
   total: number;
-  /** Первые найденные реплики (не больше SEARCH_HITS_PER_MEETING). */
+  /** Совпадения в итогах и ответах — первыми (не больше SEARCH_HITS_PER_MEETING). */
+  aiHits: SearchAiHit[];
+  /** Первые найденные реплики (вместе с aiHits — не больше SEARCH_HITS_PER_MEETING). */
   hits: SearchHit[];
 }
 

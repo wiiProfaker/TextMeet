@@ -38,8 +38,10 @@ export const meetingText = (doc: ExportDoc): string => toPlainText(doc);
  * Отпечаток текста встречи, который видела модель. Название не входит: переименование встречи — не правка текста, и
  * пометка «текст меняли» из-за него не появляется.
  */
-export const sourceHash = (doc: ExportDoc): string =>
-  createHash('sha256').update(toPlainText({ ...doc, title: '' })).digest('hex');
+export function sourceHash(doc: ExportDoc): string {
+  const text = toPlainText({ title: '', metaLine: doc.metaLine, participantsLine: doc.participantsLine, paragraphs: doc.paragraphs });
+  return createHash('sha256').update(text).digest('hex');
+}
 
 /** Встреча с запросом помещается в окно модели, и ещё остаётся место под ответ. */
 export const fitsWindow = (tokens: number, contextTokens: number): boolean =>

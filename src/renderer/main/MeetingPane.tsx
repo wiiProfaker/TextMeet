@@ -1,4 +1,4 @@
-import { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort, formatLongDate } from '../../shared/format';
 import type { ImportProgress } from '../../shared/import';
@@ -314,6 +314,13 @@ function MeetingView({
   const speakerNames = JSON.stringify(meeting.speakerNames);
   const textKey = useMemo(() => [shownTranscript, speakerNames], [shownTranscript, speakerNames]);
   const ai = useAiPanel(meeting.id, textKey, onError);
+  // Перешли из найденного в итогах или ответах — блок итогов разворачивается и показывается.
+  const searchFocus = useContext(SearchViewContext).focus;
+  const aiFocus = searchFocus?.meetingId === meeting.id && searchFocus.aiKey !== null ? searchFocus.nonce : null;
+  const { reveal } = ai;
+  useEffect(() => {
+    if (aiFocus !== null) reveal();
+  }, [aiFocus, reveal]);
   // «Повторить» — той же моделью, что не справилась (её id в meeting.json); неизвестная — из настроек.
   const retry = () =>
     window.textmeet

@@ -1,6 +1,7 @@
 // Итоги встречи и свои вопросы (решения Плана 9, §2.2, §5): файл ai.json в папке встречи и что main сообщает окну о
 // работе модели. Схемы (zod) нужны только main; окно и preload берут отсюда типы.
 import { z } from 'zod';
+import { formatStamp } from './format';
 
 /** Свой вопрос к встрече — не длиннее. */
 export const AI_QUESTION_MAX = 1000;
@@ -43,6 +44,13 @@ export type AiQuestion = z.infer<typeof AiQuestionSchema>;
 export type AiDoc = z.infer<typeof AiDocSchema>;
 
 export const EMPTY_AI_DOC: AiDoc = { version: 1, summary: null, questions: [] };
+
+/** Подпись итогов или ответа: «Qwen3.5 9B · 27.09, 16:55»; остановленный — с «· остановлено»; withYear — для выгрузки. */
+export function aiCaption(record: { modelTitle: string; createdAt: string; status: AiAnswerStatus }, withYear = false): string {
+  const parts = [record.modelTitle, formatStamp(record.createdAt, withYear)];
+  if (record.status === 'stopped') parts.push('остановлено');
+  return parts.join(' · ');
+}
 
 /** Итоги и вопросы встречи глазами окна. */
 export interface AiMeetingView {

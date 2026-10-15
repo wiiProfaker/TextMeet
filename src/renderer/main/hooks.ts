@@ -473,9 +473,12 @@ export function useSearch(query: string, refreshKey: number): SearchState {
     const bump = () => setAgain((n) => n + 1);
     window.addEventListener('focus', bump);
     const unsubscribe = window.textmeet.onLibraryChanged(bump);
+    // Итоги или ответ сохранились — их слова тоже ищутся.
+    const unsubscribeAi = window.textmeet.onAiChanged(bump);
     return () => {
       window.removeEventListener('focus', bump);
       unsubscribe();
+      unsubscribeAi();
     };
   }, [active]);
 
@@ -514,7 +517,7 @@ export interface SearchView {
    * nonce — каждый переход новый: повторный щелчок по той же реплике снова к ней прокручивает. segmentId null — перешли
    * по названию встречи: она открывается сверху (в том числе уже открытая).
    */
-  focus: { meetingId: string; segmentId: string | null; nonce: number } | null;
+  focus: { meetingId: string; segmentId: string | null; aiKey: string | null; nonce: number } | null;
   /** Текст встречи правили — повторить поиск. */
   refresh(): void;
 }

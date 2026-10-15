@@ -2,12 +2,14 @@ import { promises as fsp } from 'node:fs';
 import { join } from 'node:path';
 import { MEETING_ID_PATTERN, MeetingSchema } from '../../shared/meeting';
 import { SEARCH_HITS_PER_MEETING, SEARCH_MAX_MEETINGS, type SearchMeeting, type SearchResult } from '../../shared/search';
+import { aiPlainText } from '../../shared/ai-markdown';
 import { findRanges, isSearchable, matchesAll, normalize, queryWords, snippet } from '../../shared/search-text';
 import { speakerLabel, type SpeakerId } from '../../shared/transcript';
 import { humanFsError } from '../fs/fs-errors';
 import { readJsonFile } from '../fs/read-json';
 import type { Logger } from '../logger';
 import { MEETING_FILE } from './library';
+import { AI_FILE, readAi } from '../ai/ai-store';
 import { readTranscript, TRANSCRIPT_FILE } from './transcript-store';
 
 /** Сколько встреч поиск читает одновременно: тысячи открытых файлов разом упёрлись бы в предел системы. */
@@ -24,6 +26,22 @@ interface IndexedSegment {
   norm: string;
 }
 
+/** Итоги или ответ на свой вопрос — простым текстом, без разметки. */
+interface IndexedAi {
+  key: string;
+  label: string;
+  text: string;
+  norm: string;
+}
+
+/** Вопрос в подписи найденного ответа — не длиннее. */
+const QUESTION_LABEL_CHARS = 40;
+
+function questionLabel(question: string): string {
+  const short = question.length > QUESTION_LABEL_CHARS ? `${question.slice(0, QUESTION_LABEL_CHARS - 1).trimEnd()}…` : question;
+  return `Ответ на «${short}»`;
+}
+
 interface IndexedMeeting {
   id: string;
   title: string;
@@ -31,10 +49,11 @@ interface IndexedMeeting {
   createdAt: string;
   speakerNames: Readonly<Record<string, string>>;
   segments: IndexedSegment[];
+  ai: IndexedAi[];
 }
 
 interface Entry {
-  /** Время изменения и размер meeting.json и transcript.json: изменились — встречу перечитать. */
+  /** Время изменения и размер meeting.json, transcript.json и ai.json: изменились — встречу перечитать. */
   stamp: string;
   /** null — встречу не удалось прочитать (в поиске её нет). */
   meeting: IndexedMeeting | null;
@@ -135,12 +154,13 @@ export class SearchIndex {
 
   private async update(dir: string, id: string): Promise<void> {
     const folder = join(dir, id);
-    const stamp = `${await fileStamp(join(folder, MEETING_FILE))}|${await fileStamp(join(folder, TRANSCRIPT_FILE))}`;
-    if (this.entries.get(id)?.stamp === stamp) return;
+    const stamp = [MEETING_FILE, TRANSCRIPT_FILE, AI_FILE].map((file) => fileStamp(join(folder, file)));
+    const joined = (await Promise.all(stamp)).join('|');
+    if (this.entries.get(id)?.stamp === joined) return;
     const { meeting, retry } = await this.read(dir, id);
     // Пока читали, папку библиотеки сменили — эта встреча уже не наша.
     // Сбой чтения (файл занят) — отпечаток не запоминаем: следующее обновление прочитает встречу снова.
-    if (this.dir === dir) this.entries.set(id, { stamp: retry ? '' : stamp, meeting });
+    if (this.dir === dir) this.entries.set(id, { stamp: retry ? '' : joined, meeting });
   }
 
   private async read(dir: string, id: string): Promise<{ meeting: IndexedMeeting | null; retry: boolean }> {
@@ -167,6 +187,19 @@ export class SearchIndex {
         retry = typeof (err as NodeJS.ErrnoException).code === 'string';
         this.deps.logger.warn(`Поиск: текст встречи ${id} не прочитан`, err);
       }
+      let ai: IndexedAi[] = [];
+      try {
+        // Испорченный ai.json — итогов в поиске нет; файл занят — перечитаем.
+        const { doc } = await readAi(dir, id);
+        const items = [
+          ...(doc.summary ? [{ key: 'summary', label: 'Итоги', text: aiPlainText(doc.summary.text) }] : []),
+          ...doc.questions.map((q) => ({ key: `q:${q.id}`, label: questionLabel(q.question), text: aiPlainText(q.answer) })),
+        ];
+        ai = items.map((item) => ({ ...item, norm: normalize(item.text) }));
+      } catch (err) {
+        retry = true;
+        this.deps.logger.warn(`Поиск: итоги встречи ${id} не прочитаны`, err);
+      }
       return {
         meeting: {
           id,
@@ -175,6 +208,7 @@ export class SearchIndex {
           createdAt: meeting.createdAt,
           speakerNames: meeting.speakerNames,
           segments,
+          ai,
         },
         retry,
       };
@@ -189,14 +223,20 @@ export class SearchIndex {
 function searchMeeting(meeting: IndexedMeeting, words: readonly string[]): SearchMeeting | null {
   const titleMatch = matchesAll(meeting.titleNorm, words);
   const matched = meeting.segments.filter((s) => matchesAll(s.norm, words));
-  if (!titleMatch && matched.length === 0) return null;
+  const matchedAi = meeting.ai.filter((a) => matchesAll(a.norm, words));
+  if (!titleMatch && matched.length === 0 && matchedAi.length === 0) return null;
+  const aiHits = matchedAi.slice(0, SEARCH_HITS_PER_MEETING).map((a) => {
+    const cut = snippet(a.text, findRanges(a.norm, words), SNIPPET_CHARS);
+    return { key: a.key, label: a.label, text: cut.text, ranges: cut.ranges };
+  });
   return {
     meetingId: meeting.id,
     title: meeting.title,
     titleRanges: titleMatch ? findRanges(meeting.titleNorm, words) : [],
     createdAt: meeting.createdAt,
-    total: matched.length,
-    hits: matched.slice(0, SEARCH_HITS_PER_MEETING).map((s) => {
+    total: matched.length + matchedAi.length,
+    aiHits,
+    hits: matched.slice(0, SEARCH_HITS_PER_MEETING - aiHits.length).map((s) => {
       const cut = snippet(s.text, findRanges(s.norm, words), SNIPPET_CHARS);
       return {
         segmentId: s.id,

@@ -1,6 +1,6 @@
 // «Сохранить в Word (.docx)»: та же раскладка, что у .txt и буфера обмена (shared/export-doc.ts), с оформлением.
 import { Document, Packer, Paragraph, TextRun, type IRunOptions } from 'docx';
-import type { AiInline, AiMdBlock } from '../../shared/ai-markdown';
+import { listMark, type AiInline, type AiMdBlock } from '../../shared/ai-markdown';
 import { SUMMARY_HEADING, TEXT_HEADING, type ExportDoc, type ExportSummary } from '../../shared/export-doc';
 
 /** Шрифт, который есть в Word и на Windows, и на Mac. */
@@ -35,7 +35,7 @@ function blockParagraphs(block: AiMdBlock): Paragraph[] {
     (item, i) =>
       new Paragraph({
         indent: { left: 360, hanging: 360 },
-        children: [new TextRun({ text: `${block.ordered ? `${i + 1}.` : '•'} ` }), ...inlineRuns(item)],
+        children: [new TextRun({ text: `${listMark(block, i)} ` }), ...inlineRuns(item)],
       }),
   );
 }

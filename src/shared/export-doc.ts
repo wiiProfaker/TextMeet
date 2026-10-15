@@ -1,7 +1,7 @@
 // Выгрузка встречи: одна раскладка текста для «Скопировать всё», .txt и .docx (решения Плана 5, §2.3).
 // Чистые функции без зависимостей: тексту в буфере обмена, в .txt и в Word не разойтись.
 import { aiCaption, type AiSummary } from './ai';
-import { inlineText, parseAiMarkdown, type AiInline, type AiMdBlock } from './ai-markdown';
+import { inlineText, listMark, parseAiMarkdown, type AiInline, type AiMdBlock } from './ai-markdown';
 import { formatDurationShort, formatLongDate, formatTimestamp } from './format';
 import type { Meeting } from './meeting';
 import { speakerLabel, type Transcript } from './transcript';
@@ -87,7 +87,7 @@ function summaryLines(summary: ExportSummary): string[] {
   for (const block of summary.blocks) {
     lines.push('');
     if (block.kind === 'list') {
-      block.items.forEach((item, i) => lines.push(`${block.ordered ? `${i + 1}.` : '•'} ${inlineText(item)}`));
+      block.items.forEach((item, i) => lines.push(`${listMark(block, i)} ${inlineText(item)}`));
     } else {
       lines.push(inlineText(block.inline));
     }
@@ -123,7 +123,8 @@ function blockHtml(block: AiMdBlock): string {
   if (block.kind === 'heading') return `<p><b>${inlineHtml(block.inline)}</b></p>`;
   if (block.kind === 'paragraph') return `<p>${inlineHtml(block.inline)}</p>`;
   const tag = block.ordered ? 'ol' : 'ul';
-  return `<${tag}>${block.items.map((item) => `<li>${inlineHtml(item)}</li>`).join('')}</${tag}>`;
+  const start = block.ordered && block.start !== 1 ? ` start="${block.start}"` : '';
+  return `<${tag}${start}>${block.items.map((item) => `<li>${inlineHtml(item)}</li>`).join('')}</${tag}>`;
 }
 
 /** Оформленный текст для буфера обмена (вставка в Word, Google Docs): имена жирным, время серым. */

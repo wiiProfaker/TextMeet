@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { aiCaption, EMPTY_AI_DOC, type AiFailure, type AiFinished, type AiJob, type AiMeetingView } from '../../shared/ai';
-import { aiBlockVisible, aiBusyText, aiFinishedText, aiStageText } from './ai-block';
+import { aiAnnouncement, aiBlockVisible, aiBusyText, aiFinishedText, aiStageText, summaryAction } from './ai-block';
 
 const job = (over: Partial<AiJob> = {}): AiJob => ({
   meetingId: 'm',
@@ -68,5 +68,44 @@ describe('aiFinishedText', () => {
     expect(aiFinishedText(job(), null, done({ meetingId: 'другая' }))).toBeNull();
     expect(aiFinishedText(job(), job(), done())).toBeNull();
     expect(aiFinishedText(null, null, done())).toBeNull();
+  });
+});
+
+describe('aiAnnouncement', () => {
+  const answered: AiFinished = { meetingId: 'm', kind: 'question', status: 'done' };
+
+  it('clears the announcement while a request runs, so the next answer is announced again', () => {
+    const asking = job({ kind: 'question' });
+    // Первый ответ объявлен; второй вопрос пишется — объявление пустое; второй ответ — снова «Ответ готов».
+    expect(aiAnnouncement('Ответ готов', null, asking, answered)).toBe('');
+    expect(aiAnnouncement('', asking, null, answered)).toBe('Ответ готов');
+  });
+
+  it('keeps the last announcement when nothing new was finished', () => {
+    expect(aiAnnouncement('Итоги готовы', null, null, null)).toBe('Итоги готовы');
+    expect(aiAnnouncement('', job(), null, { ...answered, kind: 'summary', status: 'stopped' })).toBe('');
+  });
+});
+
+describe('summaryAction', () => {
+  const view = (summary: boolean): AiMeetingView => ({
+    doc: {
+      ...EMPTY_AI_DOC,
+      summary: summary
+        ? { text: 'x', model: 'qwen3.5-9b', modelTitle: 'Qwen3.5 9B', createdAt: '2026-09-27T13:55:00.000Z', status: 'done', sourceHash: 'h' }
+        : null,
+    },
+    broken: false,
+    stale: false,
+  });
+
+  it('opens saved summaries, and starts new ones only when there are none', () => {
+    expect(summaryAction(view(true), null)).toBe('open');
+    expect(summaryAction(view(false), null)).toBe('summarize');
+    expect(summaryAction(view(false), job({ meetingId: 'другая' }))).toBe('open');
+  });
+
+  it('reads ai.json first while it is still loading, so saved summaries are not replaced without asking', () => {
+    expect(summaryAction(null, null)).toBe('load');
   });
 });

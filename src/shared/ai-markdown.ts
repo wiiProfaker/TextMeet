@@ -10,13 +10,14 @@ export interface AiInline {
 
 export type AiMdBlock =
   | { kind: 'heading'; inline: AiInline[] }
-  | { kind: 'list'; ordered: boolean; items: AiInline[][] }
+  /** start — номер первого пункта: нумерованный список, разорванный вложенным пунктом, продолжает свои номера. */
+  | { kind: 'list'; ordered: boolean; start: number; items: AiInline[][] }
   /** Строки абзаца — через перевод строки внутри текста. */
   | { kind: 'paragraph'; inline: AiInline[] };
 
 const HEADING = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/;
 const BULLET = /^\s*[-*+•]\s+(.*)$/;
-const ORDERED = /^\s*\d{1,3}[.)]\s+(.*)$/;
+const ORDERED = /^\s*(\d{1,3})[.)]\s+(.*)$/;
 /** Черта «---», «***» — разделитель разделов, в тексте не нужна. */
 const RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
 /**
@@ -68,10 +69,10 @@ export function parseAiMarkdown(text: string): AiMdBlock[] {
     } else if (bullet || ordered) {
       flushParagraph();
       const isOrdered = ordered !== null;
-      const item = parseInline((bullet ?? ordered)?.[1] ?? '');
+      const item = parseInline((bullet ? bullet[1] : ordered?.[2]) ?? '');
       const last = blocks.at(-1);
       if (last?.kind === 'list' && last.ordered === isOrdered) last.items.push(item);
-      else blocks.push({ kind: 'list', ordered: isOrdered, items: [item] });
+      else blocks.push({ kind: 'list', ordered: isOrdered, start: ordered ? Number(ordered[1]) : 1, items: [item] });
     } else {
       paragraph.push(line.trim());
     }
@@ -82,12 +83,16 @@ export function parseAiMarkdown(text: string): AiMdBlock[] {
 
 export const inlineText = (inline: readonly AiInline[]): string => inline.map((piece) => piece.text).join('');
 
+/** Маркер пункта простым текстом: «•» или номер (считая от номера первого пункта списка). */
+export const listMark = (list: { ordered: boolean; start: number }, index: number): string =>
+  list.ordered ? `${list.start + index}.` : '•';
+
 /** Простым текстом (выгрузка в .txt, буфер обмена): маркеры «•» и номера вместо разметки, блоки — через пустую строку. */
 export function aiPlainText(text: string): string {
   return parseAiMarkdown(text)
     .map((block) => {
       if (block.kind === 'list') {
-        return block.items.map((item, i) => `${block.ordered ? `${i + 1}.` : '•'} ${inlineText(item)}`).join('\n');
+        return block.items.map((item, i) => `${listMark(block, i)} ${inlineText(item)}`).join('\n');
       }
       return inlineText(block.inline);
     })

@@ -37,11 +37,12 @@ describe('parseAiMarkdown', () => {
       {
         kind: 'list',
         ordered: false,
+        start: 1,
         items: [[plain('Бюджет — '), { text: 'половина', bold: true, italic: false }, plain('.')], [plain('Дизайн до пятницы.')]],
       },
       { kind: 'paragraph', inline: [plain('В целом спокойно.\nБез споров.')] },
       { kind: 'heading', inline: [plain('Задачи')] },
-      { kind: 'list', ordered: true, items: [[plain('Написать Олегу.')], [plain('Сравнить сроки.')]] },
+      { kind: 'list', ordered: true, start: 1, items: [[plain('Написать Олегу.')], [plain('Сравнить сроки.')]] },
     ]);
   });
 
@@ -49,6 +50,18 @@ describe('parseAiMarkdown', () => {
     const blocks = parseAiMarkdown('- раз\r\n---\r\n1. два');
     expect(blocks.map((b) => b.kind)).toEqual(['list', 'list']);
     expect(blocks[1]).toMatchObject({ ordered: true });
+  });
+
+  it('keeps the numbers of a numbered list broken by nested points or continuation lines', () => {
+    const blocks = parseAiMarkdown('1. **Бюджет**\n   - половина\n2. Дизайн\n   до пятницы\n3. Сроки');
+    expect(blocks.map((b) => (b.kind === 'list' ? `${b.ordered ? 'ol' : 'ul'}${b.start}` : b.kind))).toEqual([
+      'ol1',
+      'ul1',
+      'ol2',
+      'paragraph',
+      'ol3',
+    ]);
+    expect(aiPlainText('1. Бюджет\n   - половина\n2. Дизайн')).toBe('1. Бюджет\n\n• половина\n\n2. Дизайн');
   });
 
   it('shows text that is still being written', () => {

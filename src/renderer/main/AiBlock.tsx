@@ -12,13 +12,14 @@ import {
 import { aiPlainText } from '../../shared/ai-markdown';
 import {
   AI_FOOT,
+  aiAnnouncement,
   aiBlockVisible,
   aiBusyText,
-  aiFinishedText,
   aiStageText,
   ASK_PLACEHOLDER,
   ASK_PLACEHOLDER_WAIT,
   NO_MODEL_TEXT,
+  summaryAction,
 } from './ai-block';
 import { AiMarkdown } from './AiMarkdown';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -115,8 +116,19 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     noModel,
     visible: aiBlockVisible({ view, job, failure, opened: opened || noModel, collapsed }),
     openSummary: () => {
-      if (view?.doc.summary || other) expand();
-      else summarize();
+      const action = summaryAction(view, other);
+      if (action === 'open') expand();
+      else if (action === 'summarize') summarize();
+      else {
+        window.textmeet
+          .getAi(meetingId)
+          .then((loaded) => {
+            setView(loaded);
+            if (loaded.doc.summary) expand();
+            else summarize();
+          })
+          .catch((err: unknown) => onError(errorText(err)));
+      }
     },
     summarize,
     ask: (question) => start(() => window.textmeet.askAi({ meetingId, question })),
@@ -252,9 +264,9 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
 
   // Ответ дописан и сохранён — «Итоги готовы» / «Ответ готов» экранному диктору (поток текста ему не читается).
   useEffect(() => {
-    const text = aiFinishedText(previousJob.current, job, finished);
+    const previous = previousJob.current;
     previousJob.current = job;
-    if (text) setAnnouncement(text);
+    setAnnouncement((current) => aiAnnouncement(current, previous, job, finished));
   }, [job, finished]);
 
   // Перешли из найденного — блок прокручивается в поле зрения.

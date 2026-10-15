@@ -64,12 +64,13 @@ describe('toDocx with a summary', () => {
         caption: 'Qwen3.5 9B · 27.09.2026, 16:55',
         blocks: [
           { kind: 'heading', inline: [{ text: 'Главное', bold: false, italic: false }] },
-          { kind: 'list', ordered: false, items: [[{ text: 'Бюджет', bold: true, italic: false }]] },
+          { kind: 'list', ordered: false, start: 1, items: [[{ text: 'Бюджет', bold: true, italic: false }]] },
+          { kind: 'list', ordered: true, start: 2, items: [[{ text: 'Дизайн', bold: false, italic: false }]] },
         ],
       },
     };
     const { document } = await unpack(await toDocx(withSummary));
-    for (const text of ['Итоги встречи', 'Qwen3.5 9B · 27.09.2026, 16:55', 'Главное', '• ', 'Бюджет', 'Текст встречи']) {
+    for (const text of ['Итоги встречи', 'Qwen3.5 9B · 27.09.2026, 16:55', 'Главное', '• ', 'Бюджет', '2. ', 'Дизайн', 'Текст встречи']) {
       expect(document).toContain(text);
     }
     expect(document.indexOf('Итоги встречи')).toBeLessThan(document.indexOf('Текст встречи'));

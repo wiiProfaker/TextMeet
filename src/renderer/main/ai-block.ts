@@ -50,3 +50,26 @@ export function aiFinishedText(previous: AiJob | null, current: AiJob | null, fi
   if (finished.meetingId !== previous.meetingId || finished.kind !== previous.kind || finished.status !== 'done') return null;
   return previous.kind === 'summary' ? 'Итоги готовы' : 'Ответ готов';
 }
+
+/**
+ * Что сказать экранному диктору после смены состояния: пока запрос идёт — ничего (так следующий «Ответ готов» снова
+ * будет новым текстом и прозвучит), ответ дописан и сохранён — «Итоги готовы» / «Ответ готов», иначе — прежнее.
+ */
+export function aiAnnouncement(
+  current: string,
+  previous: AiJob | null,
+  job: AiJob | null,
+  finished: AiFinished | null,
+): string {
+  if (job) return '';
+  return aiFinishedText(previous, job, finished) ?? current;
+}
+
+/**
+ * «Итоги встречи» в шапке: есть итоги (или модель занята другой встречей) — показать блок, нет — сделать итоги;
+ * ai.json ещё читается — сначала узнать, есть ли итоги (иначе сохранённые заменились бы без «Заменить итоги?»).
+ */
+export function summaryAction(view: AiMeetingView | null, other: AiJob | null): 'open' | 'summarize' | 'load' {
+  if (view?.doc.summary || other) return 'open';
+  return view ? 'summarize' : 'load';
+}

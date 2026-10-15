@@ -44,7 +44,7 @@ export function AiMarkdown({ text, caret = false }: { text: string; caret?: bool
         }
         const List = block.ordered ? 'ol' : 'ul';
         return (
-          <List key={i}>
+          <List key={i} start={block.ordered && block.start !== 1 ? block.start : undefined}>
             {block.items.map((item, j) => (
               <li key={j}>
                 <Inline inline={item} />

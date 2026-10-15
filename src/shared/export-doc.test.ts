@@ -206,6 +206,15 @@ describe('the summary in the export', () => {
     expect(html.indexOf('Итоги встречи')).toBeLessThan(html.indexOf('Текст встречи'));
   });
 
+  it('keeps the numbers of a numbered list broken by a nested point', () => {
+    const split = buildExportDoc(meeting, { segments: [seg(708, 's1', 'Смотри.')] }, {
+      ...summary,
+      text: '1. Бюджет\n   - половина\n2. Дизайн',
+    });
+    expect(toPlainText(split)).toContain('1. Бюджет\n\n• половина\n\n2. Дизайн');
+    expect(toHtml(split)).toContain('<ol start="2"><li>Дизайн</li></ol>');
+  });
+
   it('is left out without a summary', () => {
     const plain = buildExportDoc(meeting, { segments: [seg(708, 's1', 'Смотри.')] });
     expect(plain.summary).toBeUndefined();

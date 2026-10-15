@@ -215,6 +215,11 @@ export function App() {
         importing={imports.get(entryId(selectedEntry)) ?? null}
         onError={setError}
         onDeleted={() => selectNeighbor(entryId(selectedEntry))}
+        onOpenAiSettings={() => {
+          setSettingsTab('ai');
+          setSelection({ kind: 'settings' });
+        }}
+        onOpenMeeting={(id) => setSelection({ kind: 'meeting', id })}
       />
     );
   } else {

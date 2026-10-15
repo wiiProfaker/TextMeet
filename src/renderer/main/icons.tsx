@@ -100,6 +100,13 @@ export const FileIcon = () => (
   </Icon>
 );
 
+/** Итоги встречи: искра. */
+export const SparkIcon = () => (
+  <Icon>
+    <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z" />
+  </Icon>
+);
+
 export const CheckIcon = () => (
   <Icon>
     <path d="M5 12l5 5 9-10" />

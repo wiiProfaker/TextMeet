@@ -7,6 +7,7 @@ import {
   formatLongDate,
   formatMegabytes,
   formatRemaining,
+  formatStamp,
   formatTimestamp,
 } from './format';
 
@@ -93,5 +94,14 @@ describe('formatRemaining', () => {
     [3900, 'осталось около 1 ч 05 мин'],
   ])('%s с → %s', (seconds, text) => {
     expect(formatRemaining(seconds)).toBe(text);
+  });
+});
+
+describe('formatStamp', () => {
+  it('shows the day, the month and the time, with the year for the export', () => {
+    const iso = new Date(2026, 8, 27, 16, 5).toISOString();
+    expect(formatStamp(iso)).toBe('27.09, 16:05');
+    expect(formatStamp(iso, true)).toBe('27.09.2026, 16:05');
+    expect(formatStamp('не дата')).toBe('—');
   });
 });

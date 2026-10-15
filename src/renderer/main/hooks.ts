@@ -1,4 +1,5 @@
 import { createContext, useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import type { AiMeetingView, AiState } from '../../shared/ai';
 import type { ImportProgress } from '../../shared/import';
 import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
@@ -574,4 +575,74 @@ export function useModelCatalog<S>(load: () => Promise<S>, watch: (reload: () =>
   }, []);
 
   return { state, error: catalogErrorText(errors), run };
+}
+
+const NO_AI: AiState = { job: null, failures: [] };
+
+/** Работа модели для итогов: что она пишет сейчас (один запрос на всю программу) и последние неудачи по встречам. */
+export function useAiState(): AiState {
+  const [state, setState] = useState<AiState | null>(null);
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = window.textmeet.onAiState(setState);
+    window.textmeet
+      .getAiState()
+      .then((initial) => {
+        // Событие могло прийти раньше ответа — оно новее.
+        if (active) setState((current) => current ?? initial);
+      })
+      .catch((err: unknown) => console.error('TextMeet: состояние итогов не получено', errorText(err)));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+  return state ?? NO_AI;
+}
+
+/**
+ * Итоги и вопросы встречи (ai.json): при открытии встречи, после записи файла (ai:changed), при возврате в окно и когда
+ * меняется текст встречи (textKey) — от него зависит пометка «Текст встречи меняли после итогов». Ошибка чтения — в
+ * onError; показанное остаётся.
+ */
+export function useAiMeeting(
+  meetingId: string,
+  textKey: unknown,
+  onError: (message: string) => void,
+): [AiMeetingView | null, (view: AiMeetingView) => void] {
+  const [state, setState] = useState<{ meetingId: string; view: AiMeetingView } | null>(null);
+  const [again, setAgain] = useState(0);
+  const latest = useRef(0);
+  const report = useRef(onError);
+  report.current = onError;
+  useEffect(() => {
+    const bump = () => setAgain((n) => n + 1);
+    window.addEventListener('focus', bump);
+    const unsubscribe = window.textmeet.onAiChanged((id) => {
+      if (id === meetingId) bump();
+    });
+    return () => {
+      window.removeEventListener('focus', bump);
+      unsubscribe();
+    };
+  }, [meetingId]);
+  useEffect(() => {
+    const request = ++latest.current;
+    window.textmeet
+      .getAi(meetingId)
+      .then((view) => {
+        if (request === latest.current) setState({ meetingId, view });
+      })
+      .catch((err: unknown) => {
+        if (request === latest.current) report.current(errorText(err));
+      });
+  }, [meetingId, textKey, again]);
+  const set = useCallback(
+    (view: AiMeetingView) => {
+      latest.current += 1;
+      setState({ meetingId, view });
+    },
+    [meetingId],
+  );
+  return [state?.meetingId === meetingId ? state.view : null, set];
 }

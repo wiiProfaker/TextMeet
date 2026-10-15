@@ -4,6 +4,7 @@
 // здесь только константы и типы, из других файлов — только `import type`.
 import type { AsrModelId } from './asr-models';
 import type { ImportFailedEvent, ImportProgress, ImportResult } from './import';
+import type { AiModelsState, LlmModelId } from './llm-models';
 import type { Meeting, MeetingListEntry } from './meeting';
 import type {
   Peaks,
@@ -60,6 +61,11 @@ export const IPC = {
   downloadModel: 'models:download',
   cancelModelDownload: 'models:cancel-download',
   selectModel: 'models:select',
+  getAiModels: 'ai:get-models',
+  downloadAiModel: 'ai:download-model',
+  cancelAiModelDownload: 'ai:cancel-download',
+  selectAiModel: 'ai:select-model',
+  deleteAiModel: 'ai:delete-model',
   copyMeeting: 'export:copy',
   copyForAi: 'export:copy-for-ai',
   saveMeeting: 'export:save',
@@ -71,7 +77,7 @@ export const IPC = {
   recordingPeaks: 'recording:peaks',
   libraryChanged: 'library:changed',
   transcriptionProgress: 'transcription:progress',
-  /** Скачивание из каталога продвинулось, началось или закончилось — перечитать модели. */
+  /** Скачивание из каталога (любого) продвинулось, началось или закончилось — перечитать модели. */
   modelsChanged: 'models:changed',
   /** Щелчок по уведомлению о расшифровке: показать эту встречу. */
   showMeeting: 'app:show-meeting',
@@ -194,6 +200,11 @@ export interface MainInvokeContract {
   [IPC.downloadModel]: { arg: AsrModelId; result: ModelsState };
   [IPC.cancelModelDownload]: { arg: AsrModelId; result: ModelsState };
   [IPC.selectModel]: { arg: AsrModelId; result: ModelsState };
+  [IPC.getAiModels]: { arg: void; result: AiModelsState };
+  [IPC.downloadAiModel]: { arg: LlmModelId; result: AiModelsState };
+  [IPC.cancelAiModelDownload]: { arg: LlmModelId; result: AiModelsState };
+  [IPC.selectAiModel]: { arg: LlmModelId; result: AiModelsState };
+  [IPC.deleteAiModel]: { arg: LlmModelId; result: AiModelsState };
   [IPC.copyMeeting]: { arg: string; result: void };
   [IPC.copyForAi]: { arg: string; result: void };
   [IPC.saveMeeting]: { arg: SaveMeetingRequest; result: SaveMeetingResult };
@@ -289,6 +300,14 @@ export interface TextMeetApi {
   cancelModelDownload(id: AsrModelId): Promise<ModelsState>;
   /** «Выбрать»: модель для новых встреч. */
   selectModel(id: AsrModelId): Promise<ModelsState>;
+  /** Каталог «Модель для итогов» (вкладка «ИИ»). */
+  getAiModels(): Promise<AiModelsState>;
+  downloadAiModel(id: LlmModelId): Promise<AiModelsState>;
+  /** «Отменить» скачивание: недокачанное стирается. */
+  cancelAiModelDownload(id: LlmModelId): Promise<AiModelsState>;
+  /** «Выбрать»: модель для итогов (только скачанная). */
+  selectAiModel(id: LlmModelId): Promise<AiModelsState>;
+  deleteAiModel(id: LlmModelId): Promise<AiModelsState>;
   /** «Скопировать всё»: текст встречи — в буфер обмена (обычный и оформленный). */
   copyMeeting(meetingId: string): Promise<void>;
   /** «Скопировать для ИИ»: запрос из настроек и текст встречи — в буфер обмена простым текстом. */

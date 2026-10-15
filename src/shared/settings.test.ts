@@ -13,6 +13,7 @@ describe('SettingsSchema', () => {
       asrModel: 'gigaam-v3-e2e-rnnt',
       exportDir: null,
       aiPrompt: null,
+      aiModel: null,
     });
   });
 
@@ -62,5 +63,11 @@ describe('SettingsSchema', () => {
     expect(SettingsSchema.safeParse({ microphoneId: '' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ recordHotkey: '' }).success).toBe(false);
     expect(SettingsSchema.safeParse({ recordSounds: 1 }).success).toBe(false);
+  });
+
+  it('keeps the model for summaries and forgets an unknown or broken one', () => {
+    expect(SettingsSchema.parse({ aiModel: 'qwen3.5-4b' }).aiModel).toBe('qwen3.5-4b');
+    expect(SettingsSchema.parse({ aiModel: 'llama-70b', recordSounds: false })).toMatchObject({ aiModel: null, recordSounds: false });
+    expect(SettingsSchema.parse({ aiModel: 7 }).aiModel).toBeNull();
   });
 });

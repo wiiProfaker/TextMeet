@@ -8,6 +8,7 @@ import type { Transcript } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { cleanDeviceLabel } from './format';
+import { catalogErrorsAfter, catalogErrorText, NO_CATALOG_ERRORS } from './model-catalog';
 import { nextSpeed } from './playback';
 
 /** Сколько кнопка показывает «Скопировано». */
@@ -518,3 +519,59 @@ export interface SearchView {
 }
 
 export const SearchViewContext = createContext<SearchView>({ words: [], focus: null, refresh: () => undefined });
+
+export interface ModelCatalog<S> {
+  state: S | null;
+  /** Ошибка чтения или ответа на нажатие (ответ на нажатие важнее). */
+  error: string | null;
+  /** Действие с ответом-состоянием («Скачать», «Удалить»…); его ошибку показываем всегда — это ответ на нажатие. */
+  run(action: () => Promise<S>): void;
+}
+
+/**
+ * Каталог моделей в настройках (расшифровки или для итогов): состояние из main, перечитывается по событиям watch
+ * (скачивание продвинулось, расшифровка началась…). Запросы могут наложиться и ответить не по порядку — показываем
+ * только ответ на последний. load и watch берутся при первом показе.
+ */
+export function useModelCatalog<S>(load: () => Promise<S>, watch: (reload: () => void) => () => void): ModelCatalog<S> {
+  const [state, setState] = useState<S | null>(null);
+  const [errors, setErrors] = useState(NO_CATALOG_ERRORS);
+  const latestRequest = useRef(0);
+  const source = useRef({ load, watch });
+
+  useEffect(() => {
+    const reload = () => {
+      const request = ++latestRequest.current;
+      source.current
+        .load()
+        .then((next) => {
+          if (request !== latestRequest.current) return;
+          setState(next);
+          setErrors((prev) => catalogErrorsAfter(prev, 'load', null));
+        })
+        .catch((err: unknown) => {
+          if (request === latestRequest.current) setErrors((prev) => catalogErrorsAfter(prev, 'load', errorText(err)));
+        });
+    };
+    reload();
+    const unwatch = source.current.watch(reload);
+    return () => {
+      // Ответы после закрытия настроек не нужны.
+      latestRequest.current += 1;
+      unwatch();
+    };
+  }, []);
+
+  const run = useCallback((action: () => Promise<S>) => {
+    const request = ++latestRequest.current;
+    action().then(
+      (next) => {
+        setErrors((prev) => catalogErrorsAfter(prev, 'action', null));
+        if (request === latestRequest.current) setState(next);
+      },
+      (err: unknown) => setErrors((prev) => catalogErrorsAfter(prev, 'action', errorText(err))),
+    );
+  }, []);
+
+  return { state, error: catalogErrorText(errors), run };
+}

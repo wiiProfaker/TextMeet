@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   formatBytes,
   formatDownloaded,
+  formatDownloadedGb,
   formatDurationShort,
   formatLongDate,
   formatMegabytes,
+  formatRemaining,
   formatTimestamp,
 } from './format';
 
@@ -72,5 +74,24 @@ describe('formatBytes', () => {
   it('shows a dash for garbage', () => {
     expect(formatBytes(-5)).toBe('—');
     expect(formatBytes(Number.POSITIVE_INFINITY)).toBe('—');
+  });
+});
+
+describe('formatDownloadedGb', () => {
+  it('shows the bytes of a big model in gigabytes with one decimal', () => {
+    expect(formatDownloadedGb(2.74 * 1024 ** 3, 6_474_702_976)).toBe('2,7 из 6,0 ГБ');
+    expect(formatDownloadedGb(0, 5_680_522_464)).toBe('0,0 из 5,3 ГБ');
+  });
+});
+
+describe('formatRemaining', () => {
+  it.each([
+    [0, 'осталось меньше минуты'],
+    [59, 'осталось меньше минуты'],
+    [60, 'осталось около 1 мин'],
+    [200, 'осталось около 4 мин'],
+    [3900, 'осталось около 1 ч 05 мин'],
+  ])('%s с → %s', (seconds, text) => {
+    expect(formatRemaining(seconds)).toBe(text);
   });
 });

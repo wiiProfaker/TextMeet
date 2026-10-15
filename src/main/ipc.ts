@@ -21,10 +21,12 @@ import {
 } from '../shared/ipc';
 import { AiPromptSchema, storedAiPrompt } from '../shared/ai-prompt';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
+import { LLM_MODEL_IDS, type AiModelsState } from '../shared/llm-models';
 import { IMPORT_EXTENSIONS } from '../shared/import';
 import { MeetingIdSchema, RecordedTrackKindSchema } from '../shared/meeting';
 import { SpeakerIdSchema } from '../shared/transcript';
-import type { ModelsState, TranscriptionProgress } from '../shared/transcription';
+import type { CatalogModelId, ModelsState, TranscriptionProgress } from '../shared/transcription';
+import { currentAiModel } from './ai/ai-models';
 import { copyForAi, copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
@@ -36,8 +38,8 @@ import type { SearchIndex } from './library/search-index';
 import { readTranscript } from './library/transcript-store';
 import type { Logger } from './logger';
 import type { ModelStore } from './models/model-manager';
-import { buildModelsState, type CatalogDownloadsSnapshot } from './models/models-state';
-import { MODEL_GROUP_IDS } from './models/registry';
+import { buildAiModelsState, buildModelsState, type CatalogDownloadsSnapshot } from './models/models-state';
+import { TRANSCRIPTION_GROUP_IDS } from './models/registry';
 import type { RecordingController } from './recording/controller';
 import type { SettingsStore } from './settings/settings-store';
 import { systemSettingsUrl, transcriptionTexts } from './texts';
@@ -73,8 +75,8 @@ export interface IpcDeps {
   };
   models: Pick<ModelStore, 'state' | 'remove'>;
   downloads: {
-    start(id: AsrModelId): void;
-    cancel(id: AsrModelId): Promise<void>;
+    start(id: CatalogModelId): void;
+    cancel(id: CatalogModelId): Promise<void>;
     snapshot(): CatalogDownloadsSnapshot;
     isBusy(): boolean;
   };
@@ -121,6 +123,9 @@ const ImportPathsSchema = z
   .max(1000);
 
 const AsrModelIdSchema = z.enum(ASR_MODEL_IDS);
+const LlmModelIdSchema = z.enum(LLM_MODEL_IDS);
+/** «Выбрать» есть только у скачанной модели: не скачанную окно выбрать не просит. */
+const AI_MODEL_NOT_DOWNLOADED = 'Эта модель не скачана — сначала скачайте её.';
 const TranscribeRequestSchema = z.object({
   meetingId: MeetingIdSchema,
   participantsHint: z.number().int().min(1).max(50).nullable(),
@@ -446,7 +451,7 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.getModels, () => modelsState());
 
   handle(IPC.deleteModels, async (arg) => {
-    const group = z.enum(MODEL_GROUP_IDS).parse(arg);
+    const group = z.enum(TRANSCRIPTION_GROUP_IDS).parse(arg);
     if (deps.transcription.isBusy()) throw new Error(MODELS_BUSY);
     if (deps.downloads.isBusy()) throw new Error(MODELS_DOWNLOADING);
     deps.transcription.stopIdleWorker();
@@ -474,6 +479,43 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.selectModel, async (arg) => {
     await deps.settings.update({ asrModel: AsrModelIdSchema.parse(arg) });
     return modelsState();
+  });
+
+  const aiModelsState = async (): Promise<AiModelsState> => {
+    const { groups, selected } = await currentAiModel(deps);
+    return buildAiModelsState(groups, selected, deps.downloads.snapshot());
+  };
+
+  handle(IPC.getAiModels, () => aiModelsState());
+
+  handle(IPC.downloadAiModel, async (arg) => {
+    deps.downloads.start(LlmModelIdSchema.parse(arg));
+    return aiModelsState();
+  });
+
+  handle(IPC.cancelAiModelDownload, async (arg) => {
+    await deps.downloads.cancel(LlmModelIdSchema.parse(arg));
+    return aiModelsState();
+  });
+
+  handle(IPC.selectAiModel, async (arg) => {
+    const id = LlmModelIdSchema.parse(arg);
+    const installed = (await deps.models.state()).some((g) => g.id === id && g.installed);
+    if (!installed) throw new Error(AI_MODEL_NOT_DOWNLOADED);
+    await deps.settings.update({ aiModel: id });
+    return aiModelsState();
+  });
+
+  handle(IPC.deleteAiModel, async (arg) => {
+    const id = LlmModelIdSchema.parse(arg);
+    if (deps.downloads.isBusy()) throw new Error(MODELS_DOWNLOADING);
+    try {
+      await deps.models.remove(id);
+    } catch (err) {
+      throw new Error(transcriptionTexts.deleteModels(err), { cause: err });
+    }
+    // Удалили выбранную — выбирается другая скачанная (или никакая).
+    return aiModelsState();
   });
 
   onRecorder(IPC.recorderReady, () => deps.onRecorderReady());

@@ -1685,6 +1685,14 @@ button.chip:hover {
   font-weight: 600;
 }
 
+/* «оценка» — полоски примерные: пунктирная рамка вместо заливки. */
+.tag.est {
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .mcard-bars {
   display: grid;
   gap: 4px;

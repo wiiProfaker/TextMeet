@@ -1,71 +1,38 @@
-import { useEffect, useRef, useState } from 'react';
 import type { AsrModelId } from '../../shared/asr-models';
 import { formatMegabytes } from '../../shared/format';
 import type { ModelGroupId, ModelsState } from '../../shared/transcription';
-import { errorText } from './errors';
-import { catalogErrorsAfter, catalogErrorText, catalogSections, NO_CATALOG_ERRORS } from './model-catalog';
+import { useModelCatalog } from './hooks';
+import { catalogSections } from './model-catalog';
 import { ModelCard, type ModelCardActions } from './ModelCard';
+
+/** Перечитывать каталог: скачивание продвинулось или закончилось, расшифровка началась или закончилась. */
+function watchModels(reload: () => void): () => void {
+  const unsubscribeModels = window.textmeet.onModelsChanged(reload);
+  // Расшифровка началась или закончилась (и модели могли скачаться) — перечитать.
+  let busy: boolean | null = null;
+  const unsubscribeProgress = window.textmeet.onTranscriptionProgress((list) => {
+    const nowBusy = list.length > 0;
+    if (nowBusy !== busy) reload();
+    busy = nowBusy;
+  });
+  return () => {
+    unsubscribeModels();
+    unsubscribeProgress();
+  };
+}
 
 /** Вкладка настроек «Расшифровка»: каталог моделей (решения Плана 7, §2) и общие модели голосов. */
 export function TranscriptionSettings() {
-  const [models, setModels] = useState<ModelsState | null>(null);
-  const [errors, setErrors] = useState(NO_CATALOG_ERRORS);
-  // Запросы могут наложиться и ответить не по порядку — показываем только ответ на последний.
-  const latestRequest = useRef(0);
-
-  useEffect(() => {
-    const load = () => {
-      const request = ++latestRequest.current;
-      return window.textmeet
-        .getModels()
-        .then((state) => {
-          if (request !== latestRequest.current) return;
-          setModels(state);
-          setErrors((prev) => catalogErrorsAfter(prev, 'load', null));
-        })
-        .catch((err: unknown) => {
-          if (request === latestRequest.current) setErrors((prev) => catalogErrorsAfter(prev, 'load', errorText(err)));
-        });
-    };
-    void load();
-    // Скачивание из каталога продвинулось или закончилось — перечитать.
-    const unsubscribeModels = window.textmeet.onModelsChanged(() => void load());
-    // Расшифровка началась или закончилась (и модели могли скачаться) — перечитать.
-    let busy: boolean | null = null;
-    const unsubscribeProgress = window.textmeet.onTranscriptionProgress((list) => {
-      const nowBusy = list.length > 0;
-      if (nowBusy !== busy) void load();
-      busy = nowBusy;
-    });
-    return () => {
-      // Ответы после закрытия настроек не нужны.
-      latestRequest.current += 1;
-      unsubscribeModels();
-      unsubscribeProgress();
-    };
-  }, []);
-
-  /** Действие с ответом-состоянием; его ошибку показываем всегда — это ответ на нажатие. */
-  const run = async (action: () => Promise<ModelsState>) => {
-    const request = ++latestRequest.current;
-    try {
-      const state = await action();
-      setErrors((prev) => catalogErrorsAfter(prev, 'action', null));
-      if (request === latestRequest.current) setModels(state);
-    } catch (err) {
-      setErrors((prev) => catalogErrorsAfter(prev, 'action', errorText(err)));
-    }
-  };
+  const { state: models, error, run } = useModelCatalog<ModelsState>(() => window.textmeet.getModels(), watchModels);
 
   const actions: ModelCardActions = {
-    onSelect: (id: AsrModelId) => void run(() => window.textmeet.selectModel(id)),
-    onDownload: (id: AsrModelId) => void run(() => window.textmeet.downloadModel(id)),
-    onCancel: (id: AsrModelId) => void run(() => window.textmeet.cancelModelDownload(id)),
-    onDelete: (id: ModelGroupId) => void run(() => window.textmeet.deleteModels(id)),
+    onSelect: (id: AsrModelId) => run(() => window.textmeet.selectModel(id)),
+    onDownload: (id: AsrModelId) => run(() => window.textmeet.downloadModel(id)),
+    onCancel: (id: AsrModelId) => run(() => window.textmeet.cancelModelDownload(id)),
+    onDelete: (id: ModelGroupId) => run(() => window.textmeet.deleteModels(id)),
   };
 
   const sections = models && catalogSections(models);
-  const error = catalogErrorText(errors);
   const group = (title: string, ids: AsrModelId[]) =>
     models &&
     ids.length > 0 && (

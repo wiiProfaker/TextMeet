@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aiTexts,
   dialogTexts,
   MIC_ACCESS_DENIED,
   micProblem,
@@ -143,6 +144,19 @@ describe('transcription texts', () => {
     expect(transcriptionTexts.download(new DownloadError('space', 'x'))).toBe('Не хватает места на диске для модели расшифровки.');
     expect(transcriptionTexts.download(new DownloadError('disk', 'x'))).toContain('на диск');
     expect(transcriptionTexts.download(new DownloadError('cancelled', 'x'))).toBe('Скачивание модели отменено.');
+  });
+
+  it('names the model for summaries when it could not be downloaded', () => {
+    expect(aiTexts.download(new DownloadError('network', 'x'))).toBe(
+      'Не удалось скачать модель для итогов: нет связи с сервером. Проверьте интернет.',
+    );
+    expect(aiTexts.download(new DownloadError('space', 'x', { neededBytes: 5.5 * 1024 ** 3 }))).toBe(
+      'Не хватает места на диске для модели для итогов: нужно 5632 МБ свободного места.',
+    );
+    expect(aiTexts.download(Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }))).toBe(
+      'Не удалось сохранить модель для итогов на диск.',
+    );
+    expect(aiTexts.download(new Error('что-то'))).toMatch(/^Не удалось подготовить модель для итогов\. /);
   });
 
   it('names the model that could not be loaded', () => {

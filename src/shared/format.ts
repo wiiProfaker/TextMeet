@@ -54,6 +54,17 @@ export const formatMegabytes = (bytes: number): string => `${megabytes(bytes)} �
 /** Ход скачивания: «120 из 464 МБ» — мегабайты, чтобы число росло заметно и у больших моделей. */
 export const formatDownloaded = (done: number, total: number): string => `${megabytes(done)} из ${megabytes(total)} МБ`;
 
+const gigabytes = (bytes: number): string => (Math.max(0, bytes) / GB).toFixed(1).replace('.', ',');
+
+/** Ход скачивания больших моделей (для итогов): «2,7 из 6,0 ГБ». */
+export const formatDownloadedGb = (done: number, total: number): string => `${gigabytes(done)} из ${gigabytes(total)} ГБ`;
+
+/** Сколько осталось скачивать: «осталось меньше минуты», «осталось около 4 мин», «осталось около 1 ч 05 мин». */
+export function formatRemaining(seconds: number): string {
+  if (seconds < 60) return 'осталось меньше минуты';
+  return `осталось около ${formatDurationShort(Math.ceil(seconds / 60) * 60)}`;
+}
+
 /** Размер для людей: «50 МБ», «0,8 ГБ», «214 ГБ» (от 100 МБ — в гигабайтах). */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';

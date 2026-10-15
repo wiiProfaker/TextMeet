@@ -2,7 +2,7 @@
 // начало, ход (не чаще 10 раз в секунду) и конец; написанное сохраняется в ai.json встречи. «Остановить» и выход из
 // программы сохраняют написанное с пометкой «остановлено»; удаление встречи — ничего не сохраняет.
 import { randomUUID } from 'node:crypto';
-import type { AiFailure, AiJob, AiJobKind, AiStartResult, AiState } from '../../shared/ai';
+import type { AiFailure, AiFinished, AiJob, AiJobKind, AiStartResult, AiState } from '../../shared/ai';
 import type { ExportDoc } from '../../shared/export-doc';
 import { llmModel, type LlmModelId, type LlmModelInfo } from '../../shared/llm-models';
 import { loadExportDoc } from '../export/export-meeting';
@@ -75,6 +75,8 @@ interface Running {
   controller: AbortController;
   /** Встречу удалили — написанное не сохраняется. */
   discard: boolean;
+  /** Ответ записан в ai.json — окну сказать после последнего состояния. */
+  saved: boolean;
   done: Promise<void>;
 }
 
@@ -90,7 +92,11 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class AiRunner {
   private running: Running | null = null;
   /** Запрос готовится (модель, текст встречи): второй в это время — «занято». */
-  private starting = false;
+  private starting: { meetingId: string; forgotten: boolean } | null = null;
+  /** Движок остановлен на время удаления модели или навсегда (выход): новые запросы — «занято». */
+  private engineHeld = false;
+  private disposed = false;
+  private finished: AiFinished | null = null;
   private readonly failures = new Map<string, AiFailure>();
   private lastEmit = 0;
   private emitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -98,11 +104,11 @@ export class AiRunner {
   constructor(private readonly deps: AiRunnerDeps) {}
 
   state(): AiState {
-    return { job: this.running?.job ?? null, failures: [...this.failures.values()] };
+    return { job: this.running?.job ?? null, finished: this.finished, failures: [...this.failures.values()] };
   }
 
   isBusy(): boolean {
-    return this.running !== null || this.starting;
+    return this.running !== null || this.starting !== null;
   }
 
   /** «Итоги встречи» и «Обновить»: итоги по запросу для ИИ из настроек. */
@@ -125,8 +131,9 @@ export class AiRunner {
     if (this.failures.delete(meetingId)) this.emit(true);
   }
 
-  /** Встречу удаляют: её запрос останавливается без сохранения, неудача забывается. */
+  /** Встречу удаляют: её запрос останавливается без сохранения (и готовящийся не начнётся), неудача забывается. */
   forget(meetingId: string): void {
+    if (this.starting?.meetingId === meetingId) this.starting.forgotten = true;
     const running = this.running;
     if (running?.job.meetingId === meetingId) {
       running.discard = true;
@@ -135,13 +142,27 @@ export class AiRunner {
     this.dismiss(meetingId);
   }
 
-  /** Завершить движок (перед удалением модели: файл модели открыт, пока он работает). */
-  stopEngine(): Promise<void> {
-    return this.deps.engine.stop();
+  /**
+   * Удалить модель: пока работает движок, её файл открыт (Windows его не удалит) — движок завершается, и до конца
+   * удаления новые запросы получают «занято». Модель отвечает — отказ.
+   */
+  async withEngineStopped<T>(work: () => Promise<T>): Promise<T> {
+    if (this.isBusy() || this.engineHeld) throw new Error(aiTexts.modelBusy);
+    this.engineHeld = true;
+    try {
+      await this.deps.engine.stop();
+      return await work();
+    } finally {
+      this.engineHeld = this.disposed;
+    }
   }
 
   /** Выход из программы: идущий ответ сохраняется как остановленный (ждём до 2 с), движок завершается. */
   async disposeForQuit(): Promise<void> {
+    // Новые запросы (нажатие во время выхода) уже не начнутся.
+    this.disposed = true;
+    this.engineHeld = true;
+    if (this.starting) this.starting.forgotten = true;
     const running = this.running;
     if (running) {
       running.controller.abort();
@@ -151,27 +172,32 @@ export class AiRunner {
   }
 
   private async start(meetingId: string, kind: AiJobKind, question: string | null): Promise<AiStartResult> {
-    if (this.isBusy()) return 'busy';
-    this.starting = true;
+    if (this.isBusy() || this.engineHeld) return 'busy';
+    const starting = { meetingId, forgotten: false };
+    this.starting = starting;
     try {
       const model = await this.deps.model();
       if (!model) return 'no-model';
       // Нет текста или он не читается — ошибка уходит в окно (как у «Скопировать всё»).
       const doc = await loadExportDoc(this.deps.libraryDir(), meetingId);
       const task = question ?? summaryTask(await this.deps.aiPrompt());
+      // Пока готовились, встречу удалили или программа выходит — запрос не начинается.
+      if (starting.forgotten) return 'busy';
       const info = llmModel(model.id);
       const running: Running = {
         job: { meetingId, meetingTitle: doc.title, kind, question, modelTitle: info.title, stage: 'loading', text: '' },
         controller: new AbortController(),
         discard: false,
+        saved: false,
         done: Promise.resolve(),
       };
       this.failures.delete(meetingId);
+      this.finished = null;
       this.running = running;
       running.done = this.run(running, { model, info, doc, task });
       return 'started';
     } finally {
-      this.starting = false;
+      this.starting = null;
       this.emit(true);
     }
   }
@@ -205,6 +231,14 @@ export class AiRunner {
       this.deps.engine.idle();
       this.running = null;
       this.emit(true);
+      // После последнего состояния: окно сразу перечитывает итоги, без мелькания прежних.
+      if (running.saved) {
+        try {
+          this.deps.saved(running.job.meetingId);
+        } catch (err) {
+          this.deps.logger.error('Итоги: сбой обработчика записи', err);
+        }
+      }
     }
   }
 
@@ -242,7 +276,8 @@ export class AiRunner {
       this.failures.set(meetingId, { meetingId, kind, question, failure: 'save', message: aiTexts.notSaved(kind, err), text });
       return;
     }
-    this.deps.saved(meetingId);
+    running.saved = true;
+    this.finished = { meetingId, kind, status };
   }
 
   private update(running: Running, patch: Partial<AiJob>, force: boolean): void {

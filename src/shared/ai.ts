@@ -92,8 +92,17 @@ export interface AiFailure {
   text: string | null;
 }
 
+/** Чем кончился последний запрос: done — дописан и сохранён, stopped — остановлен (написанное сохранено). */
+export interface AiFinished {
+  meetingId: string;
+  kind: AiJobKind;
+  status: AiAnswerStatus;
+}
+
 export interface AiState {
   job: AiJob | null;
+  /** Последний сохранённый ответ — для экранного диктора («Итоги готовы»); null — с начала запроса. */
+  finished: AiFinished | null;
   /** Последняя неудача по встрече — до следующего запроса по ней или до ухода со встречи. */
   failures: AiFailure[];
 }

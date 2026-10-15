@@ -1,7 +1,8 @@
 // Движок итогов — llama.cpp (llama-server, решения Плана 9, §4.1). Скрипт скачивает выпуск ggml-org для этой системы,
 // сверяет SHA-256 и кладёт нужные файлы в vendor/llama/: оттуда их берёт electron-builder (extraResources →
 // resources/llama) и версия для разработки. Уже на месте (vendor/llama/.build совпадает) — ничего не делает.
-// Запуск: npm run fetch:llama (сам — перед dist:win, dist:mac и dev).
+// Запуск: npm run fetch:llama (сам — перед dist:win, dist:mac и test:llm). С --optional (перед dev и start) неудача —
+// только предупреждение: без движка программа работает, нет лишь итогов.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createReadStream, createWriteStream, promises as fsp } from 'node:fs';
@@ -94,6 +95,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(`fetch-llama: ${err instanceof Error ? err.message : String(err)}`);
-  process.exit(1);
+  const optional = process.argv.includes('--optional');
+  console.error(`fetch-llama: ${err instanceof Error ? err.message : String(err)}${optional ? ' — без движка итогов' : ''}`);
+  process.exit(optional ? 0 : 1);
 });

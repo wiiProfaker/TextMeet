@@ -19,8 +19,8 @@
     "e2e": "npm run build && playwright test",
     "dist:win": "npm run build && npm run fetch:llama && electron-builder --win --publish never",
     "dist:mac": "npm run build && npm run fetch:llama && electron-builder --mac dir --arm64 --publish never",
-    "predev": "node node_modules/electron/install.js && node scripts/fetch-llama.mjs",
-    "prestart": "node node_modules/electron/install.js && node scripts/fetch-llama.mjs"
+    "predev": "node node_modules/electron/install.js && node scripts/fetch-llama.mjs --optional",
+    "prestart": "node node_modules/electron/install.js && node scripts/fetch-llama.mjs --optional"
   },
   "dependencies": {
     "docx": "9.8.1",

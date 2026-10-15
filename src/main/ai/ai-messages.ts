@@ -35,11 +35,11 @@ export function summaryTask(stored: string | null): string {
 export const meetingText = (doc: ExportDoc): string => toPlainText(doc);
 
 /**
- * Отпечаток текста встречи, который видела модель. Название не входит: переименование встречи — не правка текста, и
- * пометка «текст меняли» из-за него не появляется.
+ * Отпечаток текста встречи, который видела модель: участники и реплики. Название, дата и длительность не входят:
+ * переименование встречи или другой часовой пояс — не правка текста, и пометка «текст меняли» из-за них не появляется.
  */
 export function sourceHash(doc: ExportDoc): string {
-  const text = toPlainText({ title: '', metaLine: doc.metaLine, participantsLine: doc.participantsLine, paragraphs: doc.paragraphs });
+  const text = toPlainText({ title: '', metaLine: '', participantsLine: doc.participantsLine, paragraphs: doc.paragraphs });
   return createHash('sha256').update(text).digest('hex');
 }
 

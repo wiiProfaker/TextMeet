@@ -28,12 +28,24 @@ async function setup(env: Record<string, string> = {}, options: Partial<LlamaSer
     ...options,
   });
   servers.push(server);
-  const starts = async () =>
+  const launches = async () =>
     (await readFile(log, 'utf8').catch(() => ''))
       .split('\n')
       .filter((line) => line.includes('"start"'))
-      .map((line) => (JSON.parse(line) as { args: string[] }).args);
-  return { server, logger, starts };
+      .map((line) => JSON.parse(line) as { args: string[]; pid: number });
+  const starts = async () => (await launches()).map((l) => l.args);
+  /** Процесс последнего запуска жив. */
+  const lastAlive = async () => {
+    const pid = (await launches()).at(-1)?.pid;
+    if (pid === undefined) return false;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  return { server, logger, starts, lastAlive };
 }
 
 const model = { path: 'M/qwen.gguf', contextTokens: 65_536 };
@@ -46,10 +58,10 @@ describe('llama-server paths and arguments', () => {
     expect(llamaServerFile('darwin')).toBe('llama-server');
   });
 
-  it('starts the engine with the settings of the plan, on 127.0.0.1 with a key', () => {
-    expect(llamaArgs({ path: 'M/q.gguf', contextTokens: 40_960 }, 5000, 'key')).toEqual([
+  it('starts the engine with the settings of the plan, on 127.0.0.1, without the key on the command line', () => {
+    expect(llamaArgs({ path: 'M/q.gguf', contextTokens: 40_960 }, 5000)).toEqual([
       '-m', 'M/q.gguf', '-c', '40960', '-fa', 'on', '-ctk', 'q8_0', '-ctv', 'q8_0', '-np', '1', '--jinja', '--fit', 'on',
-      '--no-webui', '--log-colors', 'off', '--host', '127.0.0.1', '--port', '5000', '--api-key', 'key',
+      '--no-webui', '--log-colors', 'off', '--host', '127.0.0.1', '--port', '5000',
     ]);
   });
 });
@@ -76,10 +88,11 @@ describe('LlamaServer', () => {
   });
 
   it('stops after a quiet while and starts again on the next request', async () => {
-    const { server, starts } = await setup({}, { idleMs: 50 });
+    const { server, starts, lastAlive } = await setup({}, { idleMs: 50 });
     await server.ready(model);
     server.idle();
     await vi.waitFor(() => expect(server.isRunning()).toBe(false));
+    await vi.waitFor(async () => expect(await lastAlive()).toBe(false));
     await server.ready(model);
     expect(await starts()).toHaveLength(2);
   });
@@ -111,9 +124,10 @@ describe('LlamaServer', () => {
   });
 
   it('gives up on a model that does not load in time and leaves no process behind', async () => {
-    const { server, logger } = await setup({ TEXTMEET_FAKE_LLM_LOAD_MS: '60000' }, { startTimeoutMs: 300 });
+    const { server, logger, lastAlive } = await setup({ TEXTMEET_FAKE_LLM_LOAD_MS: '60000' }, { startTimeoutMs: 300 });
     await expect(server.ready(model)).rejects.toMatchObject({ kind: 'engine' });
     expect(server.isRunning()).toBe(false);
+    await vi.waitFor(async () => expect(await lastAlive()).toBe(false));
     // В журнал — вывод сервера, чтобы было понятно, на чём он застрял.
     const logged = logger.error.mock.calls.find((call) => call[0] === 'Движок итогов не загрузил модель');
     expect(String((logged?.[1] as Error | undefined)?.message)).toContain('fake llama-server: loading model');
@@ -126,6 +140,29 @@ describe('LlamaServer', () => {
     });
     servers.push(server);
     await expect(server.ready(model)).rejects.toMatchObject({ kind: 'engine', message: 'движок итогов не запустился' });
+  });
+
+  it('a stop right after the start leaves no process behind', async () => {
+    const { server, lastAlive } = await setup();
+    const starting = server.ready(model).catch(() => undefined);
+    await server.stop();
+    await starting;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(await lastAlive()).toBe(false);
+    expect(server.isRunning()).toBe(false);
+  });
+
+  it('a model that did not load in time after «Остановить» is started anew by the next request', async () => {
+    const { server, starts } = await setup({ TEXTMEET_FAKE_LLM_LOAD_MS: '60000' }, { startTimeoutMs: 300 });
+    const controller = new AbortController();
+    const waiting = server.ready(model, controller.signal);
+    controller.abort();
+    await expect(waiting).rejects.toBeDefined();
+    // Время загрузки вышло — процесс завершается сам; следующий запрос запускает новый, а не получает старую ошибку.
+    await vi.waitFor(() => expect(server.isRunning()).toBe(false));
+    const next = server.ready(model).catch(() => undefined);
+    await vi.waitFor(async () => expect(await starts()).toHaveLength(2));
+    await next;
   });
 
   it('stops waiting when asked, but keeps loading the model for the next request', async () => {

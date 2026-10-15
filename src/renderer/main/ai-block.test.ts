@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aiCaption, EMPTY_AI_DOC, type AiFailure, type AiJob, type AiMeetingView } from '../../shared/ai';
+import { aiCaption, EMPTY_AI_DOC, type AiFailure, type AiFinished, type AiJob, type AiMeetingView } from '../../shared/ai';
 import { aiBlockVisible, aiBusyText, aiFinishedText, aiStageText } from './ai-block';
 
 const job = (over: Partial<AiJob> = {}): AiJob => ({
@@ -55,11 +55,18 @@ describe('aiBlockVisible', () => {
 });
 
 describe('aiFinishedText', () => {
-  it('announces a finished summary or answer, but not a failure or a request still going', () => {
-    expect(aiFinishedText(job(), null, null)).toBe('Итоги готовы');
-    expect(aiFinishedText(job({ kind: 'question' }), null, null)).toBe('Ответ готов');
-    expect(aiFinishedText(job(), null, failure)).toBeNull();
-    expect(aiFinishedText(job(), job(), null)).toBeNull();
-    expect(aiFinishedText(null, null, null)).toBeNull();
+  const done = (over: Partial<AiFinished> = {}): AiFinished => ({ meetingId: 'm', kind: 'summary', status: 'done', ...over });
+
+  it('announces a summary or an answer that was finished and saved', () => {
+    expect(aiFinishedText(job(), null, done())).toBe('Итоги готовы');
+    expect(aiFinishedText(job({ kind: 'question' }), null, done({ kind: 'question' }))).toBe('Ответ готов');
+  });
+
+  it('says nothing for a stopped, unsaved or failed request, or one still going', () => {
+    expect(aiFinishedText(job(), null, done({ status: 'stopped' }))).toBeNull();
+    expect(aiFinishedText(job(), null, null)).toBeNull();
+    expect(aiFinishedText(job(), null, done({ meetingId: 'другая' }))).toBeNull();
+    expect(aiFinishedText(job(), job(), done())).toBeNull();
+    expect(aiFinishedText(null, null, done())).toBeNull();
   });
 });

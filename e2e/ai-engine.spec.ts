@@ -48,7 +48,7 @@ test('a summary is written by the engine and saved in ai.json of the meeting', a
   expect(request?.max_tokens).toBe(2048);
   expect(request?.messages[0]?.content).toContain('не придумывай');
   expect(request?.messages[1]?.content).toContain('Спикер 1 [0:05]\nПереносим запуск на пятницу.');
-  expect(await page.evaluate(() => window.textmeet.getAiState())).toEqual({ job: null, failures: [] });
+  expect(await page.evaluate(() => window.textmeet.getAiState())).toMatchObject({ job: null, failures: [] });
 });
 
 test('without a downloaded model nothing starts', async () => {
@@ -79,7 +79,7 @@ test('deleting the meeting while the model writes stops it and saves nothing', a
   await page.evaluate((id) => window.textmeet.summarize(id), ID);
   await expect.poll(() => page.evaluate(() => window.textmeet.getAiState().then((s) => s.job?.stage ?? null))).toBe('writing');
   await page.evaluate((id) => window.textmeet.deleteMeeting(id), ID);
-  await expect.poll(() => page.evaluate(() => window.textmeet.getAiState())).toEqual({ job: null, failures: [] });
+  await expect.poll(() => page.evaluate(() => window.textmeet.getAiState())).toEqual({ job: null, finished: null, failures: [] });
   const [trashed] = await readdir(trashDir);
   expect(existsSync(join(trashDir, trashed!, 'ai.json'))).toBe(false);
 });

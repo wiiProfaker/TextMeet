@@ -50,9 +50,9 @@ export const llamaServerFile = (platform: string): string => (platform === 'win3
 /**
  * Параметры сервера: окно модели, внимание flash и сжатый кэш (память видеокарты), один запрос за раз, шаблон
  * модели (jinja), --fit — сам решает, сколько слоёв отдать видеокарте; не хватает памяти — часть остаётся на
- * процессоре.
+ * процессоре. Ключ — не здесь, а в переменной LLAMA_API_KEY: строку запуска видят другие программы.
  */
-export function llamaArgs(model: LlamaModel, port: number, apiKey: string): string[] {
+export function llamaArgs(model: LlamaModel, port: number): string[] {
   return [
     '-m',
     model.path,
@@ -76,8 +76,6 @@ export function llamaArgs(model: LlamaModel, port: number, apiKey: string): stri
     '127.0.0.1',
     '--port',
     String(port),
-    '--api-key',
-    apiKey,
   ];
 }
 
@@ -143,13 +141,15 @@ class LlamaProcess {
 
   private async start(): Promise<LlmEndpoint> {
     const port = await freePort();
+    // Пока искали порт, запуск отменили (выход из программы, удаление модели) — процесс не запускаем.
+    if (this.stopping) throw new LlmError('engine', 'запуск движка итогов отменён');
     const apiKey = randomBytes(16).toString('hex');
     const command = this.deps.command();
     this.deps.logger.info('Движок итогов запускается');
-    const child = spawn(command.file, [...command.args, ...llamaArgs(this.model, port, apiKey)], {
+    const child = spawn(command.file, [...command.args, ...llamaArgs(this.model, port)], {
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
-      ...(command.env && { env: command.env }),
+      env: { ...(command.env ?? process.env), LLAMA_API_KEY: apiKey },
     });
     this.child = child;
     // Вывод читается всегда: непрочитанный заполнил бы канал, и сервер встал бы.
@@ -181,7 +181,11 @@ class LlamaProcess {
     try {
       await Promise.race([failed, timeout, this.waitHealthy(endpoint)]);
     } catch (err) {
-      if (!this.exited) this.deps.logger.error('Движок итогов не загрузил модель', new Error(this.output.join('\n')));
+      if (!this.exited && !this.stopping) {
+        this.deps.logger.error('Движок итогов не загрузил модель', new Error(this.output.join('\n')));
+      }
+      // Не загрузился (или запуск отменили) — процесс не оставляем: следующий запрос запустит его заново.
+      void this.stop();
       throw err;
     } finally {
       clearTimeout(timer);
@@ -230,7 +234,7 @@ export class LlamaServer {
     try {
       return await untilAborted(running.ready, signal);
     } catch (err) {
-      // Не загрузился — процесс не оставляем: следующий запрос запустит его заново.
+      // Не загрузился — процесс уже завершается сам; забываем его, следующий запрос запустит новый.
       if (!signal?.aborted && this.running === running) await this.stop();
       throw err;
     }

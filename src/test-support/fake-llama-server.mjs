@@ -1,5 +1,5 @@
 // Поддельный llama-server — только для автотестов: модульных (src/main/ai) и сквозных (TEXTMEET_TEST_LLM). Понимает
-// те же параметры запуска (--port, --api-key, -c) и отвечает так же: /health, /tokenize, поток /v1/chat/completions.
+// те же параметры запуска (--port, -c, ключ в LLAMA_API_KEY) и отвечает так же: /health, /tokenize, поток /v1/chat/completions.
 // Ответ — по заданию в конце сообщения (после «---»): на вопрос (ответ до 1024 «кусочков») — «Ответ: <вопрос>»,
 // иначе — итоги в разметке.
 // Особые слова в задании или тексте: «УПАДИ» — процесс падает посреди ответа; «ОЧЕНЬ_ДЛИННАЯ_ВСТРЕЧА» — /tokenize
@@ -15,7 +15,8 @@ const arg = (name) => {
   return at === -1 ? undefined : args[at + 1];
 };
 const port = Number(arg('--port'));
-const apiKey = arg('--api-key');
+// Ключ, как у настоящего сервера, — в переменной LLAMA_API_KEY.
+const apiKey = process.env.LLAMA_API_KEY;
 const loadMs = Number(process.env.TEXTMEET_FAKE_LLM_LOAD_MS ?? 50);
 const tokenMs = Number(process.env.TEXTMEET_FAKE_LLM_TOKEN_MS ?? 20);
 const logFile = process.env.TEXTMEET_FAKE_LLM_LOG;
@@ -23,7 +24,7 @@ const logFile = process.env.TEXTMEET_FAKE_LLM_LOG;
 const log = (entry) => {
   if (logFile) appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
 };
-log({ kind: 'start', args });
+log({ kind: 'start', args, pid: process.pid });
 process.stderr.write('fake llama-server: loading model\n');
 
 let loaded = false;

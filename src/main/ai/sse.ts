@@ -26,7 +26,13 @@ export function parseSse(buffer: string): { chunks: SseChunk[]; rest: string } {
       chunks.push({ text: '', finishReason: null, done: true });
       continue;
     }
-    const event = JSON.parse(payload) as StreamEvent;
+    let event: StreamEvent;
+    try {
+      event = JSON.parse(payload) as StreamEvent;
+    } catch {
+      // Без исходной ошибки: в её тексте — кусок ответа модели (текст встречи в журнал не пишем).
+      throw new Error('движок прислал неверный кусок ответа');
+    }
     if (event.error) throw new Error(`движок сообщил об ошибке: ${String(event.error.message ?? 'без описания')}`);
     const choice = event.choices?.[0];
     const content = choice?.delta?.content;

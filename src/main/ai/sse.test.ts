@@ -28,6 +28,19 @@ describe('parseSse', () => {
     expect(chunks.map((c) => c.text)).toEqual(['а']);
   });
 
+  it('reports a broken piece without quoting it (the answer is meeting text)', () => {
+    const error = (() => {
+      try {
+        parseSse('data: {"choices": [{"delta": {"content": "секрет\n');
+        return null;
+      } catch (err) {
+        return err as Error;
+      }
+    })();
+    expect(error?.message).toBe('движок прислал неверный кусок ответа');
+    expect(error?.cause).toBeUndefined();
+  });
+
   it('turns an error event of the engine into an error', () => {
     expect(() => parseSse('data: {"error":{"message":"out of memory"}}\n')).toThrow('out of memory');
   });

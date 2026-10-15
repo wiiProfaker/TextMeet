@@ -42,9 +42,9 @@ describe('summaryTask', () => {
 });
 
 describe('sourceHash', () => {
-  it('changes with the text and the speaker names, but not with the title', () => {
+  it('changes with the text and the speaker names, but not with the title, the date or the duration', () => {
     const base = sourceHash(doc);
-    expect(sourceHash({ ...doc, title: 'Новое название' })).toBe(base);
+    expect(sourceHash({ ...doc, title: 'Новое название', metaLine: '27 сентября 2026, 17:20 · 33 мин' })).toBe(base);
     expect(sourceHash({ ...doc, paragraphs: [{ speaker: 'Ирина', time: '0:05', text: 'Переносим на четверг.' }] })).not.toBe(base);
     expect(sourceHash({ ...doc, paragraphs: [{ speaker: 'Ира', time: '0:05', text: 'Переносим на пятницу.' }] })).not.toBe(base);
     expect(base).toMatch(/^[0-9a-f]{64}$/);

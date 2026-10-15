@@ -77,7 +77,7 @@ export interface IpcDeps {
     stopIdleWorker(): void;
   };
   models: Pick<ModelStore, 'state' | 'remove'>;
-  ai: Pick<AiRunner, 'state' | 'isBusy' | 'summarize' | 'ask' | 'stop' | 'dismiss' | 'forget' | 'stopEngine'>;
+  ai: Pick<AiRunner, 'state' | 'isBusy' | 'summarize' | 'ask' | 'stop' | 'dismiss' | 'forget' | 'withEngineStopped'>;
   downloads: {
     start(id: CatalogModelId): void;
     cancel(id: CatalogModelId): Promise<void>;
@@ -518,14 +518,14 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.deleteAiModel, async (arg) => {
     const id = LlmModelIdSchema.parse(arg);
     if (deps.downloads.isBusy()) throw new Error(MODELS_DOWNLOADING);
-    if (deps.ai.isBusy()) throw new Error(aiTexts.modelBusy);
-    // Пока движок работает, файл модели открыт — Windows не даст его удалить.
-    await deps.ai.stopEngine();
-    try {
-      await deps.models.remove(id);
-    } catch (err) {
-      throw new Error(transcriptionTexts.deleteModels(err), { cause: err });
-    }
+    // Пока движок работает, файл модели открыт — Windows не даст его удалить. Модель отвечает — отказ.
+    await deps.ai.withEngineStopped(async () => {
+      try {
+        await deps.models.remove(id);
+      } catch (err) {
+        throw new Error(transcriptionTexts.deleteModels(err), { cause: err });
+      }
+    });
     // Удалили выбранную — выбирается другая скачанная (или никакая).
     return aiModelsState();
   });

@@ -580,7 +580,7 @@ export function useModelCatalog<S>(load: () => Promise<S>, watch: (reload: () =>
   return { state, error: catalogErrorText(errors), run };
 }
 
-const NO_AI: AiState = { job: null, failures: [] };
+const NO_AI: AiState = { job: null, finished: null, failures: [] };
 
 /** Работа модели для итогов: что она пишет сейчас (один запрос на всю программу) и последние неудачи по встречам. */
 export function useAiState(): AiState {

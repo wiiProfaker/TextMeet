@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
-import { AI_QUESTION_MAX, aiCaption, type AiFailure, type AiJob, type AiMeetingView, type AiQuestion, type AiStartResult } from '../../shared/ai';
+import {
+  AI_QUESTION_MAX,
+  aiCaption,
+  type AiFailure,
+  type AiFinished,
+  type AiJob,
+  type AiMeetingView,
+  type AiQuestion,
+  type AiStartResult,
+} from '../../shared/ai';
 import { aiPlainText } from '../../shared/ai-markdown';
 import {
   AI_FOOT,
@@ -28,6 +37,8 @@ export interface AiPanel {
   /** Модель занята другой встречей. */
   other: AiJob | null;
   failure: AiFailure | null;
+  /** Последний сохранённый ответ (для экранного диктора). */
+  finished: AiFinished | null;
   visible: boolean;
   /** «Модель не скачана» — после нажатия «Итоги встречи» или «Спросить». */
   noModel: boolean;
@@ -100,6 +111,7 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     job,
     other,
     failure,
+    finished: state.finished,
     noModel,
     visible: aiBlockVisible({ view, job, failure, opened: opened || noModel, collapsed }),
     openSummary: () => {
@@ -236,14 +248,14 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
   const [announcement, setAnnouncement] = useState('');
   const previousJob = useRef<AiJob | null>(null);
   const section = useRef<HTMLElement>(null);
-  const { view, job, other, failure } = panel;
+  const { view, job, other, failure, finished } = panel;
 
-  // По окончании ответа — «Итоги готовы» / «Ответ готов» экранному диктору (поток текста ему не читается).
+  // Ответ дописан и сохранён — «Итоги готовы» / «Ответ готов» экранному диктору (поток текста ему не читается).
   useEffect(() => {
-    const text = aiFinishedText(previousJob.current, job, failure);
+    const text = aiFinishedText(previousJob.current, job, finished);
     previousJob.current = job;
     if (text) setAnnouncement(text);
-  }, [job, failure]);
+  }, [job, finished]);
 
   // Перешли из найденного — блок прокручивается в поле зрения.
   useEffect(() => {

@@ -113,7 +113,7 @@ describe('AiRunner', () => {
     expect(view.stale).toBe(false);
     expect(t.saved).toHaveBeenCalledWith(id);
     expect(t.engine.idle).toHaveBeenCalled();
-    expect(t.runner.state()).toEqual({ job: null, failures: [] });
+    expect(t.runner.state()).toEqual({ job: null, finished: { meetingId: id, kind: 'summary', status: 'done' }, failures: [] });
   });
 
   it('asks a question with the question alone as the task, and keeps the questions in order', async () => {
@@ -142,6 +142,68 @@ describe('AiRunner', () => {
     await t.runner.summarize(first);
     expect(await t.runner.summarize(second)).toBe('busy');
     expect(await t.runner.ask(first, 'Что?')).toBe('busy');
+  });
+
+  it('two presses at once start one request', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    const results = await Promise.all([t.runner.summarize(id), t.runner.ask(id, 'Что?')]);
+    expect(results.sort()).toEqual(['busy', 'started']);
+  });
+
+  it('a meeting deleted while its request is being prepared does not start', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    const started = t.runner.summarize(id);
+    t.runner.forget(id);
+    expect(await started).toBe('busy');
+    expect(t.engine.ready).not.toHaveBeenCalled();
+    expect(t.runner.isBusy()).toBe(false);
+  });
+
+  it('after quitting began, no new request starts and the engine is not started again', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    const preparing = t.runner.summarize(id);
+    const quit = t.runner.disposeForQuit();
+    expect(await preparing).toBe('busy');
+    await quit;
+    expect(await t.runner.summarize(id)).toBe('busy');
+    expect(t.engine.ready).not.toHaveBeenCalled();
+  });
+
+  it('deleting a model stops the engine first and holds new requests until it is done', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    let during: string | null = null;
+    await t.runner.withEngineStopped(async () => {
+      during = await t.runner.summarize(id);
+    });
+    expect(during).toBe('busy');
+    expect(t.engine.stop).toHaveBeenCalled();
+    expect(await t.runner.summarize(id)).toBe('started');
+    // Пока модель отвечает, удалить её нельзя.
+    await expect(t.runner.withEngineStopped(async () => undefined)).rejects.toThrow(aiTexts.modelBusy);
+  });
+
+  it('tells the window about the saved answer only after the last state, and how it ended', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    await t.runner.summarize(id);
+    // Что окно знало в момент «ai.json записан»: модель уже свободна, и понятно, чем кончился запрос.
+    const seen: unknown[] = [];
+    t.saved.mockImplementation(() => seen.push(t.states.at(-1)));
+    (await t.write('- Итоги')).finish();
+    await idle(t.runner);
+    await vi.waitFor(() => expect(t.saved).toHaveBeenCalledWith(id));
+    expect(seen[0]).toMatchObject({ job: null, finished: { meetingId: id, kind: 'summary', status: 'done' } });
+
+    await t.runner.summarize(id);
+    expect(t.runner.state().finished).toBeNull();
+    await t.write('- Ещё');
+    t.runner.stop();
+    await idle(t.runner);
+    expect(t.runner.state().finished).toEqual({ meetingId: id, kind: 'summary', status: 'stopped' });
   });
 
   it('says when no model is downloaded, without starting anything', async () => {

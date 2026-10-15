@@ -1,6 +1,6 @@
 // Блок «Итоги встречи» (решения Плана 9, §2.2; листы 18–20 макета): подписи и когда блок виден. Чистые функции —
 // проверяются модульными тестами.
-import type { AiFailure, AiJob, AiJobStage, AiMeetingView } from '../../shared/ai';
+import type { AiFailure, AiFinished, AiJob, AiJobStage, AiMeetingView } from '../../shared/ai';
 
 export const ASK_PLACEHOLDER = 'Свой вопрос к встрече — например, что решили по срокам?';
 /** Пока пишутся итоги этой встречи, спросить нельзя. */
@@ -41,8 +41,12 @@ export function aiBlockVisible(input: AiBlockShown): boolean {
   return input.opened || input.job !== null || input.failure !== null || !!doc?.summary || (doc?.questions.length ?? 0) > 0;
 }
 
-/** Ответ по встрече закончился (не сбой) — что сказать экранному диктору: «Итоги готовы» / «Ответ готов». */
-export function aiFinishedText(previous: AiJob | null, current: AiJob | null, failure: AiFailure | null): string | null {
-  if (!previous || current || failure) return null;
+/**
+ * Ответ по встрече дописан и сохранён — что сказать экранному диктору: «Итоги готовы» / «Ответ готов». Остановленный,
+ * несохранённый и неудачный — ничего.
+ */
+export function aiFinishedText(previous: AiJob | null, current: AiJob | null, finished: AiFinished | null): string | null {
+  if (!previous || current || !finished) return null;
+  if (finished.meetingId !== previous.meetingId || finished.kind !== previous.kind || finished.status !== 'done') return null;
   return previous.kind === 'summary' ? 'Итоги готовы' : 'Ответ готов';
 }

@@ -10,6 +10,7 @@ function state(selected: LlmModelId | null, installed: LlmModelId[]): AiModelsSt
     models: LLM_MODEL_IDS.map((id) => ({ id, sizeBytes: 5 * GB, installed: installed.includes(id) })),
     download: null,
     downloadError: null,
+    busy: false,
   };
 }
 

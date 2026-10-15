@@ -35,7 +35,7 @@ function AiModelCard({ id, state, run }: CardProps) {
       error={failed ? (state.downloadError?.message ?? null) : null}
       downloadButton={downloadButton(info.title, failed)}
       otherDownload={state.download !== null && !download}
-      deleteDisabled={state.download !== null}
+      deleteDisabled={state.busy || state.download !== null}
       note={null}
       onSelect={() => run(() => window.textmeet.selectAiModel(id))}
       onDownload={() => run(() => window.textmeet.downloadAiModel(id))}
@@ -45,12 +45,24 @@ function AiModelCard({ id, state, run }: CardProps) {
   );
 }
 
+/** Перечитывать каталог: скачивание продвинулось, модель начала или закончила отвечать (удалять её нельзя). */
+function watchAiModels(reload: () => void): () => void {
+  const unsubscribeModels = window.textmeet.onModelsChanged(reload);
+  let busy: boolean | null = null;
+  const unsubscribeAi = window.textmeet.onAiState((state) => {
+    const nowBusy = state.job !== null;
+    if (nowBusy !== busy) reload();
+    busy = nowBusy;
+  });
+  return () => {
+    unsubscribeModels();
+    unsubscribeAi();
+  };
+}
+
 /** Вкладка «ИИ» → «Модель для итогов»: каталог, как во вкладке «Расшифровка». */
 export function AiModelSettings() {
-  const { state, error, run } = useModelCatalog<AiModelsState>(
-    () => window.textmeet.getAiModels(),
-    (reload) => window.textmeet.onModelsChanged(reload),
-  );
+  const { state, error, run } = useModelCatalog<AiModelsState>(() => window.textmeet.getAiModels(), watchAiModels);
   const sections = state && aiCatalogSections(state);
   const group = (title: string, ids: LlmModelId[]) =>
     state &&

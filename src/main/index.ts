@@ -21,6 +21,9 @@ import {
   type RecorderCommandChannel,
   type RecorderCommandContract,
 } from '../shared/ipc';
+import { currentAiModel } from './ai/ai-models';
+import { AiRunner, llamaEngine } from './ai/ai-runner';
+import { llamaDir, LlamaServer, llamaServerFile, type LlamaCommand } from './ai/llama-server';
 import { macMenuTemplate } from './app-menu';
 import { resolveFfmpegPath } from './audio/ffmpeg';
 import { meetingsNeedingMix, Mixer } from './audio/mixer';
@@ -37,6 +40,7 @@ import { CatalogDownloads } from './models/catalog-downloads';
 import { FakeModelStore } from './models/fake-model-store';
 import { ModelManager, type ModelStore } from './models/model-manager';
 import { modelsRoot } from './models/models-dir';
+import { isModelGroupId, llmFilePath } from './models/registry';
 import { createNotifier, type Notify } from './notifications';
 import { DEV_FOLDER_NAME, LIBRARY_FOLDER_NAME, resolveLibraryDir } from './paths';
 import { applyPermissionPolicy } from './permissions';
@@ -71,6 +75,10 @@ if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 // их скачивания; TEXTMEET_TEST_DOWNLOAD_MS — сколько длится шаг «скачивания» из каталога (по умолчанию мгновенно).
 const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
 const fakeDownloadStepMs = Number(process.env.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
+/** Только для автотестов: модели, уже «скачанные» в поддельном хранилище (через запятую). */
+const fakeInstalled = (process.env.TEXTMEET_TEST_INSTALLED ?? '').split(',').filter(isModelGroupId);
+/** Только для автотестов: поддельный llama-server (скрипт src/test-support/fake-llama-server.mjs) вместо настоящего. */
+const fakeLlm = process.env.TEXTMEET_TEST_LLM;
 /** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
 const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
 /** Только для автотестов: «Корзина» — обычная папка (на машинах CI настоящей Корзины может не быть). */
@@ -99,6 +107,7 @@ let hotkeys: HotkeyManager | null = null;
 let recorderReady = false;
 let transcription: TranscriptionQueue | null = null;
 let importer: Importer | null = null;
+let aiRunner: AiRunner | null = null;
 /** Окно записи падало снова и снова, и его больше не перезапускают. */
 let recorderBroken = false;
 const recorderCrashes: number[] = [];
@@ -253,6 +262,8 @@ async function prepareQuit(logger: Logger, controller: RecordingController, hotk
   logger.info('TextMeet завершает работу');
   // Недоделанные встречи из файлов убираются: исходные файлы на месте, добавить их можно снова.
   await importer?.disposeForQuit().catch((err: unknown) => logger.error('Импорт не остановился перед выходом', err));
+  // Идущий ответ модели сохраняется как остановленный, движок итогов завершается.
+  await aiRunner?.disposeForQuit().catch((err: unknown) => logger.error('Итоги не остановились перед выходом', err));
   await logger.flush();
   // Только когда выход точно состоится: остановленная очередь молча пропускала бы новые встречи.
   // Встречи остаются «в очереди» / «расшифровывается» и продолжатся при следующем запуске.
@@ -336,7 +347,7 @@ async function start(logger: Logger): Promise<void> {
     override: process.env.TEXTMEET_MODELS_DIR,
   });
   const models: ModelStore = fakeAsr
-    ? new FakeModelStore(modelsDir, fakeDownloadStepMs)
+    ? new FakeModelStore(modelsDir, fakeDownloadStepMs, fakeInstalled)
     : new ModelManager({ root: modelsDir, logger, freeBytes: freeDiskBytes });
   const catalogDownloads = new CatalogDownloads({
     models,
@@ -344,6 +355,30 @@ async function start(logger: Logger): Promise<void> {
     changed: () => sendToMain(IPC.modelsChanged),
     now: () => Date.now(),
   });
+  const llamaCommand = (): LlamaCommand =>
+    fakeLlm
+      ? { file: process.execPath, args: [fakeLlm], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } }
+      : {
+          file: join(
+            llamaDir({ packaged: app.isPackaged, resourcesPath: process.resourcesPath, appPath: app.getAppPath() }),
+            llamaServerFile(process.platform),
+          ),
+          args: [],
+        };
+  const ai = new AiRunner({
+    libraryDir,
+    model: async () => {
+      const { selected } = await currentAiModel({ models, settings, logger });
+      return selected && { id: selected, path: llmFilePath(models.root, selected) };
+    },
+    engine: llamaEngine(new LlamaServer({ command: llamaCommand, logger })),
+    aiPrompt: () => settings.settled().then(() => settings.get().aiPrompt),
+    now: () => new Date(),
+    logger,
+    changed: (state) => sendToMain(IPC.aiState, state),
+    saved: (id) => sendToMain(IPC.aiChanged, id),
+  });
+  aiRunner = ai;
   const queue = new TranscriptionQueue({
     spawn: () => spawnTranscriptionWorker(logger),
     models,
@@ -506,6 +541,7 @@ async function start(logger: Logger): Promise<void> {
     },
     transcription: queue,
     models,
+    ai,
     downloads: catalogDownloads,
   });
 
@@ -530,6 +566,7 @@ async function start(logger: Logger): Promise<void> {
     // «расшифровывается» — до следующего запуска.
     transcription?.dispose();
     void importer?.stop();
+    void aiRunner?.disposeForQuit();
     onSystemEnding();
   });
   windowsCreated = true;

@@ -8,6 +8,7 @@ import {
   asrFilePath,
   groupFiles,
   groupSize,
+  isModelGroupId,
   llmFilePath,
   MODEL_FILES,
   MODEL_GROUP_IDS,
@@ -50,6 +51,12 @@ describe('model registry', () => {
     }
     expect(llmFilePath('M', 'qwen3.5-9b')).toBe(join('M', 'llm', 'qwen3.5-9b', 'Qwen3.5-9B-Q4_K_M.gguf'));
     expect(groupSize('qwen3.5-9b')).toBe(5_680_522_464);
+  });
+
+  it('recognizes the groups of the registry only', () => {
+    expect(isModelGroupId('voices')).toBe(true);
+    expect(isModelGroupId('qwen3.5-4b')).toBe(true);
+    expect(isModelGroupId('llama-70b')).toBe(false);
   });
 
   it('keeps the transcription groups apart from the models for summaries', () => {

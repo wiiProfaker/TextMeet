@@ -106,4 +106,6 @@ export interface AiModelsState {
   download: CatalogDownload | null;
   /** Последнее скачивание модели для итогов не удалось — причина для человека. */
   downloadError: { id: LlmModelId; message: string } | null;
+  /** Модель отвечает — удалять модели нельзя. */
+  busy: boolean;
 }

@@ -52,11 +52,13 @@ export function buildAiModelsState(
   groups: Groups,
   selected: LlmModelId | null,
   downloads: CatalogDownloadsSnapshot,
+  busy: boolean,
 ): AiModelsState {
   return {
     selected,
     models: LLM_MODEL_IDS.map((id) => ({ id, ...stateOf(groups, id) })),
     download: downloads.download,
     downloadError: failureOf(groups, downloads, isLlmModelId),
+    busy,
   };
 }

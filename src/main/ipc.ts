@@ -19,6 +19,7 @@ import {
   type RecorderMessageChannel,
   type SettingsState,
 } from '../shared/ipc';
+import { AI_QUESTION_MAX } from '../shared/ai';
 import { AiPromptSchema, storedAiPrompt } from '../shared/ai-prompt';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL, type AsrModelId } from '../shared/asr-models';
 import { LLM_MODEL_IDS, type AiModelsState } from '../shared/llm-models';
@@ -26,7 +27,9 @@ import { IMPORT_EXTENSIONS } from '../shared/import';
 import { MeetingIdSchema, RecordedTrackKindSchema } from '../shared/meeting';
 import { SpeakerIdSchema } from '../shared/transcript';
 import type { CatalogModelId, ModelsState, TranscriptionProgress } from '../shared/transcription';
+import { aiView, deleteQuestion } from './ai/ai-meeting';
 import { currentAiModel } from './ai/ai-models';
+import type { AiRunner } from './ai/ai-runner';
 import { copyForAi, copyMeeting, saveMeeting, type ExportDeps } from './export/export-meeting';
 import { humanFsError } from './fs/fs-errors';
 import type { HotkeyManager } from './hotkey-manager';
@@ -42,7 +45,7 @@ import { buildAiModelsState, buildModelsState, type CatalogDownloadsSnapshot } f
 import { TRANSCRIPTION_GROUP_IDS } from './models/registry';
 import type { RecordingController } from './recording/controller';
 import type { SettingsStore } from './settings/settings-store';
-import { systemSettingsUrl, transcriptionTexts } from './texts';
+import { aiTexts, systemSettingsUrl, transcriptionTexts } from './texts';
 
 export interface IpcDeps {
   settings: SettingsStore;
@@ -74,6 +77,7 @@ export interface IpcDeps {
     stopIdleWorker(): void;
   };
   models: Pick<ModelStore, 'state' | 'remove'>;
+  ai: Pick<AiRunner, 'state' | 'isBusy' | 'summarize' | 'ask' | 'stop' | 'dismiss' | 'forget' | 'stopEngine'>;
   downloads: {
     start(id: CatalogModelId): void;
     cancel(id: CatalogModelId): Promise<void>;
@@ -114,6 +118,9 @@ const EditTranscriptSchema = z.object({
   edit: TranscriptEditSchema,
   transcriptVersion: z.iso.datetime(),
 });
+
+const AskSchema = z.object({ meetingId: MeetingIdSchema, question: z.string().trim().min(1).max(AI_QUESTION_MAX) });
+const DeleteQuestionSchema = z.object({ meetingId: MeetingIdSchema, questionId: z.string().min(1).max(100) });
 
 const SaveMeetingSchema = z.object({ meetingId: MeetingIdSchema, format: z.enum(['docx', 'txt']) });
 /** Пути файлов для импорта: полные, не больше 1000 (больше 100 программа отклонит с понятной причиной). */
@@ -368,6 +375,8 @@ export function registerIpc(deps: IpcDeps): void {
   // Имя папки, а не только прочитанная встреча: удалить можно и папку, которую не удалось прочитать.
   handle(IPC.deleteMeeting, async (arg) => {
     const id = MeetingIdSchema.parse(arg);
+    // Ответ модели по этой встрече останавливается без сохранения: папка уходит в Корзину.
+    deps.ai.forget(id);
     try {
       await shown('Не удалось удалить встречу', () => deleteMeeting(deps.deletion, id))();
     } catch (err) {
@@ -483,7 +492,7 @@ export function registerIpc(deps: IpcDeps): void {
 
   const aiModelsState = async (): Promise<AiModelsState> => {
     const { groups, selected } = await currentAiModel(deps);
-    return buildAiModelsState(groups, selected, deps.downloads.snapshot());
+    return buildAiModelsState(groups, selected, deps.downloads.snapshot(), deps.ai.isBusy());
   };
 
   handle(IPC.getAiModels, () => aiModelsState());
@@ -509,6 +518,9 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.deleteAiModel, async (arg) => {
     const id = LlmModelIdSchema.parse(arg);
     if (deps.downloads.isBusy()) throw new Error(MODELS_DOWNLOADING);
+    if (deps.ai.isBusy()) throw new Error(aiTexts.modelBusy);
+    // Пока движок работает, файл модели открыт — Windows не даст его удалить.
+    await deps.ai.stopEngine();
     try {
       await deps.models.remove(id);
     } catch (err) {
@@ -516,6 +528,34 @@ export function registerIpc(deps: IpcDeps): void {
     }
     // Удалили выбранную — выбирается другая скачанная (или никакая).
     return aiModelsState();
+  });
+
+  handle(IPC.getAi, (arg) => {
+    const id = MeetingIdSchema.parse(arg);
+    return shown('Не удалось прочитать итоги встречи', () => aiView(deps.libraryDir(), id))();
+  });
+
+  handle(IPC.getAiState, () => deps.ai.state());
+
+  handle(IPC.summarize, (arg) => {
+    const id = MeetingIdSchema.parse(arg);
+    return shown('Не удалось прочитать встречу', () => deps.ai.summarize(id))();
+  });
+
+  handle(IPC.askAi, (arg) => {
+    const request = AskSchema.parse(arg);
+    return shown('Не удалось прочитать встречу', () => deps.ai.ask(request.meetingId, request.question))();
+  });
+
+  handle(IPC.stopAi, () => deps.ai.stop());
+
+  handle(IPC.dismissAiFailure, (arg) => deps.ai.dismiss(MeetingIdSchema.parse(arg)));
+
+  handle(IPC.deleteAiQuestion, (arg) => {
+    const request = DeleteQuestionSchema.parse(arg);
+    return shown('Не удалось удалить вопрос', () =>
+      deleteQuestion(deps.libraryDir(), request.meetingId, request.questionId, deps.logger),
+    )();
   });
 
   onRecorder(IPC.recorderReady, () => deps.onRecorderReady());

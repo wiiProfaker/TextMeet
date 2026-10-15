@@ -1,7 +1,7 @@
 // Тексты для человека, которые показывает main: уведомления, системные окна, причины ошибок записи.
 import { formatBytes, formatDurationShort } from '../shared/format';
 import type { MediaFailure, StartProblem, SystemSettingsKind } from '../shared/recording';
-import { knownFsReason } from './fs/fs-errors';
+import { humanFsReason, knownFsReason } from './fs/fs-errors';
 import { DownloadError } from './models/download';
 import { MODELS_ENSURING } from './models/model-manager';
 import { WORKER_REFUSALS } from './transcription/protocol';
@@ -253,4 +253,13 @@ export function systemSettingsUrl(kind: SystemSettingsKind, platform: string): s
 export const aiTexts = {
   /** Модель для итогов не скачалась — причина для карточки каталога. */
   download: (err: unknown): string => downloadText(err, AI_WORDS),
+  /** Движок не запустился, упал или не ответил (подробности — в журнале). */
+  engine:
+    'Модель не смогла ответить — подробности в журнале. Возможно, не хватило памяти: закройте тяжёлые программы и попробуйте снова.',
+  tooLong: (modelTitle: string): string =>
+    `Встреча слишком длинная для ${modelTitle}. Выберите другую модель в настройках ИИ или воспользуйтесь «Скопировать для ИИ».`,
+  /** Ответ готов, но ai.json не записался — текст остаётся в блоке до ухода со встречи. */
+  notSaved: (kind: 'summary' | 'question', err: unknown): string =>
+    `Не удалось сохранить ${kind === 'summary' ? 'итоги' : 'ответ'}: ${humanFsReason(err)}`,
+  modelBusy: 'Модель нельзя удалить, пока она отвечает.',
 };

@@ -8,12 +8,16 @@ import { groupSize, MODEL_GROUP_IDS, type ModelGroupId } from './registry';
 const STEPS = 5;
 
 export class FakeModelStore implements ModelStore {
-  private readonly installed = new Set<ModelGroupId>();
+  private readonly installed: Set<ModelGroupId>;
 
+  /** installed — модели, «скачанные» с самого начала (TEXTMEET_TEST_INSTALLED). */
   constructor(
     readonly root: string,
     private readonly stepMs: number,
-  ) {}
+    installed: readonly ModelGroupId[] = [],
+  ) {
+    this.installed = new Set(installed);
+  }
 
   async ensure(groups: readonly ModelGroupId[], options: EnsureOptions = {}): Promise<void> {
     const missing = groups.filter((g) => !this.installed.has(g));

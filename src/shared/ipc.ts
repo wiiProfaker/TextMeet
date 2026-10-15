@@ -2,6 +2,7 @@
 // preload и main пользуются типизированными обёртками над этими таблицами, поэтому расхождение ловит
 // проверка типов. preload работает в песочнице и не может подключать zod и другие пакеты:
 // здесь только константы и типы, из других файлов — только `import type`.
+import type { AiMeetingView, AiStartResult, AiState, AskRequest, DeleteQuestionRequest } from './ai';
 import type { AsrModelId } from './asr-models';
 import type { ImportFailedEvent, ImportProgress, ImportResult } from './import';
 import type { AiModelsState, LlmModelId } from './llm-models';
@@ -66,6 +67,13 @@ export const IPC = {
   cancelAiModelDownload: 'ai:cancel-download',
   selectAiModel: 'ai:select-model',
   deleteAiModel: 'ai:delete-model',
+  getAi: 'ai:get',
+  getAiState: 'ai:get-state',
+  summarize: 'ai:summarize',
+  askAi: 'ai:ask',
+  stopAi: 'ai:stop',
+  deleteAiQuestion: 'ai:delete-question',
+  dismissAiFailure: 'ai:dismiss-failure',
   copyMeeting: 'export:copy',
   copyForAi: 'export:copy-for-ai',
   saveMeeting: 'export:save',
@@ -81,6 +89,10 @@ export const IPC = {
   modelsChanged: 'models:changed',
   /** Щелчок по уведомлению о расшифровке: показать эту встречу. */
   showMeeting: 'app:show-meeting',
+  /** Модель начала, продолжила или закончила отвечать (не чаще 10 раз в секунду). */
+  aiState: 'ai:state',
+  /** ai.json встречи записан — перечитать итоги. */
+  aiChanged: 'ai:changed',
   importProgress: 'import:progress',
   /** Звук файла не скопировался: недоделанная встреча убрана. */
   importFailed: 'import:failed',
@@ -205,6 +217,13 @@ export interface MainInvokeContract {
   [IPC.cancelAiModelDownload]: { arg: LlmModelId; result: AiModelsState };
   [IPC.selectAiModel]: { arg: LlmModelId; result: AiModelsState };
   [IPC.deleteAiModel]: { arg: LlmModelId; result: AiModelsState };
+  [IPC.getAi]: { arg: string; result: AiMeetingView };
+  [IPC.getAiState]: { arg: void; result: AiState };
+  [IPC.summarize]: { arg: string; result: AiStartResult };
+  [IPC.askAi]: { arg: AskRequest; result: AiStartResult };
+  [IPC.stopAi]: { arg: void; result: void };
+  [IPC.deleteAiQuestion]: { arg: DeleteQuestionRequest; result: AiMeetingView };
+  [IPC.dismissAiFailure]: { arg: string; result: void };
   [IPC.copyMeeting]: { arg: string; result: void };
   [IPC.copyForAi]: { arg: string; result: void };
   [IPC.saveMeeting]: { arg: SaveMeetingRequest; result: SaveMeetingResult };
@@ -224,6 +243,8 @@ export interface MainEventContract {
   [IPC.transcriptionProgress]: TranscriptionProgress[];
   [IPC.modelsChanged]: void;
   [IPC.showMeeting]: string;
+  [IPC.aiState]: AiState;
+  [IPC.aiChanged]: string;
   [IPC.importProgress]: ImportProgress[];
   [IPC.importFailed]: ImportFailedEvent;
 }
@@ -308,6 +329,19 @@ export interface TextMeetApi {
   /** «Выбрать»: модель для итогов (только скачанная). */
   selectAiModel(id: LlmModelId): Promise<AiModelsState>;
   deleteAiModel(id: LlmModelId): Promise<AiModelsState>;
+  /** Итоги и вопросы встречи (ai.json). */
+  getAi(meetingId: string): Promise<AiMeetingView>;
+  getAiState(): Promise<AiState>;
+  /** «Итоги встречи», «Обновить». */
+  summarize(meetingId: string): Promise<AiStartResult>;
+  /** «Спросить». */
+  askAi(request: AskRequest): Promise<AiStartResult>;
+  /** «Остановить»: написанное сохраняется с пометкой «остановлено». */
+  stopAi(): Promise<void>;
+  /** «Удалить» у своего вопроса. */
+  deleteAiQuestion(request: DeleteQuestionRequest): Promise<AiMeetingView>;
+  /** Ушли со встречи — её прошлая неудача больше не нужна. */
+  dismissAiFailure(meetingId: string): Promise<void>;
   /** «Скопировать всё»: текст встречи — в буфер обмена (обычный и оформленный). */
   copyMeeting(meetingId: string): Promise<void>;
   /** «Скопировать для ИИ»: запрос из настроек и текст встречи — в буфер обмена простым текстом. */
@@ -327,6 +361,8 @@ export interface TextMeetApi {
   onTranscriptionProgress(listener: Listener<TranscriptionProgress[]>): Unsubscribe;
   onModelsChanged(listener: () => void): Unsubscribe;
   onShowMeeting(listener: Listener<string>): Unsubscribe;
+  onAiState(listener: Listener<AiState>): Unsubscribe;
+  onAiChanged(listener: Listener<string>): Unsubscribe;
   onImportProgress(listener: Listener<ImportProgress[]>): Unsubscribe;
   onImportFailed(listener: Listener<ImportFailedEvent>): Unsubscribe;
 }

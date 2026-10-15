@@ -43,21 +43,23 @@ describe('buildModelsState', () => {
 describe('buildAiModelsState', () => {
   it('lists the models for summaries in catalog order with the download of any catalog', () => {
     const download = { id: 't-one' as const, done: 1, total: 2, remainingSec: 40 };
-    const state = buildAiModelsState([{ id: 'qwen3.5-4b', sizeBytes: 7, installed: true }], 'qwen3.5-4b', {
-      download,
-      downloadError: null,
-    });
+    const state = buildAiModelsState(
+      [{ id: 'qwen3.5-4b', sizeBytes: 7, installed: true }],
+      'qwen3.5-4b',
+      { download, downloadError: null },
+      true,
+    );
     expect(state.models.map((m) => m.id)).toEqual([...LLM_MODEL_IDS]);
     expect(state.models.find((m) => m.id === 'qwen3.5-4b')).toEqual({ id: 'qwen3.5-4b', sizeBytes: 7, installed: true });
     expect(state.models[0]).toEqual({ id: 'qwen3.5-9b', sizeBytes: groupSize('qwen3.5-9b'), installed: false });
-    expect(state).toMatchObject({ selected: 'qwen3.5-4b', download, downloadError: null });
+    expect(state).toMatchObject({ selected: 'qwen3.5-4b', download, downloadError: null, busy: true });
   });
 
   it('shows only its own failed download, and only while the model is missing', () => {
     const failed = (id: 't-one' | 'qwen3.5-9b') => ({ download: null, downloadError: { id, message: 'нет связи' } });
-    expect(buildAiModelsState([], null, failed('qwen3.5-9b')).downloadError).toEqual({ id: 'qwen3.5-9b', message: 'нет связи' });
-    expect(buildAiModelsState([], null, failed('t-one')).downloadError).toBeNull();
+    expect(buildAiModelsState([], null, failed('qwen3.5-9b'), false).downloadError).toEqual({ id: 'qwen3.5-9b', message: 'нет связи' });
+    expect(buildAiModelsState([], null, failed('t-one'), false).downloadError).toBeNull();
     const installed = [{ id: 'qwen3.5-9b' as const, sizeBytes: 1, installed: true }];
-    expect(buildAiModelsState(installed, 'qwen3.5-9b', failed('qwen3.5-9b')).downloadError).toBeNull();
+    expect(buildAiModelsState(installed, 'qwen3.5-9b', failed('qwen3.5-9b'), false).downloadError).toBeNull();
   });
 });

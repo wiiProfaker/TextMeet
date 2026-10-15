@@ -19,6 +19,9 @@ export interface ModelFile {
 const HF_GIGAAM = 'https://huggingface.co/Smirnov75/GigaAM-v3-sherpa-onnx/resolve/6888903da215c7735f51101d939f3bfa679fb2b8';
 const SHERPA_RELEASES = 'https://github.com/k2-fsa/sherpa-onnx/releases/download';
 
+export const isModelGroupId = (value: unknown): value is ModelGroupId =>
+  typeof value === 'string' && (MODEL_GROUP_IDS as readonly string[]).includes(value);
+
 /** Группы расшифровки: модели в порядке каталога, затем общая группа. */
 export const TRANSCRIPTION_GROUP_IDS = [...ASR_MODEL_IDS, 'voices'] as const satisfies readonly ModelGroupId[];
 

@@ -40,7 +40,8 @@ export interface ExportDeps {
 /** Метка BOM: старый Блокнот и другие программы Windows узнают по ней UTF-8 (кириллицу). */
 const BOM = '﻿';
 
-async function loadDoc(libraryDir: string, meetingId: string): Promise<ExportDoc> {
+/** Встреча для выгрузки и для модели итогов: текст с правками и именами спикеров; нет текста — понятная ошибка. */
+export async function loadExportDoc(libraryDir: string, meetingId: string): Promise<ExportDoc> {
   let doc: ExportDoc | null;
   try {
     const meeting = await readMeeting(libraryDir, meetingId);
@@ -54,13 +55,13 @@ async function loadDoc(libraryDir: string, meetingId: string): Promise<ExportDoc
 }
 
 export async function copyMeeting(deps: ExportDeps, meetingId: string): Promise<void> {
-  const doc = await loadDoc(deps.libraryDir(), meetingId);
+  const doc = await loadExportDoc(deps.libraryDir(), meetingId);
   await deps.writeClipboard({ text: toPlainText(doc), html: toHtml(doc) });
 }
 
 /** «Скопировать для ИИ»: запрос и текст встречи — только простым текстом (чаты вставляют его без лишнего оформления). */
 export async function copyForAi(deps: ExportDeps, meetingId: string): Promise<void> {
-  const doc = await loadDoc(deps.libraryDir(), meetingId);
+  const doc = await loadExportDoc(deps.libraryDir(), meetingId);
   const prompt = resolveAiPrompt(await deps.aiPrompt());
   await deps.writeClipboard({ text: withAiPrompt(prompt, toPlainText(doc)) });
 }
@@ -79,7 +80,7 @@ async function startDir(deps: ExportDeps): Promise<string> {
 
 /** Окно сохранения → файл. Не атомарно: файл, открытый в Word, даёт понятное «файл занят другой программой». */
 export async function saveMeeting(deps: ExportDeps, meetingId: string, format: ExportFormat): Promise<{ saved: boolean }> {
-  const doc = await loadDoc(deps.libraryDir(), meetingId);
+  const doc = await loadExportDoc(deps.libraryDir(), meetingId);
   const dir = await startDir(deps);
   const picked = await deps.chooseSavePath(join(dir, exportFileName(doc.title, format)), format);
   if (picked === null) return { saved: false };

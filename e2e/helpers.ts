@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test';
 import ffmpegPath from 'ffmpeg-static';
@@ -26,6 +26,10 @@ export interface LaunchOptions {
   transcripts?: Record<string, unknown>;
   /** Сколько длится каждый из пяти шагов поддельного скачивания модели, мс (по умолчанию — мгновенно). */
   downloadStepMs?: number;
+  /** Модели, уже «скачанные» в поддельном хранилище: например, ['qwen3.5-9b'] — модель для итогов. */
+  installedModels?: string[];
+  /** Пауза поддельного движка итогов между кусками ответа, мс (по умолчанию 20). */
+  llmTokenMs?: number;
 }
 
 export interface LaunchedApp {
@@ -37,6 +41,8 @@ export interface LaunchedApp {
   libraryDir: string;
   /** «Корзина» программы в тестах (TEXTMEET_TEST_TRASH): удалённое переносится сюда. */
   trashDir: string;
+  /** Журнал поддельного движка итогов: параметры запусков и запросы, по строке JSON. */
+  llmLog: string;
   close(): Promise<void>;
 }
 
@@ -218,6 +224,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
   const homeDir = join(root, 'home');
   const libraryDir = join(root, 'library');
   const trashDir = join(root, 'trash');
+  const llmLog = join(root, 'llm.log');
 
   let app: ElectronApplication | undefined;
   let page: Page;
@@ -236,6 +243,11 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         TEXTMEET_TEST_DOWNLOAD_MS: String(options.downloadStepMs ?? 0),
         // Удалённое — в папку теста, а не в Корзину системы (на машинах CI её может не быть).
         TEXTMEET_TEST_TRASH: trashDir,
+        TEXTMEET_TEST_INSTALLED: (options.installedModels ?? []).join(','),
+        // Итоги — поддельным llama-server (Node-скрипт), без модели и видеокарты.
+        TEXTMEET_TEST_LLM: resolve('src/test-support/fake-llama-server.mjs'),
+        TEXTMEET_FAKE_LLM_TOKEN_MS: String(options.llmTokenMs ?? 20),
+        TEXTMEET_FAKE_LLM_LOG: llmLog,
       },
     });
     page = await mainWindow(app);
@@ -253,6 +265,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
     homeDir,
     libraryDir,
     trashDir,
+    llmLog,
     close: async () => {
       // Если запись ещё идёт, при выходе программа спросит системным окном — отвечаем «Остановить и выйти».
       // Тест мог уже закрыть программу сам (выход из меню) — тогда закрывать нечего.
@@ -265,4 +278,18 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
       await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     },
   };
+}
+
+/** Запросы, которые получил поддельный движок итогов (тело /v1/chat/completions). */
+export interface LlmRequest {
+  messages: { role: string; content: string }[];
+  max_tokens: number;
+}
+
+export async function llmRequests(llmLog: string): Promise<LlmRequest[]> {
+  const text = await readFile(llmLog, 'utf8').catch(() => '');
+  return text
+    .split('\n')
+    .filter((line) => line.includes('"chat"'))
+    .map((line) => (JSON.parse(line) as { body: LlmRequest }).body);
 }

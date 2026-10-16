@@ -161,3 +161,63 @@ describe('toHtml', () => {
     expect(html).toContain('1 &lt; 2 &amp; 3 &gt; 2');
   });
 });
+
+describe('the summary in the export', () => {
+  const summary = {
+    text: '### Главное\n- Бюджет — **половина**.\n1. Написать Олегу.',
+    model: 'qwen3.5-9b',
+    modelTitle: 'Qwen3.5 9B',
+    createdAt: new Date(2026, 8, 27, 16, 55).toISOString(),
+    status: 'stopped' as const,
+    sourceHash: 'h',
+  };
+  const doc = buildExportDoc(meeting, { segments: [seg(708, 's1', 'Смотри.')] }, summary);
+
+  it('goes first, signed with the model and the date, then comes the text of the meeting', () => {
+    expect(toPlainText(doc)).toBe(
+      [
+        'Созвон с Ириной',
+        '27 сентября 2026, 16:20 · 32 мин',
+        'Участники: Ирина',
+        '',
+        'Итоги встречи',
+        'Qwen3.5 9B · 27.09.2026, 16:55 · остановлено',
+        '',
+        'Главное',
+        '',
+        '• Бюджет — половина.',
+        '',
+        '1. Написать Олегу.',
+        '',
+        'Текст встречи',
+        '',
+        'Ирина [11:48]',
+        'Смотри.',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('keeps bold and lists in the formatted text', () => {
+    const html = toHtml(doc);
+    expect(html).toContain('<h2 style="font-size:13pt">Итоги встречи</h2>');
+    expect(html).toContain('<ul><li>Бюджет — <b>половина</b>.</li></ul>');
+    expect(html).toContain('<ol><li>Написать Олегу.</li></ol>');
+    expect(html.indexOf('Итоги встречи')).toBeLessThan(html.indexOf('Текст встречи'));
+  });
+
+  it('keeps the numbers of a numbered list broken by a nested point', () => {
+    const split = buildExportDoc(meeting, { segments: [seg(708, 's1', 'Смотри.')] }, {
+      ...summary,
+      text: '1. Бюджет\n   - половина\n2. Дизайн',
+    });
+    expect(toPlainText(split)).toContain('1. Бюджет\n\n• половина\n\n2. Дизайн');
+    expect(toHtml(split)).toContain('<ol start="2"><li>Дизайн</li></ol>');
+  });
+
+  it('is left out without a summary', () => {
+    const plain = buildExportDoc(meeting, { segments: [seg(708, 's1', 'Смотри.')] });
+    expect(plain.summary).toBeUndefined();
+    expect(toPlainText(plain)).not.toContain('Итоги встречи');
+  });
+});

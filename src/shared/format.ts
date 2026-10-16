@@ -24,6 +24,14 @@ export function formatLongDate(iso: string): string {
   return `${d.getDate()} ${MONTHS_GENITIVE[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Когда сделаны итоги: «27.09, 16:55» (местное время); withYear — «27.09.2026, 16:55» (для выгрузки). */
+export function formatStamp(iso: string, withYear = false): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const day = `${pad(d.getDate())}.${pad(d.getMonth() + 1)}${withYear ? `.${d.getFullYear()}` : ''}`;
+  return `${day}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** Время реплики: «1:05», «12:04», «1:02:05». */
 export function formatTimestamp(seconds: number): string {
   const total = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
@@ -53,6 +61,17 @@ export const formatMegabytes = (bytes: number): string => `${megabytes(bytes)} �
 
 /** Ход скачивания: «120 из 464 МБ» — мегабайты, чтобы число росло заметно и у больших моделей. */
 export const formatDownloaded = (done: number, total: number): string => `${megabytes(done)} из ${megabytes(total)} МБ`;
+
+const gigabytes = (bytes: number): string => (Math.max(0, bytes) / GB).toFixed(1).replace('.', ',');
+
+/** Ход скачивания больших моделей (для итогов): «2,7 из 6,0 ГБ». */
+export const formatDownloadedGb = (done: number, total: number): string => `${gigabytes(done)} из ${gigabytes(total)} ГБ`;
+
+/** Сколько осталось скачивать: «осталось меньше минуты», «осталось около 4 мин», «осталось около 1 ч 05 мин». */
+export function formatRemaining(seconds: number): string {
+  if (seconds < 60) return 'осталось меньше минуты';
+  return `осталось около ${formatDurationShort(Math.ceil(seconds / 60) * 60)}`;
+}
 
 /** Размер для людей: «50 МБ», «0,8 ГБ», «214 ГБ» (от 100 МБ — в гигабайтах). */
 export function formatBytes(bytes: number): string {

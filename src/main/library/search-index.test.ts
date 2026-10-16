@@ -98,6 +98,7 @@ describe('SearchIndex', () => {
       titleRanges: [],
       createdAt: '2026-09-03T10:00:00.000Z',
       total: 1,
+      aiHits: [],
       hits: [
         {
           segmentId: 'seg-1',
@@ -149,7 +150,7 @@ describe('SearchIndex', () => {
     for (let i = 0; i <= SEARCH_MAX_MEETINGS; i++) {
       index.entries.set(`m${i}`, {
         stamp: 'x',
-        meeting: { id: `m${i}`, title: 'Бюджет', titleNorm: 'бюджет', createdAt: '2026-09-01', speakerNames: {}, segments: [] },
+        meeting: { id: `m${i}`, title: 'Бюджет', titleNorm: 'бюджет', createdAt: '2026-09-01', speakerNames: {}, segments: [], ai: [] },
       });
     }
     // Папка совпадает — обновлять индекс поиску незачем.
@@ -309,5 +310,43 @@ describe('SearchIndex', () => {
     writeFileSync(file, 'x');
     t.setLibrary(file);
     await expect(t.index.refresh()).rejects.toThrow('Не удалось прочитать библиотеку');
+  });
+});
+
+describe('SearchIndex — summaries and answers', () => {
+  const writeAi = (lib: string, n: number, ai: unknown) => writeFileSync(join(lib, idOf(n), 'ai.json'), JSON.stringify(ai));
+  const answer = { model: 'qwen3.5-9b', modelTitle: 'Qwen3.5 9B', createdAt: '2026-10-14T10:00:00.000Z', status: 'done' };
+
+  it('finds words in the summary and in the answers, signed instead of the time', async () => {
+    const lib = makeTempDir();
+    writeMeeting(lib, 1, 'Созвон', [{ text: 'Про бюджет.' }]);
+    writeAi(lib, 1, {
+      version: 1,
+      summary: { ...answer, text: '### Главное\n- **Бюджет** — половина плана.', sourceHash: 'h' },
+      questions: [{ ...answer, id: 'q1', question: 'Что решили по бюджету на октябрь и подрядчикам вообще?', answer: 'Бюджет урезан.' }],
+    });
+    const index = new SearchIndex({ libraryDir: () => lib, logger });
+    const [found] = (await index.search('бюджет')).meetings;
+    expect(found?.total).toBe(3);
+    expect(found?.aiHits.map((h) => [h.key, h.label, h.text])).toEqual([
+      ['summary', 'Итоги', 'Главное\n\n• Бюджет — половина плана.'],
+      ['q:q1', 'Ответ на «Что решили по бюджету на октябрь и подр…»', 'Бюджет урезан.'],
+    ]);
+    // Вместе с итогами и ответами — не больше трёх строк.
+    expect(found?.hits).toHaveLength(1);
+  });
+
+  it('reads the summary again when ai.json changes, and ignores a broken one', async () => {
+    const lib = makeTempDir();
+    writeMeeting(lib, 1, 'Созвон', [{ text: 'Текст.' }]);
+    const index = new SearchIndex({ libraryDir: () => lib, logger });
+    expect((await index.search('перенос')).meetings).toEqual([]);
+    writeAi(lib, 1, { version: 1, summary: { ...answer, text: 'Перенос на пятницу.', sourceHash: 'h' }, questions: [] });
+    await index.refresh();
+    expect((await index.search('перенос')).meetings).toHaveLength(1);
+    writeFileSync(join(lib, idOf(1), 'ai.json'), '{ сломано');
+    await index.refresh();
+    expect((await index.search('перенос')).meetings).toEqual([]);
+    expect((await index.search('текст')).meetings).toHaveLength(1);
   });
 });

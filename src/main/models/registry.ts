@@ -1,8 +1,10 @@
 import { join } from 'node:path';
 import { ASR_MODEL_IDS, type AsrModelId } from '../../shared/asr-models';
+import { LLM_MODEL_IDS, type LlmModelId } from '../../shared/llm-models';
 import type { ModelGroupId } from '../../shared/transcription';
 
-// Группа моделей — то, что пользователь скачивает и удаляет одной кнопкой: модель расшифровки или «voices».
+// Группа моделей — то, что пользователь скачивает и удаляет одной кнопкой: модель расшифровки, «voices» или модель для
+// итогов.
 export type { ModelGroupId };
 
 export interface ModelFile {
@@ -17,8 +19,14 @@ export interface ModelFile {
 const HF_GIGAAM = 'https://huggingface.co/Smirnov75/GigaAM-v3-sherpa-onnx/resolve/6888903da215c7735f51101d939f3bfa679fb2b8';
 const SHERPA_RELEASES = 'https://github.com/k2-fsa/sherpa-onnx/releases/download';
 
-/** Все группы: модели расшифровки в порядке каталога, затем общая группа. */
-export const MODEL_GROUP_IDS = [...ASR_MODEL_IDS, 'voices'] as const satisfies readonly ModelGroupId[];
+export const isModelGroupId = (value: unknown): value is ModelGroupId =>
+  typeof value === 'string' && (MODEL_GROUP_IDS as readonly string[]).includes(value);
+
+/** Группы расшифровки: модели в порядке каталога, затем общая группа. */
+export const TRANSCRIPTION_GROUP_IDS = [...ASR_MODEL_IDS, 'voices'] as const satisfies readonly ModelGroupId[];
+
+/** Все группы: расшифровка, затем модели для итогов в порядке каталога. */
+export const MODEL_GROUP_IDS = [...TRANSCRIPTION_GROUP_IDS, ...LLM_MODEL_IDS] as const satisfies readonly ModelGroupId[];
 
 /** Папка модели расшифровки внутри папки моделей. */
 export const ASR_FOLDERS: Record<AsrModelId, string> = {
@@ -49,7 +57,7 @@ function huggingFace(group: AsrModelId, repo: string, commit: string, files: [st
 // Размеры и SHA-256 сверены 2026-09-29 (GigaAM, голоса) и 2026-10-02 (остальные модели) с Hugging Face (LFS oid;
 // у небольших файлов в git — сумма скачанного файла) и релизами sherpa-onnx на GitHub. Адреса Hugging Face закреплены
 // на коммитах (2026-10-02): файл по адресу не подменится, а сумма не разойдётся с реестром.
-export const MODEL_FILES: readonly ModelFile[] = [
+const TRANSCRIPTION_FILES: readonly ModelFile[] = [
   {
     group: 'gigaam-v3-e2e-rnnt',
     path: 'gigaam-v3-e2e-rnnt/gigaam_v3_e2e_rnnt_encoder_int8.onnx',
@@ -141,6 +149,53 @@ export const MODEL_FILES: readonly ModelFile[] = [
   },
 ];
 
+/**
+ * Модель для итогов — один файл GGUF (сжатие Q4_K_M) из репозитория Hugging Face, закреплённого на коммите; в папке
+ * моделей — llm/<модель>/<файл>.
+ */
+function llmFile(group: LlmModelId, repo: string, commit: string, name: string, size: number, sha256: string): ModelFile {
+  return { group, path: `llm/${group}/${name}`, url: `https://huggingface.co/${repo}/resolve/${commit}/${name}`, size, sha256 };
+}
+
+// Размеры и SHA-256 сверены 2026-10-13 с Hugging Face (LFS oid), у Qwen3.5 9B — ещё и по скачанному файлу.
+export const LLM_FILES: readonly ModelFile[] = [
+  llmFile(
+    'qwen3.5-9b',
+    'unsloth/Qwen3.5-9B-GGUF',
+    '3885219b6810b007914f3a7950a8d1b469d598a5',
+    'Qwen3.5-9B-Q4_K_M.gguf',
+    5_680_522_464,
+    '03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8',
+  ),
+  llmFile(
+    'gigachat-3.1-lightning',
+    'ai-sage/GigaChat3.1-10B-A1.8B-GGUF',
+    '97045b260251cfa86f5ad25638fa2dd074153446',
+    'GigaChat3.1-10B-A1.8B-q4_K_M.gguf',
+    6_474_702_976,
+    '68a8732fb5cee04f83ebffd7924e15c534d4442c5a43d2ba9e2041fe310b8deb',
+  ),
+  llmFile(
+    't-lite-it-2.1',
+    't-tech/T-lite-it-2.1-GGUF',
+    'fc10186e59064c2e74f59c3d5dbce233931b3b81',
+    'T-lite-it-2.1-Q4_K_M.gguf',
+    5_027_750_240,
+    '68c75f5940c36baca18113058ad3d55f6d1d3e1123a8053bb4bba8481805c960',
+  ),
+  llmFile(
+    'qwen3.5-4b',
+    'unsloth/Qwen3.5-4B-GGUF',
+    'e87f176479d0855a907a41277aca2f8ee7a09523',
+    'Qwen3.5-4B-Q4_K_M.gguf',
+    2_740_937_888,
+    '00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4',
+  ),
+];
+
+/** Все файлы моделей: расшифровка и итоги. */
+export const MODEL_FILES: readonly ModelFile[] = [...TRANSCRIPTION_FILES, ...LLM_FILES];
+
 /** Пути к общим моделям (разделение по голосам, поиск речи) для процесса расшифровки. */
 export interface VoicePaths {
   segmentation: string;
@@ -169,6 +224,13 @@ export function voicePaths(root: string): VoicePaths {
 /** Путь к файлу модели расшифровки по имени внутри её папки; файла нет в реестре — ошибка (опечатка в коде). */
 export const asrFilePath = (root: string, model: AsrModelId, name: string): string =>
   pathOf(root, `${ASR_FOLDERS[model]}/${name}`);
+
+/** Файл модели для итогов (у каждой — один). */
+export function llmFilePath(root: string, model: LlmModelId): string {
+  const file = LLM_FILES.find((f) => f.group === model);
+  if (!file) throw new Error(`В реестре нет модели ${model}`);
+  return modelFilePath(root, file);
+}
 
 export const groupFiles = (group: ModelGroupId): ModelFile[] => MODEL_FILES.filter((f) => f.group === group);
 export const groupSize = (group: ModelGroupId): number => groupFiles(group).reduce((sum, f) => sum + f.size, 0);

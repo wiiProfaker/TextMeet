@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AiPromptSchema } from './ai-prompt';
 import { ASR_MODEL_IDS, DEFAULT_ASR_MODEL } from './asr-models';
+import { LLM_MODEL_IDS } from './llm-models';
 
 // Новые поля добавляются с .default(...) — старый settings.json читается без миграции.
 export const SettingsSchema = z.object({
@@ -26,6 +27,11 @@ export const SettingsSchema = z.object({
    * (не строка, длиннее 4000 символов) — забывается.
    */
   aiPrompt: AiPromptSchema.default(null).catch(null),
+  /**
+   * Модель для итогов (каталог на вкладке «ИИ»); null — не выбрана. Неизвестная или испорченная — забывается: тогда
+   * берётся первая скачанная (shared/llm-models.ts, effectiveAiModel).
+   */
+  aiModel: z.enum(LLM_MODEL_IDS).nullable().default(null).catch(null),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppInfo, SettingsState } from '../../shared/ipc';
+import { AiModelSettings } from './AiModelSettings';
 import { AiSettings } from './AiSettings';
 import { errorText } from './errors';
 import { launchAtLoginNoticeText } from './format';
@@ -183,6 +184,7 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
             onError={setError}
             onErrorAfterLeave={onError}
           />
+          <AiModelSettings />
         </Panel>
 
         <Panel id="general" current={tab}>

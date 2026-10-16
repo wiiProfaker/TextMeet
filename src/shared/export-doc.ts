@@ -1,5 +1,7 @@
 // Выгрузка встречи: одна раскладка текста для «Скопировать всё», .txt и .docx (решения Плана 5, §2.3).
 // Чистые функции без зависимостей: тексту в буфере обмена, в .txt и в Word не разойтись.
+import { aiCaption, type AiSummary } from './ai';
+import { inlineText, listMark, parseAiMarkdown, type AiInline, type AiMdBlock } from './ai-markdown';
 import { formatDurationShort, formatLongDate, formatTimestamp } from './format';
 import type { Meeting } from './meeting';
 import { speakerLabel, type Transcript } from './transcript';
@@ -13,6 +15,13 @@ export interface ExportParagraph {
   text: string;
 }
 
+/** Итоги встречи в выгрузке (решения Плана 9, §2.3): в начале, перед текстом встречи. */
+export interface ExportSummary {
+  /** «Qwen3.5 9B · 27.09.2026, 16:55» (у остановленных — «· остановлено»). */
+  caption: string;
+  blocks: AiMdBlock[];
+}
+
 export interface ExportDoc {
   title: string;
   /** «27 сентября 2026, 16:20 · 32 мин»; длительность неизвестна — только дата. */
@@ -20,7 +29,12 @@ export interface ExportDoc {
   /** «Участники: Я, Ирина, Спикер 2» — в порядке первого появления; реплик нет — null. */
   participantsLine: string | null;
   paragraphs: ExportParagraph[];
+  /** Итоги встречи; нет — раздела нет (и в «Скопировать для ИИ», и в том, что видит модель). */
+  summary?: ExportSummary;
 }
+
+export const SUMMARY_HEADING = 'Итоги встречи';
+export const TEXT_HEADING = 'Текст встречи';
 
 /**
  * Управляющие символы недопустимы в XML — Word счёл бы файл повреждённым. Вертикальная табуляция (её даёт вставка из
@@ -37,6 +51,7 @@ const BLANK_LINES = /\n(?:[^\S\n]*\n)+/g;
 export function buildExportDoc(
   meeting: Pick<Meeting, 'title' | 'createdAt' | 'durationSec' | 'speakerNames'>,
   transcript: Pick<Transcript, 'segments'>,
+  summary: AiSummary | null = null,
 ): ExportDoc {
   const paragraphs: (ExportParagraph & { speakerId: string })[] = [];
   for (const segment of transcript.segments) {
@@ -62,13 +77,29 @@ export function buildExportDoc(
     metaLine: meta.join(' · '),
     participantsLine: participants.length > 0 ? `Участники: ${participants.join(', ')}` : null,
     paragraphs: paragraphs.map(({ speaker, time, text }) => ({ speaker, time, text })),
+    ...(summary && { summary: { caption: aiCaption(summary, true), blocks: parseAiMarkdown(cleanText(summary.text)) } }),
   };
+}
+
+/** Итоги простым текстом: заголовки и абзацы — строками, пункты — с «•» или номером. */
+function summaryLines(summary: ExportSummary): string[] {
+  const lines: string[] = [];
+  for (const block of summary.blocks) {
+    lines.push('');
+    if (block.kind === 'list') {
+      block.items.forEach((item, i) => lines.push(`${listMark(block, i)} ${inlineText(item)}`));
+    } else {
+      lines.push(inlineText(block.inline));
+    }
+  }
+  return lines;
 }
 
 /** Обычный текст: шапка, пустая строка, абзацы «Имя [время]» + текст через пустую строку. */
 export function toPlainText(doc: ExportDoc, eol = '\n'): string {
   const lines = [doc.title, doc.metaLine];
   if (doc.participantsLine) lines.push(doc.participantsLine);
+  if (doc.summary) lines.push('', SUMMARY_HEADING, doc.summary.caption, ...summaryLines(doc.summary), '', TEXT_HEADING);
   for (const p of doc.paragraphs) lines.push('', `${p.speaker} [${p.time}]`, p.text);
   return lines.join('\n').replace(/\r\n?|\n/g, eol) + eol;
 }
@@ -78,6 +109,24 @@ const escapeHtml = (text: string): string =>
 
 const htmlLines = (text: string): string => escapeHtml(text).replace(/\r\n?|\n/g, '<br>');
 
+const inlineHtml = (inline: readonly AiInline[]): string =>
+  inline
+    .map((piece) => {
+      let html = htmlLines(piece.text);
+      if (piece.italic) html = `<i>${html}</i>`;
+      if (piece.bold) html = `<b>${html}</b>`;
+      return html;
+    })
+    .join('');
+
+function blockHtml(block: AiMdBlock): string {
+  if (block.kind === 'heading') return `<p><b>${inlineHtml(block.inline)}</b></p>`;
+  if (block.kind === 'paragraph') return `<p>${inlineHtml(block.inline)}</p>`;
+  const tag = block.ordered ? 'ol' : 'ul';
+  const start = block.ordered && block.start !== 1 ? ` start="${block.start}"` : '';
+  return `<${tag}${start}>${block.items.map((item) => `<li>${inlineHtml(item)}</li>`).join('')}</${tag}>`;
+}
+
 /** Оформленный текст для буфера обмена (вставка в Word, Google Docs): имена жирным, время серым. */
 export function toHtml(doc: ExportDoc): string {
   const parts = [
@@ -85,6 +134,14 @@ export function toHtml(doc: ExportDoc): string {
     `<p style="color:#7a7a7a">${htmlLines(doc.metaLine)}</p>`,
   ];
   if (doc.participantsLine) parts.push(`<p>${htmlLines(doc.participantsLine)}</p>`);
+  if (doc.summary) {
+    parts.push(
+      `<h2 style="font-size:13pt">${SUMMARY_HEADING}</h2>`,
+      `<p style="color:#7a7a7a">${htmlLines(doc.summary.caption)}</p>`,
+      ...doc.summary.blocks.map(blockHtml),
+      `<h2 style="font-size:13pt">${TEXT_HEADING}</h2>`,
+    );
+  }
   for (const p of doc.paragraphs) {
     parts.push(
       `<p><b>${htmlLines(p.speaker)}</b> <span style="color:#8a8a8a">[${escapeHtml(p.time)}]</span><br>${htmlLines(p.text)}</p>`,

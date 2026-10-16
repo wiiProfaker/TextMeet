@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { Logger } from '../logger';
-import { transcriptionTexts } from '../texts';
-import { CatalogDownloads, DOWNLOAD_REPORT_MS, DOWNLOAD_RUNNING } from './catalog-downloads';
+import { aiTexts, transcriptionTexts } from '../texts';
+import { CatalogDownloads, DOWNLOAD_REPORT_MS, DOWNLOAD_RUNNING, REMAINING_AFTER_MS } from './catalog-downloads';
 import { DownloadError } from './download';
 import type { EnsureOptions } from './model-manager';
 import type { ModelGroupId } from './registry';
@@ -47,11 +47,14 @@ describe('CatalogDownloads', () => {
     const t = setup();
     t.downloads.start('t-one');
     expect(t.calls[0]?.groups).toEqual(['t-one', 'voices']);
-    expect(t.downloads.snapshot()).toEqual({ download: { id: 't-one', done: 0, total: 0 }, downloadError: null });
+    expect(t.downloads.snapshot()).toEqual({
+      download: { id: 't-one', done: 0, total: 0, remainingSec: null },
+      downloadError: null,
+    });
     expect(t.downloads.isBusy()).toBe(true);
     t.tick(DOWNLOAD_REPORT_MS);
     t.calls[0]!.options.onProgress?.({ done: 50, total: 200 });
-    expect(t.downloads.snapshot().download).toEqual({ id: 't-one', done: 50, total: 200 });
+    expect(t.downloads.snapshot().download).toEqual({ id: 't-one', done: 50, total: 200, remainingSec: null });
     t.calls[0]!.resolve();
     await vi.waitFor(() => expect(t.downloads.isBusy()).toBe(false));
     expect(t.downloads.snapshot()).toEqual({ download: null, downloadError: null });
@@ -124,5 +127,34 @@ describe('CatalogDownloads', () => {
     await t.downloads.cancel('t-one');
     expect(logger.warn).toHaveBeenCalled();
     expect(t.downloads.isBusy()).toBe(false);
+  });
+
+  it('downloads a model for summaries alone and names it in the reason of a failure', async () => {
+    const t = setup();
+    t.downloads.start('qwen3.5-4b');
+    expect(t.calls[0]?.groups).toEqual(['qwen3.5-4b']);
+    // Одно скачивание на всю программу: модель расшифровки ждёт модель для итогов.
+    expect(() => t.downloads.start('t-one')).toThrow(DOWNLOAD_RUNNING);
+    t.calls[0]!.reject(new DownloadError('network', 'нет связи с сервером'));
+    await vi.waitFor(() => expect(t.downloads.isBusy()).toBe(false));
+    expect(t.downloads.snapshot().downloadError).toEqual({
+      id: 'qwen3.5-4b',
+      message: aiTexts.download(new DownloadError('network', 'x')),
+    });
+  });
+
+  it('tells how long is left once the speed is known', () => {
+    const t = setup();
+    t.downloads.start('qwen3.5-9b');
+    const progress = (done: number) => t.calls[0]!.options.onProgress?.({ done, total: 1000 });
+    // Первый ответ — точка отсчёта: докачанные куски скорость не завышают.
+    progress(400);
+    t.tick(REMAINING_AFTER_MS - 1);
+    progress(450);
+    expect(t.downloads.snapshot().download?.remainingSec).toBeNull();
+    t.tick(1);
+    progress(500);
+    // 100 байт за 3 с → 500 оставшихся байт — за 15 с.
+    expect(t.downloads.snapshot().download?.remainingSec).toBeCloseTo(15);
   });
 });

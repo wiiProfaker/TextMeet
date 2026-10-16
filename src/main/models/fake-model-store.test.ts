@@ -27,4 +27,9 @@ describe('FakeModelStore', () => {
     // Уже скачанное — без «скачивания».
     await store.ensure([]);
   });
+
+  it('can start with models already «downloaded»', async () => {
+    const store = new FakeModelStore('M', 0, ['qwen3.5-9b']);
+    expect((await store.state()).filter((g) => g.installed).map((g) => g.id)).toEqual(['qwen3.5-9b']);
+  });
 });

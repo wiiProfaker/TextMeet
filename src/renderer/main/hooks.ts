@@ -1,4 +1,5 @@
 import { createContext, useCallback, useEffect, useRef, useState, type SyntheticEvent } from 'react';
+import type { AiMeetingView, AiState } from '../../shared/ai';
 import type { ImportProgress } from '../../shared/import';
 import type { MeetingListEntry, MeetingStatus } from '../../shared/meeting';
 import type { Peaks, RecordingState } from '../../shared/recording';
@@ -8,6 +9,7 @@ import type { Transcript } from '../../shared/transcript';
 import type { TranscriptionProgress } from '../../shared/transcription';
 import { errorText } from './errors';
 import { cleanDeviceLabel } from './format';
+import { catalogErrorsAfter, catalogErrorText, NO_CATALOG_ERRORS } from './model-catalog';
 import { nextSpeed } from './playback';
 
 /** Сколько кнопка показывает «Скопировано». */
@@ -471,9 +473,12 @@ export function useSearch(query: string, refreshKey: number): SearchState {
     const bump = () => setAgain((n) => n + 1);
     window.addEventListener('focus', bump);
     const unsubscribe = window.textmeet.onLibraryChanged(bump);
+    // Итоги или ответ сохранились — их слова тоже ищутся.
+    const unsubscribeAi = window.textmeet.onAiChanged(bump);
     return () => {
       window.removeEventListener('focus', bump);
       unsubscribe();
+      unsubscribeAi();
     };
   }, [active]);
 
@@ -512,9 +517,135 @@ export interface SearchView {
    * nonce — каждый переход новый: повторный щелчок по той же реплике снова к ней прокручивает. segmentId null — перешли
    * по названию встречи: она открывается сверху (в том числе уже открытая).
    */
-  focus: { meetingId: string; segmentId: string | null; nonce: number } | null;
+  focus: { meetingId: string; segmentId: string | null; aiKey: string | null; nonce: number } | null;
   /** Текст встречи правили — повторить поиск. */
   refresh(): void;
 }
 
 export const SearchViewContext = createContext<SearchView>({ words: [], focus: null, refresh: () => undefined });
+
+export interface ModelCatalog<S> {
+  state: S | null;
+  /** Ошибка чтения или ответа на нажатие (ответ на нажатие важнее). */
+  error: string | null;
+  /** Действие с ответом-состоянием («Скачать», «Удалить»…); его ошибку показываем всегда — это ответ на нажатие. */
+  run(action: () => Promise<S>): void;
+}
+
+/**
+ * Каталог моделей в настройках (расшифровки или для итогов): состояние из main, перечитывается по событиям watch
+ * (скачивание продвинулось, расшифровка началась…). Запросы могут наложиться и ответить не по порядку — показываем
+ * только ответ на последний. load и watch берутся при первом показе.
+ */
+export function useModelCatalog<S>(load: () => Promise<S>, watch: (reload: () => void) => () => void): ModelCatalog<S> {
+  const [state, setState] = useState<S | null>(null);
+  const [errors, setErrors] = useState(NO_CATALOG_ERRORS);
+  const latestRequest = useRef(0);
+  const source = useRef({ load, watch });
+
+  useEffect(() => {
+    const reload = () => {
+      const request = ++latestRequest.current;
+      source.current
+        .load()
+        .then((next) => {
+          if (request !== latestRequest.current) return;
+          setState(next);
+          setErrors((prev) => catalogErrorsAfter(prev, 'load', null));
+        })
+        .catch((err: unknown) => {
+          if (request === latestRequest.current) setErrors((prev) => catalogErrorsAfter(prev, 'load', errorText(err)));
+        });
+    };
+    reload();
+    const unwatch = source.current.watch(reload);
+    return () => {
+      // Ответы после закрытия настроек не нужны.
+      latestRequest.current += 1;
+      unwatch();
+    };
+  }, []);
+
+  const run = useCallback((action: () => Promise<S>) => {
+    const request = ++latestRequest.current;
+    action().then(
+      (next) => {
+        setErrors((prev) => catalogErrorsAfter(prev, 'action', null));
+        if (request === latestRequest.current) setState(next);
+      },
+      (err: unknown) => setErrors((prev) => catalogErrorsAfter(prev, 'action', errorText(err))),
+    );
+  }, []);
+
+  return { state, error: catalogErrorText(errors), run };
+}
+
+const NO_AI: AiState = { job: null, finished: null, failures: [] };
+
+/** Работа модели для итогов: что она пишет сейчас (один запрос на всю программу) и последние неудачи по встречам. */
+export function useAiState(): AiState {
+  const [state, setState] = useState<AiState | null>(null);
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = window.textmeet.onAiState(setState);
+    window.textmeet
+      .getAiState()
+      .then((initial) => {
+        // Событие могло прийти раньше ответа — оно новее.
+        if (active) setState((current) => current ?? initial);
+      })
+      .catch((err: unknown) => console.error('TextMeet: состояние итогов не получено', errorText(err)));
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
+  return state ?? NO_AI;
+}
+
+/**
+ * Итоги и вопросы встречи (ai.json): при открытии встречи, после записи файла (ai:changed), при возврате в окно и когда
+ * меняется текст встречи (textKey) — от него зависит пометка «Текст встречи меняли после итогов». Ошибка чтения — в
+ * onError; показанное остаётся.
+ */
+export function useAiMeeting(
+  meetingId: string,
+  textKey: unknown,
+  onError: (message: string) => void,
+): [AiMeetingView | null, (view: AiMeetingView) => void] {
+  const [state, setState] = useState<{ meetingId: string; view: AiMeetingView } | null>(null);
+  const [again, setAgain] = useState(0);
+  const latest = useRef(0);
+  const report = useRef(onError);
+  report.current = onError;
+  useEffect(() => {
+    const bump = () => setAgain((n) => n + 1);
+    window.addEventListener('focus', bump);
+    const unsubscribe = window.textmeet.onAiChanged((id) => {
+      if (id === meetingId) bump();
+    });
+    return () => {
+      window.removeEventListener('focus', bump);
+      unsubscribe();
+    };
+  }, [meetingId]);
+  useEffect(() => {
+    const request = ++latest.current;
+    window.textmeet
+      .getAi(meetingId)
+      .then((view) => {
+        if (request === latest.current) setState({ meetingId, view });
+      })
+      .catch((err: unknown) => {
+        if (request === latest.current) report.current(errorText(err));
+      });
+  }, [meetingId, textKey, again]);
+  const set = useCallback(
+    (view: AiMeetingView) => {
+      latest.current += 1;
+      setState({ meetingId, view });
+    },
+    [meetingId],
+  );
+  return [state?.meetingId === meetingId ? state.view : null, set];
+}

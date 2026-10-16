@@ -14,14 +14,14 @@ export function Marked({ text, ranges }: { text: string; ranges: readonly TextRa
 
 interface Props {
   state: SearchState;
-  /** Открытая из найденного реплика — выделена. */
-  selected: { meetingId: string; segmentId: string | null } | null;
-  /** Открыть встречу; segmentId — прокрутить к этой реплике. */
-  onOpen(meetingId: string, segmentId: string | null): void;
+  /** Открытое из найденного — выделено: реплика или (aiKey) итоги и ответы. */
+  selected: { meetingId: string; segmentId: string | null; aiKey: string | null } | null;
+  /** Открыть встречу; segmentId — прокрутить к этой реплике; aiKey — показать блок итогов. */
+  onOpen(meetingId: string, segmentId: string | null, aiKey?: string): void;
 }
 
 function MeetingHits({ meeting, selected, onOpen }: { meeting: SearchMeeting } & Omit<Props, 'state'>) {
-  const more = meeting.total - meeting.hits.length;
+  const more = meeting.total - meeting.hits.length - meeting.aiHits.length;
   return (
     <div className="rg" role="group" aria-label={meeting.title}>
       <button type="button" className="rg-h" onClick={() => onOpen(meeting.meetingId, null)}>
@@ -30,6 +30,20 @@ function MeetingHits({ meeting, selected, onOpen }: { meeting: SearchMeeting } &
         </b>
         <span>{searchMeetingMeta(meeting.createdAt, meeting.total, new Date())}</span>
       </button>
+      {meeting.aiHits.map((hit) => (
+        <button
+          key={hit.key}
+          type="button"
+          className="hit ai-hit"
+          aria-current={selected?.meetingId === meeting.meetingId && selected.aiKey === hit.key ? 'true' : undefined}
+          onClick={() => onOpen(meeting.meetingId, null, hit.key)}
+        >
+          <span>
+            <span className="hw">{hit.label}</span>
+            <Marked text={hit.text} ranges={hit.ranges} />
+          </span>
+        </button>
+      ))}
       {meeting.hits.map((hit) => (
         <button
           key={hit.segmentId}

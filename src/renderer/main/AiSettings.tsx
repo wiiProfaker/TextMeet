@@ -124,8 +124,7 @@ export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave
           onBlur={flush}
         />
         <small id={hintId}>
-          Добавляется перед текстом встречи, когда вы нажимаете «Скопировать для ИИ». Вставьте скопированное в
-          Claude, ChatGPT или другой чат.
+          Используется для «Итогов встречи» и добавляется перед текстом, когда вы нажимаете «Скопировать для ИИ».
         </small>
         {text !== DEFAULT_AI_PROMPT && (
           <button type="button" className="lnk" onClick={reset}>

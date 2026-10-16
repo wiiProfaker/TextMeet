@@ -1,8 +1,21 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ASR_MODEL_IDS } from '../../shared/asr-models';
+import { LLM_MODEL_IDS } from '../../shared/llm-models';
 import { modelsRoot } from './models-dir';
-import { ASR_FOLDERS, asrFilePath, groupFiles, groupSize, MODEL_FILES, MODEL_GROUP_IDS, modelFilePath, voicePaths } from './registry';
+import {
+  ASR_FOLDERS,
+  asrFilePath,
+  groupFiles,
+  groupSize,
+  isModelGroupId,
+  llmFilePath,
+  MODEL_FILES,
+  MODEL_GROUP_IDS,
+  modelFilePath,
+  TRANSCRIPTION_GROUP_IDS,
+  voicePaths,
+} from './registry';
 
 describe('model registry', () => {
   it('describes every file with a url, a size and a SHA-256', () => {
@@ -27,6 +40,28 @@ describe('model registry', () => {
       for (const file of files) expect(file.path.startsWith(`${ASR_FOLDERS[id]}/`)).toBe(true);
     }
     expect(new Set(Object.values(ASR_FOLDERS)).size).toBe(ASR_MODEL_IDS.length);
+  });
+
+  it('has one GGUF file for every model for summaries, in llm/<model>/', () => {
+    for (const id of LLM_MODEL_IDS) {
+      const files = groupFiles(id);
+      expect(files).toHaveLength(1);
+      expect(files[0]?.path.startsWith(`llm/${id}/`)).toBe(true);
+      expect(files[0]?.path.endsWith('.gguf')).toBe(true);
+    }
+    expect(llmFilePath('M', 'qwen3.5-9b')).toBe(join('M', 'llm', 'qwen3.5-9b', 'Qwen3.5-9B-Q4_K_M.gguf'));
+    expect(groupSize('qwen3.5-9b')).toBe(5_680_522_464);
+  });
+
+  it('recognizes the groups of the registry only', () => {
+    expect(isModelGroupId('voices')).toBe(true);
+    expect(isModelGroupId('qwen3.5-4b')).toBe(true);
+    expect(isModelGroupId('llama-70b')).toBe(false);
+  });
+
+  it('keeps the transcription groups apart from the models for summaries', () => {
+    expect(MODEL_GROUP_IDS).toEqual([...TRANSCRIPTION_GROUP_IDS, ...LLM_MODEL_IDS]);
+    expect(TRANSCRIPTION_GROUP_IDS).toEqual([...ASR_MODEL_IDS, 'voices']);
   });
 
   it('pins every Hugging Face file to a commit', () => {

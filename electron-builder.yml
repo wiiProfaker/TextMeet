@@ -20,6 +20,12 @@ mac:
   extendInfo:
     NSMicrophoneUsageDescription: TextMeet записывает ваш микрофон во время встречи.
     NSAudioCaptureUsageDescription: TextMeet записывает звук компьютера во время встречи.
+# Движок итогов (llama-server и его библиотеки) кладёт в vendor/llama скрипт scripts/fetch-llama.mjs (npm run
+# fetch:llama); в программе он лежит рядом с app.asar — в resources/llama.
+extraResources:
+  - from: vendor/llama
+    to: llama
+    filter: ['**/*', '!.build']
 # ffmpeg — отдельная программа, sherpa-onnx — нативная библиотека (.node и .dll/.dylib рядом):
 # запускать и загружать их можно только из распакованной копии, не из app.asar.
 asarUnpack:

@@ -1685,6 +1685,14 @@ button.chip:hover {
   font-weight: 600;
 }
 
+/* «оценка» — полоски примерные: пунктирная рамка вместо заливки. */
+.tag.est {
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .mcard-bars {
   display: grid;
   gap: 4px;
@@ -1939,6 +1947,11 @@ mark {
   background: var(--sel);
 }
 
+/* Совпадение в итогах или ответе: подпись вместо времени реплики. */
+.hit.ai-hit {
+  grid-template-columns: 1fr;
+}
+
 .hit .ht {
   font-family: var(--f-text);
   font-size: 11.5px;
@@ -1963,4 +1976,223 @@ mark {
 .row.found {
   box-shadow: inset 0 0 0 1.5px var(--accent);
   content-visibility: visible;
+}
+
+/* ---- Встреча: блок «Итоги встречи» (решения Плана 9, §2.2; листы 18–20 макета) ---- */
+.ai {
+  flex: none;
+  max-height: 48vh;
+  overflow-y: auto;
+  margin: 14px 36px 2px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-h {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-h b {
+  font-family: var(--f-text);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.ai-h > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.ai-h .lnks,
+.qa-q .lnks {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.ai-h .btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12.5px;
+}
+
+.ai p,
+.ai ul,
+.ai ol {
+  margin: 0;
+  font-family: var(--f-text);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+
+.ai p {
+  white-space: pre-wrap;
+}
+
+.ai ul,
+.ai ol {
+  padding-left: 20px;
+}
+
+.ai-md {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ai h4 {
+  margin: 4px 0 0;
+  font-family: var(--f-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.ai-row {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-warn {
+  padding: 7px 10px;
+  border-radius: var(--r);
+  background: var(--warn-soft);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ai-wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--meter-off);
+  border-top-color: var(--accent);
+  flex: none;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Курсор в конце текста, пока модель пишет. */
+.caret {
+  display: inline-block;
+  width: 7px;
+  height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  border-radius: 1px;
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin,
+  .caret {
+    animation: none;
+  }
+}
+
+.qa {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.qa-i {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.qa-q {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+
+.qa-q .lnks {
+  font-weight: 400;
+}
+
+.qa-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.ask {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 6px 0 12px;
+  border-radius: var(--r);
+  border: 1px solid var(--line);
+  background: var(--bg);
+  margin-top: 2px;
+  flex: none;
+}
+
+.ask:focus-within {
+  border-color: var(--accent);
+}
+
+.ask input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: var(--text);
+  outline: none;
+}
+
+.ask input::placeholder {
+  color: var(--muted);
+}
+
+.ask .btn {
+  height: 26px;
+  padding: 0 10px;
+}
+
+.ask.off {
+  opacity: 0.55;
+}
+
+.ai-foot {
+  color: var(--muted);
+  font-family: var(--f-ui) !important;
+  font-size: 11.5px !important;
 }

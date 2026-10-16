@@ -1,4 +1,4 @@
-import { useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort, formatLongDate } from '../../shared/format';
 import type { ImportProgress } from '../../shared/import';
@@ -10,6 +10,7 @@ import { errorText } from './errors';
 import { isImportFailure, participantsText } from './format';
 import { SearchViewContext, usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, TrashIcon, WarnIcon } from './icons';
+import { AiBlock, AiSummaryButton, useAiPanel } from './AiBlock';
 import { CopyForAiButton } from './CopyForAiButton';
 import { ExportMenu } from './ExportMenu';
 import { importView } from './import-format';
@@ -31,6 +32,10 @@ interface Props {
   onError(message: string): void;
   /** Встречу удалили — выбрать соседнюю. */
   onDeleted(): void;
+  /** «Открыть настройки ИИ» из блока итогов. */
+  onOpenAiSettings(): void;
+  /** «Перейти» к встрече, которой занята модель. */
+  onOpenMeeting(meetingId: string): void;
 }
 
 const AUDIO_BUSY = 'Аудио нельзя удалить, пока встреча ждёт расшифровки или расшифровывается.';
@@ -259,6 +264,8 @@ function MeetingView({
   importing,
   onError,
   onDeleted,
+  onOpenAiSettings,
+  onOpenMeeting,
 }: Props & { entry: Extract<MeetingListEntry, { kind: 'ok' }> }) {
   const [dialog, setDialog] = useState(false);
   const { meeting, mixReady, mixFailed } = entry;
@@ -302,6 +309,18 @@ function MeetingView({
   const actions = transcribeActions(meeting.status, hasAudio, load.kind);
   // Выгружать есть что, только если в тексте есть хоть одна реплика (прежний текст — и во время расшифровки заново).
   const canExport = load.kind === 'ready' && load.transcript.segments.some((s) => s.text.trim() !== '');
+  // Текст встречи, который видела бы модель: правки и имена спикеров меняют пометку «текст меняли после итогов».
+  const shownTranscript = load.kind === 'ready' ? load.transcript : null;
+  const speakerNames = JSON.stringify(meeting.speakerNames);
+  const textKey = useMemo(() => [shownTranscript, speakerNames], [shownTranscript, speakerNames]);
+  const ai = useAiPanel(meeting.id, textKey, onError);
+  // Перешли из найденного в итогах или ответах — блок итогов разворачивается и показывается.
+  const searchFocus = useContext(SearchViewContext).focus;
+  const aiFocus = searchFocus?.meetingId === meeting.id && searchFocus.aiKey !== null ? searchFocus.nonce : null;
+  const { reveal } = ai;
+  useEffect(() => {
+    if (aiFocus !== null) reveal();
+  }, [aiFocus, reveal]);
   // «Повторить» — той же моделью, что не справилась (её id в meeting.json); неизвестная — из настроек.
   const retry = () =>
     window.textmeet
@@ -323,6 +342,7 @@ function MeetingView({
               {actions.header}
             </button>
           )}
+          {canExport && <AiSummaryButton panel={ai} />}
           {canExport && <CopyForAiButton meetingId={meeting.id} onError={onError} />}
           {canExport && <ExportMenu meetingId={meeting.id} onError={onError} />}
           <MeetingMenu
@@ -362,6 +382,7 @@ function MeetingView({
           </div>
         </div>
       )}
+      <AiBlock panel={ai} onOpenSettings={onOpenAiSettings} onOpenMeeting={onOpenMeeting} onError={onError} />
       {meeting.status === 'importing' ? (
         <ImportBlock fileName={meeting.sourceFileName} progress={importing} />
       ) : (
@@ -404,7 +425,7 @@ function MeetingView({
 }
 
 /** Выбранная встреча: создаётся, не прочиталась или прочитана. */
-export function MeetingPane({ entry, progress, importing, onError, onDeleted }: Props) {
+export function MeetingPane({ entry, progress, importing, onError, onDeleted, onOpenAiSettings, onOpenMeeting }: Props) {
   if (entry.kind === 'creating') {
     return (
       <main className="pane" aria-label="Встреча">
@@ -435,6 +456,14 @@ export function MeetingPane({ entry, progress, importing, onError, onDeleted }: 
     );
   }
   return (
-    <MeetingView entry={entry} progress={progress} importing={importing} onError={onError} onDeleted={onDeleted} />
+    <MeetingView
+      entry={entry}
+      progress={progress}
+      importing={importing}
+      onError={onError}
+      onDeleted={onDeleted}
+      onOpenAiSettings={onOpenAiSettings}
+      onOpenMeeting={onOpenMeeting}
+    />
   );
 }

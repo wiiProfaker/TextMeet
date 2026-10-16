@@ -1,7 +1,7 @@
 // Тексты для человека, которые показывает main: уведомления, системные окна, причины ошибок записи.
 import { formatBytes, formatDurationShort } from '../shared/format';
 import type { MediaFailure, StartProblem, SystemSettingsKind } from '../shared/recording';
-import { knownFsReason } from './fs/fs-errors';
+import { humanFsReason, knownFsReason } from './fs/fs-errors';
 import { DownloadError } from './models/download';
 import { MODELS_ENSURING } from './models/model-manager';
 import { WORKER_REFUSALS } from './transcription/protocol';
@@ -88,12 +88,49 @@ function sentence(title: string): string {
 /** Системные ошибки, при которых модель не записать на диск. */
 const DISK_CODES = new Set(['ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'EBUSY']);
 const SEE_LOG = 'Попробуйте ещё раз; подробности — в журнале ошибок (он указан в настройках).';
-const MODELS_DISK_TEXT = 'Не удалось сохранить модель расшифровки на диск.';
 const INTERNAL_TEXT = `Расшифровка не удалась из-за внутренней ошибки. ${SEE_LOG}`;
 /** Сбои ffmpeg (чтения дорожек) — в тексте для человека; пути и вывод ffmpeg остаются в журнале. */
 const UNREADABLE_AUDIO = /ffmpeg|не прочиталась ни одна дорожка/;
 /** ffmpeg не запустился («spawn …ffmpeg.exe ENOENT» — например, его убрал антивирус): дорожки тут ни при чём. */
 const SPAWN_FAILED = /\bspawn\b.*\b(E[A-Z]+|UNKNOWN)\b/;
+
+/** Как назвать модель в причине неудачного скачивания: модель расшифровки или модель для итогов. */
+interface ModelWords {
+  /** «Не удалось скачать …», «Не удалось сохранить … на диск». */
+  model: string;
+  /** «Не хватает места на диске для …». */
+  ofModel: string;
+  /** «Не удалось подготовить …». */
+  prepare: string;
+}
+
+const ASR_WORDS: ModelWords = { model: 'модель расшифровки', ofModel: 'модели расшифровки', prepare: 'модели расшифровки' };
+const AI_WORDS: ModelWords = { model: 'модель для итогов', ofModel: 'модели для итогов', prepare: 'модель для итогов' };
+
+/** Причина для человека; исходная ошибка (с путями и кодами) пишется в журнал отдельно. */
+function downloadText(err: unknown, words: ModelWords): string {
+  const diskText = `Не удалось сохранить ${words.model} на диск.`;
+  if (!(err instanceof DownloadError)) {
+    const code = (err as NodeJS.ErrnoException | null)?.code;
+    return code && DISK_CODES.has(code) ? diskText : `Не удалось подготовить ${words.prepare}. ${SEE_LOG}`;
+  }
+  switch (err.kind) {
+    case 'network':
+      return `Не удалось скачать ${words.model}: нет связи с сервером. Проверьте интернет.`;
+    case 'server':
+      return `Не удалось скачать ${words.model}: сервер не отдал файл модели. Попробуйте позже или обновите TextMeet.`;
+    case 'corrupt':
+      return 'Скачанный файл модели повреждён — при повторе он скачается заново.';
+    case 'space':
+      if (err.neededBytes === undefined) return `Не хватает места на диске для ${words.ofModel}.`;
+      // В мегабайтах с округлением вверх: «0,3 ГБ» преуменьшало бы нужное место.
+      return `Не хватает места на диске для ${words.ofModel}: нужно ${Math.ceil(err.neededBytes / 1024 ** 2)} МБ свободного места.`;
+    case 'disk':
+      return diskText;
+    case 'cancelled':
+      return 'Скачивание модели отменено.';
+  }
+}
 
 /** Причины ошибок расшифровки: пишутся в meeting.json (errorMessage) и показываются во встрече рядом с «Повторить». */
 export const transcriptionTexts = {
@@ -106,28 +143,7 @@ export const transcriptionTexts = {
   badMessage: 'Процесс расшифровки прислал неверные данные.',
   unreadableAudio: 'Не удалось прочитать звук встречи: ffmpeg не прочитал дорожку. Файлы записи остались в папке встречи.',
   /** Причина для человека; исходная ошибка (с путями и кодами) пишется в журнал отдельно. */
-  download(err: unknown): string {
-    if (!(err instanceof DownloadError)) {
-      const code = (err as NodeJS.ErrnoException | null)?.code;
-      return code && DISK_CODES.has(code) ? MODELS_DISK_TEXT : `Не удалось подготовить модели расшифровки. ${SEE_LOG}`;
-    }
-    switch (err.kind) {
-      case 'network':
-        return 'Не удалось скачать модель расшифровки: нет связи с сервером. Проверьте интернет.';
-      case 'server':
-        return 'Не удалось скачать модель расшифровки: сервер не отдал файл модели. Попробуйте позже или обновите TextMeet.';
-      case 'corrupt':
-        return 'Скачанный файл модели повреждён — при повторе он скачается заново.';
-      case 'space':
-        if (err.neededBytes === undefined) return 'Не хватает места на диске для модели расшифровки.';
-        // В мегабайтах с округлением вверх: «0,3 ГБ» преуменьшало бы нужное место.
-        return `Не хватает места на диске для модели расшифровки: нужно ${Math.ceil(err.neededBytes / 1024 ** 2)} МБ свободного места.`;
-      case 'disk':
-        return MODELS_DISK_TEXT;
-      case 'cancelled':
-        return 'Скачивание модели отменено.';
-    }
-  },
+  download: (err: unknown): string => downloadText(err, ASR_WORDS),
   /** Файлы модели целы (суммы сошлись), но движок их не принял — подробности в журнале. */
   modelLoad: (title: string): string => `Не удалось загрузить модель «${title}». ${SEE_LOG}`,
   /** Сбой процесса расшифровки (его текст — для журнала: вывод sherpa-onnx и ffmpeg, пути к файлам) → текст для человека. */
@@ -232,3 +248,18 @@ export function systemSettingsUrl(kind: SystemSettingsKind, platform: string): s
   }
   return kind === 'microphone' ? 'ms-settings:privacy-microphone' : 'ms-settings:sound';
 }
+
+/** Модели для итогов и сами итоги (решения Плана 9, §6). */
+export const aiTexts = {
+  /** Модель для итогов не скачалась — причина для карточки каталога. */
+  download: (err: unknown): string => downloadText(err, AI_WORDS),
+  /** Движок не запустился, упал или не ответил (подробности — в журнале). */
+  engine:
+    'Модель не смогла ответить — подробности в журнале. Возможно, не хватило памяти: закройте тяжёлые программы и попробуйте снова.',
+  tooLong: (modelTitle: string): string =>
+    `Встреча слишком длинная для ${modelTitle}. Выберите другую модель в настройках ИИ или воспользуйтесь «Скопировать для ИИ».`,
+  /** Ответ готов, но ai.json не записался — текст остаётся в блоке до ухода со встречи. */
+  notSaved: (kind: 'summary' | 'question', err: unknown): string =>
+    `Не удалось сохранить ${kind === 'summary' ? 'итоги' : 'ответ'}: ${humanFsReason(err)}`,
+  modelBusy: 'Модель нельзя удалить, пока она отвечает.',
+};

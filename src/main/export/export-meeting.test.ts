@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AI_PROMPT } from '../../shared/ai-prompt';
 import type { Transcript } from '../../shared/transcript';
 import { makeTempDir } from '../../test-support/temp-dir';
+import { aiPath } from '../ai/ai-store';
 import { createMeeting, updateMeeting } from '../library/library';
 import { writeTranscript } from '../library/transcript-store';
 import { copyForAi, copyMeeting, exportTexts, saveMeeting, type ExportDeps } from './export-meeting';
@@ -219,5 +220,38 @@ describe('saveMeeting', () => {
     const d = deps(lib, { rememberExportDir: async () => Promise.reject(new Error('диск')) });
     expect(await saveMeeting(d, id, 'txt')).toEqual({ saved: true });
     expect(d.logger.warn).toHaveBeenCalled();
+  });
+});
+
+describe('the summary in the export', () => {
+  const summary = {
+    text: '- Бюджет — **половина**.',
+    model: 'qwen3.5-9b',
+    modelTitle: 'Qwen3.5 9B',
+    createdAt: '2026-09-27T13:55:00.000Z',
+    status: 'done',
+    sourceHash: 'h',
+  };
+
+  it('copies and saves the summary first, but «Скопировать для ИИ» stays without it', async () => {
+    const { lib, id } = await meetingWithText();
+    writeFileSync(aiPath(lib, id), JSON.stringify({ version: 1, summary, questions: [] }));
+    const d = deps(lib);
+    await copyMeeting(d, id);
+    expect(d.clipboard[0]?.text).toContain('Итоги встречи');
+    expect(d.clipboard[0]?.text).toContain('• Бюджет — половина.');
+    expect(d.clipboard[0]?.html).toContain('<b>половина</b>');
+    await copyForAi(d, id);
+    expect(d.clipboard[1]?.text).not.toContain('Итоги встречи');
+    expect(d.clipboard[1]?.text).not.toContain('Бюджет');
+  });
+
+  it('exports without the summary when ai.json is broken', async () => {
+    const { lib, id } = await meetingWithText();
+    writeFileSync(aiPath(lib, id), '{ сломано');
+    const d = deps(lib);
+    await copyMeeting(d, id);
+    expect(d.clipboard[0]?.text).not.toContain('Итоги встречи');
+    expect(d.clipboard[0]?.text).toContain('Смотри, по бюджету.');
   });
 });

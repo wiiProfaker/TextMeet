@@ -1,0 +1,93 @@
+<style>
+  .row { display:flex; align-items:flex-end; gap:18px; flex-wrap:wrap; }
+  .bgs { display:flex; gap:10px; margin-top:12px; }
+  .bg { padding:10px 14px; border-radius:8px; display:flex; align-items:center; gap:14px; }
+  .bg.l { background:#dfe6ee; } .bg.d { background:#1f2a44; }
+  .bg span { font:11px 'Segoe UI',sans-serif; color:#333; } .bg.d span { color:#eee; }
+</style>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <!-- 1. Лист с текстом и красной точкой записи -->
+    <symbol id="i1" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="56" fill="#f7f3ea"/>
+      <rect x="8.5" y="8.5" width="239" height="239" rx="55.5" fill="none" stroke="#dcd3c2" stroke-width="3"/>
+      <rect x="56" y="78" width="110" height="16" rx="8" fill="#26221b"/>
+      <rect x="56" y="120" width="144" height="16" rx="8" fill="#26221b"/>
+      <rect x="56" y="162" width="96" height="16" rx="8" fill="#26221b"/>
+      <circle cx="190" cy="86" r="20" fill="#b8352a"/>
+    </symbol>
+    <!-- 2. Звук превращается в текст -->
+    <symbol id="i2" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="56" fill="#26221b"/>
+      <g fill="#f7f3ea">
+        <rect x="44" y="110" width="14" height="36" rx="7"/>
+        <rect x="68" y="84" width="14" height="88" rx="7"/>
+        <rect x="92" y="98" width="14" height="60" rx="7"/>
+        <rect x="132" y="94" width="80" height="14" rx="7"/>
+        <rect x="132" y="121" width="64" height="14" rx="7"/>
+        <rect x="132" y="148" width="74" height="14" rx="7"/>
+      </g>
+      <circle cx="120" cy="128" r="6" fill="#eacb62"/>
+    </symbol>
+    <!-- 3. Буква Т засечками и точка записи -->
+    <symbol id="i3" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="56" fill="#f7f3ea"/>
+      <rect x="8.5" y="8.5" width="239" height="239" rx="55.5" fill="none" stroke="#dcd3c2" stroke-width="3"/>
+      <text x="118" y="196" text-anchor="middle" font-family="Literata, Georgia, serif" font-weight="600" font-size="168" fill="#26221b">Т</text>
+      <circle cx="190" cy="180" r="18" fill="#b8352a"/>
+    </symbol>
+    <!-- 4. Облачко реплики, строка подсвечена маркером -->
+    <symbol id="i4" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="56" fill="#f7f3ea"/>
+      <rect x="8.5" y="8.5" width="239" height="239" rx="55.5" fill="none" stroke="#dcd3c2" stroke-width="3"/>
+      <path d="M58 60 h140 a22 22 0 0 1 22 22 v74 a22 22 0 0 1 -22 22 h-84 l-34 28 v-28 h-22 a22 22 0 0 1 -22 -22 v-74 a22 22 0 0 1 22 -22z" fill="#26221b"/>
+      <rect x="66" y="92" width="116" height="22" rx="4" fill="#eacb62"/>
+      <rect x="72" y="98" width="104" height="10" rx="5" fill="#26221b"/>
+      <rect x="72" y="128" width="84" height="10" rx="5" fill="#f7f3ea"/>
+      <rect x="72" y="98" width="0" height="10"/>
+    </symbol>
+  </defs>
+</svg>
+
+<h2>Значок TextMeet</h2>
+<p class="subtitle">Четыре варианта в стиле «Бумаги»: бумажный фон, тёмные «чернила», красный — запись, жёлтый — маркер. Справа от большого — как он выглядит мелко (на панели задач и в трее) на светлых и тёмных обоях.</p>
+
+<div class="options">
+  <div class="option" data-choice="sheet" onclick="toggleSelect(this)">
+    <div class="letter">1</div>
+    <div class="content">
+      <h3>Лист с текстом и точкой записи</h3>
+      <p>Страница расшифровки и красная точка, как у кнопки «Начать запись».</p>
+      <div class="row"><svg width="128" height="128"><use href="#i1"/></svg><svg width="48" height="48"><use href="#i1"/></svg><svg width="32" height="32"><use href="#i1"/></svg><svg width="16" height="16"><use href="#i1"/></svg></div>
+      <div class="bgs"><div class="bg l"><svg width="32" height="32"><use href="#i1"/></svg><span>TextMeet</span></div><div class="bg d"><svg width="32" height="32"><use href="#i1"/></svg><span>TextMeet</span></div></div>
+    </div>
+  </div>
+  <div class="option" data-choice="wave" onclick="toggleSelect(this)">
+    <div class="letter">2</div>
+    <div class="content">
+      <h3>Звук превращается в текст</h3>
+      <p>Слева волна звука, справа строки. Тёмный «чернильный» фон, жёлтая точка-маркер посередине.</p>
+      <div class="row"><svg width="128" height="128"><use href="#i2"/></svg><svg width="48" height="48"><use href="#i2"/></svg><svg width="32" height="32"><use href="#i2"/></svg><svg width="16" height="16"><use href="#i2"/></svg></div>
+      <div class="bgs"><div class="bg l"><svg width="32" height="32"><use href="#i2"/></svg><span>TextMeet</span></div><div class="bg d"><svg width="32" height="32"><use href="#i2"/></svg><span>TextMeet</span></div></div>
+    </div>
+  </div>
+  <div class="option" data-choice="letter" onclick="toggleSelect(this)">
+    <div class="letter">3</div>
+    <div class="content">
+      <h3>Буква «Т» и точка записи</h3>
+      <p>Буква шрифтом заголовков программы (Literata) и красная точка.</p>
+      <div class="row"><svg width="128" height="128"><use href="#i3"/></svg><svg width="48" height="48"><use href="#i3"/></svg><svg width="32" height="32"><use href="#i3"/></svg><svg width="16" height="16"><use href="#i3"/></svg></div>
+      <div class="bgs"><div class="bg l"><svg width="32" height="32"><use href="#i3"/></svg><span>TextMeet</span></div><div class="bg d"><svg width="32" height="32"><use href="#i3"/></svg><span>TextMeet</span></div></div>
+    </div>
+  </div>
+  <div class="option" data-choice="bubble" onclick="toggleSelect(this)">
+    <div class="letter">4</div>
+    <div class="content">
+      <h3>Реплика со строкой под маркером</h3>
+      <p>Облачко разговора, одна строка подсвечена жёлтым — как играющая строка в тексте встречи.</p>
+      <div class="row"><svg width="128" height="128"><use href="#i4"/></svg><svg width="48" height="48"><use href="#i4"/></svg><svg width="32" height="32"><use href="#i4"/></svg><svg width="16" height="16"><use href="#i4"/></svg></div>
+      <div class="bgs"><div class="bg l"><svg width="32" height="32"><use href="#i4"/></svg><span>TextMeet</span></div><div class="bg d"><svg width="32" height="32"><use href="#i4"/></svg><span>TextMeet</span></div></div>
+    </div>
+  </div>
+</div>

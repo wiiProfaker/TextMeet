@@ -25,3 +25,6 @@ coverage/
 # Результаты Playwright
 test-results/
 playwright-report/
+
+# Рабочие макеты обсуждений (superpowers:brainstorming)
+.superpowers/

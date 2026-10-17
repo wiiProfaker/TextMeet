@@ -16,6 +16,7 @@
     "test:catalog": "vitest run --config vitest.catalog.config.ts",
     "test:llm": "npm run fetch:llama && vitest run --config vitest.llm.config.ts",
     "fetch:llama": "node scripts/fetch-llama.mjs",
+    "icons": "electron scripts/render-icons.cjs",
     "e2e": "npm run build && playwright test",
     "dist:win": "npm run build && npm run fetch:llama && electron-builder --win --publish never",
     "dist:mac": "npm run build && npm run fetch:llama && electron-builder --mac dir --arm64 --publish never",

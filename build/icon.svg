@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="1024" height="1024">
+  <!-- Значок TextMeet (решения Плана 8, §3, вариант «1»): лист бумаги, три строки и красная точка записи.
+       Windows: рисунок во весь квадрат. Строки толще, чем в макете, — чтобы различались на 16–32 px. -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#f7f3ea"/>
+  <rect x="9.5" y="9.5" width="237" height="237" rx="54.5" fill="none" stroke="#dcd3c2" stroke-width="3"/>
+  <rect x="54" y="71" width="108" height="24" rx="12" fill="#26221b"/>
+  <rect x="54" y="116" width="148" height="24" rx="12" fill="#26221b"/>
+  <rect x="54" y="161" width="96" height="24" rx="12" fill="#26221b"/>
+  <circle cx="190" cy="83" r="22" fill="#b8352a"/>
+</svg>

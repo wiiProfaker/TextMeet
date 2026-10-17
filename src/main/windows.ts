@@ -31,6 +31,8 @@ export function createMainWindow(logger: Logger, options: { show: boolean }): Br
     minHeight: 480,
     show: false,
     title: 'TextMeet',
+    // Собранная программа берёт значок из своего .exe / .app; в разработке — из build/ (иначе значок Electron).
+    ...(!app.isPackaged && { icon: join(app.getAppPath(), 'build', 'icon.png') }),
     webPreferences: {
       preload: PRELOAD,
       sandbox: true,

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Значок TextMeet для macOS (решения Плана 8, §3): тот же рисунок по сетке значков macOS — скруглённый квадрат
+       824×824 в поле 1024×1024 с отступом 100, скругление как у системных значков. -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#f7f3ea"/>
+  <rect x="104" y="104" width="816" height="816" rx="181" fill="none" stroke="#dcd3c2" stroke-width="8"/>
+  <g transform="translate(100 100) scale(3.21875)">
+    <rect x="46" y="66" width="108" height="22" rx="11" fill="#26221b"/>
+    <rect x="46" y="117" width="148" height="22" rx="11" fill="#26221b"/>
+    <rect x="46" y="168" width="96" height="22" rx="11" fill="#26221b"/>
+    <circle cx="182" cy="77" r="21" fill="#b8352a"/>
+  </g>
+</svg>

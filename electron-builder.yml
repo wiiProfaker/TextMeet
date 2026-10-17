@@ -14,7 +14,10 @@ electronFuses:
 files:
   - out/**
   - package.json
+# Значок (решения Плана 8, §3): PNG 1024×1024 из build/icon*.svg (npm run icons); .ico и .icns electron-builder
+# делает сам. Windows — рисунок во весь квадрат, Mac — по сетке значков macOS.
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
@@ -23,6 +26,7 @@ nsis:
   perMachine: false
   artifactName: TextMeet-Setup-${version}.exe
 mac:
+  icon: build/icon-mac.png
   target: dir
   identity: null
   category: public.app-category.productivity

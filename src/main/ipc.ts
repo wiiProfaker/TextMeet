@@ -1,6 +1,7 @@
 import { promises as fsp } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import {
+  app,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -140,6 +141,9 @@ const TranscribeRequestSchema = z.object({
   participantsHint: z.number().int().min(1).max(50).nullable(),
   model: AsrModelIdSchema.nullable(),
 });
+
+/** Список лицензий (scripts/build-notices.mjs; electron-builder кладёт его в resources/). */
+const NOTICES_FILE = 'THIRD-PARTY-NOTICES.txt';
 
 const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
@@ -304,6 +308,12 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.openLibraryDir, () => openLibraryFolder(deps.libraryDir()));
+  handle(IPC.openLicenses, async () => {
+    // Собранная программа — рядом с app.asar (extraResources), разработка — корень приложения.
+    const file = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), NOTICES_FILE);
+    const failure = await shell.openPath(file);
+    if (failure) throw new Error(`Не удалось открыть список лицензий: ${failure}`);
+  });
 
   handle(IPC.openMeetingDir, (arg) => openMeetingFolder(meetingDir(deps.libraryDir(), MeetingIdSchema.parse(arg))));
 

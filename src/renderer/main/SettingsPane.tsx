@@ -228,7 +228,15 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
           </div>
           {info && (
             <footer className="about">
-              TextMeet {info.version} · журнал ошибок: {info.logFile}
+              TextMeet {info.version} ·{' '}
+              <button
+                type="button"
+                className="lnk"
+                onClick={() => window.textmeet.openLicenses().catch((err: unknown) => setError(errorText(err)))}
+              >
+                Лицензии
+              </button>{' '}
+              · журнал ошибок: {info.logFile}
             </footer>
           )}
         </Panel>

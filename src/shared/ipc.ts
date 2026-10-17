@@ -38,6 +38,8 @@ export const IPC = {
   setHotkey: 'settings:set-hotkey',
   suspendHotkey: 'settings:suspend-hotkey',
   openLibraryDir: 'library:open-dir',
+  /** «Лицензии» в настройках «Общие»: THIRD-PARTY-NOTICES.txt программой по умолчанию. */
+  openLicenses: 'app:open-licenses',
   openMeetingDir: 'library:open-meeting-dir',
   listMeetings: 'library:list',
   renameMeeting: 'library:rename-meeting',
@@ -190,6 +192,7 @@ export interface MainInvokeContract {
   [IPC.setHotkey]: { arg: string | null; result: HotkeyChange };
   [IPC.suspendHotkey]: { arg: boolean; result: void };
   [IPC.openLibraryDir]: { arg: void; result: void };
+  [IPC.openLicenses]: { arg: void; result: void };
   [IPC.openMeetingDir]: { arg: string; result: void };
   [IPC.listMeetings]: { arg: void; result: MeetingListEntry[] };
   [IPC.renameMeeting]: { arg: RenameMeetingRequest; result: Meeting };
@@ -290,6 +293,7 @@ export interface TextMeetApi {
   /** Пока в настройках вводят новую комбинацию, действующая снимается. */
   suspendHotkey(suspended: boolean): Promise<void>;
   openLibraryDir(): Promise<void>;
+  openLicenses(): Promise<void>;
   openMeetingDir(id: string): Promise<void>;
   listMeetings(): Promise<MeetingListEntry[]>;
   renameMeeting(request: RenameMeetingRequest): Promise<Meeting>;

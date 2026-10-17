@@ -46,3 +46,25 @@ test('the main window cannot pretend to be the recorder window', async () => {
     .poll(() => readFile(join(userDataDir, 'logs', 'textmeet.log'), 'utf8'))
     .toContain('recorder:ready: сообщение не из окна записи');
 });
+
+test('the general tab shows the version and opens the list of licenses', async () => {
+  launched = await launchApp();
+  const { app, page } = launched;
+  // Файл не открываем на самом деле — запоминаем, что программа попросила открыть.
+  await app.evaluate(({ shell }) => {
+    const opened: string[] = [];
+    (globalThis as { openedPaths?: string[] }).openedPaths = opened;
+    shell.openPath = async (path: string) => {
+      opened.push(path);
+      return '';
+    };
+  });
+  await page.getByRole('button', { name: 'Настройки' }).click();
+  await page.getByRole('tab', { name: 'Общие' }).click();
+  const about = page.locator('footer.about');
+  await expect(about).toContainText('TextMeet 1.0.0');
+  await about.getByRole('button', { name: 'Лицензии' }).click();
+  await expect
+    .poll(() => app.evaluate(() => (globalThis as { openedPaths?: string[] }).openedPaths ?? []))
+    .toEqual([expect.stringMatching(/THIRD-PARTY-NOTICES\.txt$/)]);
+});

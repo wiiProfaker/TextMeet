@@ -36,6 +36,9 @@ mac:
 # Движок итогов (llama-server и его библиотеки) кладёт в vendor/llama скрипт scripts/fetch-llama.mjs (npm run
 # fetch:llama); в программе он лежит рядом с app.asar — в resources/llama.
 extraResources:
+  # Список чужих частей и их лицензий (npm run notices) — «Лицензии» в настройках «Общие».
+  - from: THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
   - from: vendor/llama
     to: llama
     filter: ['**/*', '!.build']

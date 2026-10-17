@@ -1,0 +1,235 @@
+[
+  {
+    "name": "electron",
+    "author": "OpenJS Foundation and Electron contributors",
+    "license": "MIT",
+    "url": "https://github.com/electron/electron",
+    "kind": "bundled",
+    "licenseFile": "node_modules/electron/LICENSE",
+    "notice": "В Electron входит Chromium: лицензии его частей — в файле LICENSES.chromium.html рядом с программой."
+  },
+  {
+    "name": "react",
+    "author": "Meta Platforms, Inc. and affiliates",
+    "license": "MIT",
+    "url": "https://github.com/facebook/react",
+    "kind": "bundled",
+    "licenseFile": "node_modules/react/LICENSE"
+  },
+  {
+    "name": "react-dom",
+    "author": "Meta Platforms, Inc. and affiliates",
+    "license": "MIT",
+    "url": "https://github.com/facebook/react",
+    "kind": "bundled",
+    "licenseFile": "node_modules/react-dom/LICENSE"
+  },
+  {
+    "name": "@fontsource/golos-text",
+    "author": "The Golos Text Project Authors (шрифт Golos Text)",
+    "license": "OFL-1.1",
+    "url": "https://github.com/googlefonts/golos-text",
+    "kind": "bundled",
+    "licenseFile": "node_modules/@fontsource/golos-text/LICENSE"
+  },
+  {
+    "name": "@fontsource/literata",
+    "author": "The Literata Project Authors (шрифт Literata)",
+    "license": "OFL-1.1",
+    "url": "https://github.com/googlefonts/literata",
+    "kind": "bundled",
+    "licenseFile": "node_modules/@fontsource/literata/LICENSE"
+  },
+  {
+    "name": "docx",
+    "author": "Dolan Miu",
+    "license": "MIT",
+    "url": "https://github.com/dolanmiu/docx",
+    "kind": "bundled",
+    "licenseFile": "node_modules/docx/LICENSE"
+  },
+  {
+    "name": "zod",
+    "author": "Colin McDonnell",
+    "license": "MIT",
+    "url": "https://github.com/colinhacks/zod",
+    "kind": "bundled",
+    "licenseFile": "node_modules/zod/LICENSE"
+  },
+  {
+    "name": "sherpa-onnx-node",
+    "author": "The next-gen Kaldi team",
+    "license": "Apache-2.0",
+    "url": "https://github.com/k2-fsa/sherpa-onnx",
+    "kind": "bundled",
+    "licenseFile": "licenses/texts/sherpa-onnx-Apache-2.0.txt",
+    "notice": "Вместе с нативной библиотекой sherpa-onnx для Windows или macOS (пакеты sherpa-onnx-win-x64 / sherpa-onnx-darwin-arm64)."
+  },
+  {
+    "name": "onnxruntime",
+    "author": "Microsoft Corporation",
+    "license": "MIT",
+    "url": "https://github.com/microsoft/onnxruntime",
+    "kind": "bundled",
+    "licenseFile": "licenses/texts/onnxruntime-MIT.txt",
+    "notice": "Входит в нативную библиотеку sherpa-onnx."
+  },
+  {
+    "name": "ffmpeg-static",
+    "author": "Eugene Ware и участники проекта",
+    "license": "GPL-3.0-or-later",
+    "url": "https://github.com/eugeneware/ffmpeg-static",
+    "kind": "bundled",
+    "licenseFile": "licenses/texts/GPL-3.0.txt",
+    "notice": "Пакет, который приносит в программу готовую сборку ffmpeg (см. «ffmpeg»)."
+  },
+  {
+    "name": "ffmpeg",
+    "author": "FFmpeg developers; сборка для Windows — gyan.dev, для macOS (Apple Silicon) — osxexperts.net",
+    "license": "GPL-3.0-or-later",
+    "url": "https://ffmpeg.org",
+    "kind": "bundled",
+    "licenseFile": "licenses/texts/GPL-3.0.txt",
+    "notice": "Программа ffmpeg запускается отдельным процессом для сведения и чтения звука. Исходный код: Windows — FFmpeg 6.1.1, https://github.com/FFmpeg/FFmpeg/commit/e38092ef93 (сборка «essentials» с https://www.gyan.dev/ffmpeg/builds/); macOS — FFmpeg 6.0, https://ffmpeg.org/releases/ffmpeg-6.0.tar.xz (сборка с https://osxexperts.net/). Готовые сборки — https://github.com/eugeneware/ffmpeg-static/releases/tag/b6.1.1."
+  },
+  {
+    "name": "llama.cpp",
+    "author": "The ggml authors",
+    "license": "MIT",
+    "url": "https://github.com/ggml-org/llama.cpp",
+    "kind": "bundled",
+    "licenseFile": "licenses/texts/llama.cpp-MIT.txt",
+    "notice": "Движок итогов (llama-server), выпуск b11588."
+  },
+  {
+    "name": "LLVM OpenMP (libomp)",
+    "author": "LLVM Project",
+    "license": "Apache-2.0 WITH LLVM-exception",
+    "url": "https://github.com/llvm/llvm-project/tree/main/openmp",
+    "kind": "bundled",
+    "licenseFile": "licenses/texts/LLVM-OpenMP.txt",
+    "notice": "Входит в сборку llama.cpp для Windows."
+  },
+  {
+    "name": "GigaAM v3 (e2e RNNT)",
+    "author": "SberDevices; перевод в ONNX — Smirnov75",
+    "license": "MIT",
+    "url": "https://huggingface.co/ai-sage/GigaAM-v3",
+    "kind": "downloaded",
+    "models": ["gigaam-v3-e2e-rnnt"]
+  },
+  {
+    "name": "Parakeet TDT 0.6B v3",
+    "author": "NVIDIA; перевод в ONNX — проект sherpa-onnx",
+    "license": "CC-BY-4.0",
+    "url": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
+    "kind": "downloaded",
+    "models": ["parakeet-tdt-0.6b-v3"]
+  },
+  {
+    "name": "Qwen3-ASR 0.6B",
+    "author": "Qwen Team, Alibaba Cloud; перевод в ONNX — проект sherpa-onnx",
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/Qwen/Qwen3-ASR-0.6B",
+    "kind": "downloaded",
+    "models": ["qwen3-asr-0.6b"]
+  },
+  {
+    "name": "Whisper large-v3 turbo",
+    "author": "OpenAI; перевод в ONNX — проект sherpa-onnx",
+    "license": "MIT",
+    "url": "https://huggingface.co/openai/whisper-large-v3-turbo",
+    "kind": "downloaded",
+    "models": ["whisper-large-v3-turbo"]
+  },
+  {
+    "name": "Nemotron 3.5 ASR Streaming 0.6B",
+    "author": "NVIDIA; перевод в ONNX — проект sherpa-onnx",
+    "license": "OpenMDW-1.1",
+    "url": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
+    "kind": "downloaded",
+    "models": ["nemotron-3.5-asr"],
+    "notice": "Текст лицензии: https://openmdw.ai/license/1-1/"
+  },
+  {
+    "name": "T-one",
+    "author": "T-Tech; перевод в ONNX — проект sherpa-onnx",
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/t-tech/T-one",
+    "kind": "downloaded",
+    "models": ["t-one"]
+  },
+  {
+    "name": "Parakeet Unified EN 0.6B",
+    "author": "NVIDIA; перевод в ONNX — проект sherpa-onnx",
+    "license": "NVIDIA Open Model License",
+    "url": "https://huggingface.co/nvidia/parakeet-unified-en-0.6b",
+    "kind": "downloaded",
+    "models": ["parakeet-unified-en-0.6b"],
+    "notice": "Licensed by NVIDIA Corporation under the NVIDIA Open Model License. Текст лицензии: https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/"
+  },
+  {
+    "name": "Canary 180M Flash",
+    "author": "NVIDIA; перевод в ONNX — проект sherpa-onnx",
+    "license": "CC-BY-4.0",
+    "url": "https://huggingface.co/nvidia/canary-180m-flash",
+    "kind": "downloaded",
+    "models": ["canary-180m-flash"]
+  },
+  {
+    "name": "pyannote segmentation 3.0 (разделение по голосам)",
+    "author": "pyannote (Hervé Bredin и др.); перевод в ONNX — проект sherpa-onnx",
+    "license": "MIT",
+    "url": "https://huggingface.co/pyannote/segmentation-3.0",
+    "kind": "downloaded",
+    "models": ["voices"]
+  },
+  {
+    "name": "3D-Speaker ERes2Net (голоса собеседников)",
+    "author": "Tongyi Lab, Alibaba (проект 3D-Speaker)",
+    "license": "Apache-2.0",
+    "url": "https://modelscope.cn/models/iic/speech_eres2net_sv_en_voxceleb_16k",
+    "kind": "downloaded",
+    "models": ["voices"]
+  },
+  {
+    "name": "Silero VAD (поиск речи)",
+    "author": "Silero Team",
+    "license": "MIT",
+    "url": "https://github.com/snakers4/silero-vad",
+    "kind": "downloaded",
+    "models": ["voices"]
+  },
+  {
+    "name": "Qwen3.5 9B",
+    "author": "Qwen Team, Alibaba Cloud; файл GGUF — Unsloth",
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/Qwen/Qwen3.5-9B",
+    "kind": "downloaded",
+    "models": ["qwen3.5-9b"]
+  },
+  {
+    "name": "GigaChat 3.1 Lightning (10B-A1.8B)",
+    "author": "SberDevices",
+    "license": "MIT",
+    "url": "https://huggingface.co/ai-sage/GigaChat3.1-10B-A1.8B",
+    "kind": "downloaded",
+    "models": ["gigachat-3.1-lightning"]
+  },
+  {
+    "name": "T-lite-it 2.1",
+    "author": "T-Tech (на основе Qwen3-8B)",
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/t-tech/T-lite-it-2.1",
+    "kind": "downloaded",
+    "models": ["t-lite-it-2.1"]
+  },
+  {
+    "name": "Qwen3.5 4B",
+    "author": "Qwen Team, Alibaba Cloud; файл GGUF — Unsloth",
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/Qwen/Qwen3.5-4B",
+    "kind": "downloaded",
+    "models": ["qwen3.5-4b"]
+  }
+]

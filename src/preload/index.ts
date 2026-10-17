@@ -51,6 +51,7 @@ const api: TextMeetApi = {
   setHotkey: (accelerator) => invoke(IPC.setHotkey, accelerator),
   suspendHotkey: (suspended) => invoke(IPC.suspendHotkey, suspended),
   openLibraryDir: () => invoke(IPC.openLibraryDir),
+  openLicenses: () => invoke(IPC.openLicenses),
   openMeetingDir: (id) => invoke(IPC.openMeetingDir, id),
   listMeetings: () => invoke(IPC.listMeetings),
   renameMeeting: (request) => invoke(IPC.renameMeeting, request),

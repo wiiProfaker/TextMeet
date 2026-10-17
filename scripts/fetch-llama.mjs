@@ -28,6 +28,16 @@ const BUILDS = {
   },
 };
 
+/**
+ * Лицензия llama.cpp того же выпуска: в архивах её нет, а класть её рядом с программой нужно (решения Плана 8, §4.3).
+ * Ложится в vendor/llama и вместе с движком попадает в resources/llama.
+ */
+const LICENSE = {
+  url: 'https://raw.githubusercontent.com/ggml-org/llama.cpp/b11588/LICENSE',
+  sha256: '94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d',
+  file: 'LICENSE-llama.cpp.txt',
+};
+
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const target = join(root, 'vendor', 'llama');
 const stamp = join(target, '.build');
@@ -55,7 +65,10 @@ async function main() {
     return;
   }
   const done = await fsp.readFile(stamp, 'utf8').catch(() => '');
-  if (done.trim() === build.sha256) return;
+  if (done.trim() === build.sha256) {
+    await fetchLicense();
+    return;
+  }
 
   const work = join(root, 'vendor', `llama-download-${process.pid}`);
   await fsp.rm(work, { recursive: true, force: true });
@@ -87,11 +100,26 @@ async function main() {
       if (entry.isSymbolicLink()) await fsp.symlink(await fsp.readlink(source), dest);
       else await fsp.copyFile(source, dest);
     }
+    await fetchLicense();
     await fsp.writeFile(stamp, `${build.sha256}\n`);
     console.log(`fetch-llama: движок в ${target}`);
   } finally {
     await fsp.rm(work, { recursive: true, force: true });
   }
+}
+
+/** Лицензия llama.cpp в vendor/llama; уже есть и совпадает — ничего не делает. */
+async function fetchLicense() {
+  const dest = join(target, LICENSE.file);
+  const current = await sha256(dest).catch(() => '');
+  if (current === LICENSE.sha256) return;
+  const response = await fetch(LICENSE.url);
+  if (!response.ok) throw new Error(`лицензия llama.cpp: сервер ответил ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  const sum = createHash('sha256').update(bytes).digest('hex');
+  if (sum !== LICENSE.sha256) throw new Error(`лицензия llama.cpp не совпала: SHA-256 ${sum}`);
+  await fsp.mkdir(target, { recursive: true });
+  await fsp.writeFile(dest, bytes);
 }
 
 main().catch((err) => {

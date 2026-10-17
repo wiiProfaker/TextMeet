@@ -2,6 +2,15 @@ appId: dev.textmeet.app
 productName: TextMeet
 directories:
   output: release
+# Защита выпуска (решения Плана 8, §5.1): программу нельзя запустить как Node и подключить к ней отладчик, а app.asar
+# проверяется на целостность. Сквозной тест собранной программы идёт на тестовой копии (scripts/make-test-copy.mjs).
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  resetAdHocDarwinSignature: true
 files:
   - out/**
   - package.json

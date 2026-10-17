@@ -11,7 +11,8 @@ import { ModelLoadError, sherpaEngines, sherpaVersion } from './sherpa-engines';
 
 const port = process.parentPort;
 const post = (message: WorkerToMain): void => port.postMessage(message);
-/** Только для автотестов: мгновенные поддельные движки вместо моделей. */
+/** Только для автотестов: мгновенные поддельные движки вместо моделей. Переменную ставит main (worker-host.ts) —
+ *  только когда подмены разрешены; переменные TEXTMEET_* из окружения программы сюда не доходят. */
 const fake = process.env.TEXTMEET_TEST_ASR === 'fake';
 
 let threads = 1;

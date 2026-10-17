@@ -9,9 +9,22 @@ import { spawnGate } from './spawn-gate';
 
 /** Файл процесса рядом с main (electron.vite.config.ts: вход transcription-worker). */
 const WORKER_FILE = 'transcription-worker.js';
+/** Переменная, по которой процесс включает поддельные движки (worker.ts); её ставит только main. */
+export const FAKE_ENGINES_VAR = 'TEXTMEET_TEST_ASR';
 
-export function spawnTranscriptionWorker(logger: Logger): WorkerHandle {
-  const child = utilityProcess.fork(join(__dirname, WORKER_FILE), [], { serviceName: 'TextMeet — расшифровка' });
+/** Окружение процесса: без переменных TEXTMEET_* программы; поддельные движки — только если их включил main. */
+export function workerEnv(env: NodeJS.ProcessEnv, fakeEngines: boolean): Record<string, string> {
+  const clean = Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => !entry[0].startsWith('TEXTMEET_') && entry[1] !== undefined),
+  );
+  return fakeEngines ? { ...clean, [FAKE_ENGINES_VAR]: 'fake' } : clean;
+}
+
+export function spawnTranscriptionWorker(logger: Logger, options: { fakeEngines: boolean }): WorkerHandle {
+  const child = utilityProcess.fork(join(__dirname, WORKER_FILE), [], {
+    serviceName: 'TextMeet — расшифровка',
+    env: workerEnv(process.env, options.fakeEngines),
+  });
   const gate = spawnGate<MainToWorker>(child);
   child.once('spawn', () => {
     if (!gate.started() || child.pid === undefined) return;

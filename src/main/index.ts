@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -51,38 +52,47 @@ import { createSettingsStore } from './settings/settings-store';
 import { dialogTexts, notificationTexts } from './texts';
 import { TranscriptionQueue } from './transcription/queue';
 import { spawnTranscriptionWorker } from './transcription/worker-host';
+import { testEnv } from './test-hooks';
 import { createTray, type AppTray } from './tray';
 import { createMainWindow, createRecorderWindow, testMediaMode } from './windows';
+
+// Тестовые подмены TEXTMEET_*: только в разработке и в тестовой копии сборки (test-hooks.ts). В выпуске — пусто.
+const testVars = testEnv({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  env: process.env,
+  exists: existsSync,
+});
 
 // Версия для разработки (npm run dev / npm start) иначе делила бы с установленной программой папку данных
 // и блокировку «один экземпляр»: запуск молча уступал бы установленной версии, а тестовые данные попадали
 // бы в настоящие. Поэтому у неё своя папка данных и своя библиотека по умолчанию.
-const isDevRun = !app.isPackaged && !process.env.TEXTMEET_USER_DATA;
+const isDevRun = !app.isPackaged && !testVars.TEXTMEET_USER_DATA;
 
 // Только для автотестов: отдельные папки данных и «домашняя» папка, чтобы не трогать настоящие.
 // Папка данных задаётся до requestSingleInstanceLock(): блокировка привязана к ней.
-if (process.env.TEXTMEET_USER_DATA) app.setPath('userData', process.env.TEXTMEET_USER_DATA);
+if (testVars.TEXTMEET_USER_DATA) app.setPath('userData', testVars.TEXTMEET_USER_DATA);
 else if (isDevRun) app.setPath('userData', join(app.getPath('appData'), DEV_FOLDER_NAME));
-const homeDir = (): string => process.env.TEXTMEET_HOME ?? app.getPath('home');
+const homeDir = (): string => testVars.TEXTMEET_HOME ?? app.getPath('home');
 const logFile = (): string => join(app.getPath('userData'), 'logs', 'textmeet.log');
 
 // Только для автотестов (TEXTMEET_TEST_MEDIA): поддельный микрофон Chromium вместо настоящего
 // и никаких системных запросов разрешений — на машинах GitHub Actions на них некому ответить.
 // Разрешение на микрофон по-прежнему решает обработчик программы (permissions.ts).
-const testMedia = testMediaMode();
+const testMedia = testMediaMode(testVars);
 if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 // Только для автотестов: поддельные движки расшифровки (worker.ts) и поддельное хранилище моделей — без моделей и
 // их скачивания; TEXTMEET_TEST_DOWNLOAD_MS — сколько длится шаг «скачивания» из каталога (по умолчанию мгновенно).
-const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
-const fakeDownloadStepMs = Number(process.env.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
+const fakeAsr = testVars.TEXTMEET_TEST_ASR === 'fake';
+const fakeDownloadStepMs = Number(testVars.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
 /** Только для автотестов: модели, уже «скачанные» в поддельном хранилище (через запятую). */
-const fakeInstalled = (process.env.TEXTMEET_TEST_INSTALLED ?? '').split(',').filter(isModelGroupId);
+const fakeInstalled = (testVars.TEXTMEET_TEST_INSTALLED ?? '').split(',').filter(isModelGroupId);
 /** Только для автотестов: поддельный llama-server (скрипт src/test-support/fake-llama-server.mjs) вместо настоящего. */
-const fakeLlm = process.env.TEXTMEET_TEST_LLM;
+const fakeLlm = testVars.TEXTMEET_TEST_LLM;
 /** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
-const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
+const testRun = testMedia !== null || !!testVars.TEXTMEET_TEST_ASR;
 /** Только для автотестов: «Корзина» — обычная папка (на машинах CI настоящей Корзины может не быть). */
-const testTrash = testRun ? process.env.TEXTMEET_TEST_TRASH : undefined;
+const testTrash = testRun ? testVars.TEXTMEET_TEST_TRASH : undefined;
 const trash: Trash = testTrash ? folderTrash(testTrash) : (path) => shell.trashItem(path);
 
 /** Потоков для расшифровки: все ядра, кроме одного (не больше 8); во время записи — 2 (§5.3 решений Плана 3). */
@@ -191,7 +201,7 @@ function sendToRecorder<C extends RecorderCommandChannel>(channel: C, ...payload
 
 function startRecorderWindow(logger: Logger, controller: RecordingController, notify: Notify): BrowserWindow {
   recorderReady = false;
-  const win = createRecorderWindow(logger);
+  const win = createRecorderWindow(logger, testMedia);
   hideInsteadOfClose(win);
   win.webContents.on('render-process-gone', (_event, details) => {
     logger.error(`Окно записи завершилось: ${details.reason} (код ${details.exitCode})`);
@@ -344,7 +354,7 @@ async function start(logger: Logger): Promise<void> {
     platform: process.platform,
     homeDir: app.getPath('home'),
     localAppData: process.env.LOCALAPPDATA,
-    override: process.env.TEXTMEET_MODELS_DIR,
+    override: testVars.TEXTMEET_MODELS_DIR,
   });
   const models: ModelStore = fakeAsr
     ? new FakeModelStore(modelsDir, fakeDownloadStepMs, fakeInstalled)
@@ -385,7 +395,7 @@ async function start(logger: Logger): Promise<void> {
   });
   aiRunner = ai;
   const queue = new TranscriptionQueue({
-    spawn: () => spawnTranscriptionWorker(logger),
+    spawn: () => spawnTranscriptionWorker(logger, { fakeEngines: fakeAsr }),
     models,
     ffmpegPath: () => resolveFfmpegPath(),
     // Запись начинается и кончается по ходу расшифровки: число потоков спрашивается каждый раз.

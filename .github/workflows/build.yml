@@ -40,12 +40,18 @@ jobs:
         if: runner.os == 'Windows'
         run: npx electron-builder --win --publish never
 
+      # В выпуске Node-fuses выключены. Сквозной тест идёт на тестовой копии (scripts/make-test-copy.mjs): у неё эти
+      # fuses включены обратно и есть признак тестовой сборки — без них Playwright не управляет программой, а тестовые
+      # подмены не действуют. Копия в загружаемые файлы не попадает (там только release/*.exe).
       # Собранная программа пишет и сводит дорожки своим ffmpeg (из app.asar.unpacked) и запускает свой движок итогов.
       - name: Check the packaged app (Windows)
         if: runner.os == 'Windows'
-        run: npx playwright test e2e/packaged.spec.ts
+        run: |
+          node scripts/check-fuses.mjs release/win-unpacked/TextMeet.exe
+          node scripts/make-test-copy.mjs release/win-unpacked release/test-unpacked
+          npx playwright test e2e/packaged.spec.ts
         env:
-          TEXTMEET_PACKAGED_APP: release/win-unpacked/TextMeet.exe
+          TEXTMEET_PACKAGED_APP: release/test-unpacked/TextMeet.exe
 
       - name: Package (macOS, ad-hoc signed .dmg)
         if: runner.os == 'macOS'
@@ -53,13 +59,19 @@ jobs:
           npx electron-builder --mac dir --arm64 --publish never
           APP="$(find release -maxdepth 2 -name 'TextMeet.app' -type d | head -n 1)"
           echo "App: $APP"
+          node scripts/check-fuses.mjs "$APP"
+          # Тестовая копия для сквозного теста (как на Windows); признак тестовой сборки кладётся до подписи.
+          TEST_APP=release/test/TextMeet.app
+          node scripts/make-test-copy.mjs "$APP" "$TEST_APP"
           # Неподписанное arm64-приложение macOS не запускает — подписываем ad-hoc, как в спайке.
           # ffmpeg (сведение дорожек) лежит в app.asar.unpacked, движок итогов — в Resources/llama: их тоже подписываем.
-          find "$APP" \( -name '*.node' -o -name '*.dylib' -o -name 'ffmpeg' -o -name 'llama-server' \) -type f -exec codesign --force --sign - {} \;
-          codesign --force --deep --sign - "$APP"
-          codesign --verify --deep --verbose=2 "$APP"
-          # Собранная программа пишет и сводит дорожки своим подписанным ffmpeg.
-          TEXTMEET_PACKAGED_APP="$APP/Contents/MacOS/TextMeet" npx playwright test e2e/packaged.spec.ts
+          for A in "$APP" "$TEST_APP"; do
+            find "$A" \( -name '*.node' -o -name '*.dylib' -o -name 'ffmpeg' -o -name 'llama-server' \) -type f -exec codesign --force --sign - {} \;
+            codesign --force --deep --sign - "$A"
+            codesign --verify --deep --verbose=2 "$A"
+          done
+          # Собранная программа пишет и сводит дорожки своим подписанным ffmpeg (на тестовой копии; .dmg — из оригинала).
+          TEXTMEET_PACKAGED_APP="$TEST_APP/Contents/MacOS/TextMeet" npx playwright test e2e/packaged.spec.ts
           mkdir -p dmg
           ditto "$APP" dmg/TextMeet.app
           ln -s /Applications dmg/Applications

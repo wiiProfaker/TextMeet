@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   app,
   clipboard,
@@ -588,6 +588,22 @@ async function start(logger: Logger): Promise<void> {
       exportDir: () => settings.get().exportDir,
       aiPrompt: () => settings.settled().then(() => settings.get().aiPrompt),
       rememberExportDir: (dir) => settings.update({ exportDir: dir }),
+      confirmReplace: async (path) => {
+        const text = dialogTexts.replaceExport(basename(path));
+        const options: Electron.MessageBoxOptions = {
+          type: 'question',
+          title: text.title,
+          message: text.message,
+          detail: text.detail,
+          buttons: text.buttons,
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        };
+        const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+        const { response } = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+        return response === 1;
+      },
       documentsDir: () => app.getPath('documents'),
       platform: process.platform,
       logger,

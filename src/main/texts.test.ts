@@ -74,6 +74,13 @@ describe('dialogTexts', () => {
   it('asks before quitting during a recording', () => {
     expect(dialogTexts.quitWhileRecording().buttons).toEqual(['Продолжить запись', 'Остановить и выйти']);
   });
+
+  it('asks before replacing an exported file', () => {
+    const text = dialogTexts.replaceExport('Итоги.docx');
+    expect(text.title).toBe('Заменить файл?');
+    expect(text.message).toBe('Файл «Итоги.docx» уже есть.');
+    expect(text.buttons).toEqual(['Отмена', 'Заменить']);
+  });
 });
 
 describe('micProblem', () => {

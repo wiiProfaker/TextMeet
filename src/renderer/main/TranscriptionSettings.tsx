@@ -37,7 +37,7 @@ export function TranscriptionSettings() {
     models &&
     ids.length > 0 && (
       <div className="mgroup" role="group" aria-label={title}>
-        <h3>{title}</h3>
+        <h2>{title}</h2>
         {ids.map((id) => (
           <ModelCard key={id} id={id} state={models} actions={actions} />
         ))}

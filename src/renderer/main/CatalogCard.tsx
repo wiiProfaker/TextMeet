@@ -28,8 +28,8 @@ export interface CatalogCardProps {
   sizeText: string;
   installed: boolean;
   selected: boolean;
-  /** Скачивается эта модель: подпись и доля 0…1. */
-  download: { text: string; fraction: number } | null;
+  /** Скачивается эта модель: подпись и доля 0…1; cancellable: false — качает очередь расшифровки, «Отменить» нет. */
+  download: { text: string; fraction: number; cancellable?: boolean } | null;
   /** Последнее скачивание не удалось — причина. */
   error: string | null;
   /** «Скачать» — после сбоя «Повторить»; имя для экранного диктора. */
@@ -95,9 +95,11 @@ export function CatalogCard(props: CatalogCardProps) {
         <span>{props.sizeText}</span>
         <div className="mcard-acts">
           {download ? (
-            <button type="button" className="btn" onClick={props.onCancel}>
-              Отменить
-            </button>
+            download.cancellable !== false && (
+              <button type="button" className="btn" onClick={props.onCancel}>
+                Отменить
+              </button>
+            )
           ) : (
             <>
               {!installed && (

@@ -13,8 +13,21 @@ export type SettingsTab = (typeof SETTINGS_TABS)[number]['id'];
 /** Вкладка при первом открытии настроек после запуска. */
 export const DEFAULT_SETTINGS_TAB: SettingsTab = 'record';
 
-/** Вкладка после клавиши в строке вкладок: ←/→ — по кругу, Home/End — первая и последняя; другая клавиша — null. */
-export function tabAfterKey(current: SettingsTab, key: string): SettingsTab | null {
+/** Зажатые модификаторы клавиши. */
+export interface KeyMods {
+  alt: boolean;
+  ctrl: boolean;
+  meta: boolean;
+}
+
+const NO_MODS: KeyMods = { alt: false, ctrl: false, meta: false };
+
+/**
+ * Вкладка после клавиши в строке вкладок: ←/→ — по кругу, Home/End — первая и последняя; другая клавиша или зажат
+ * Alt/Ctrl/Cmd (это сочетания программы и системы, не листание вкладок) — null.
+ */
+export function tabAfterKey(current: SettingsTab, key: string, mods: KeyMods = NO_MODS): SettingsTab | null {
+  if (mods.alt || mods.ctrl || mods.meta) return null;
   const at = SETTINGS_TABS.findIndex((t) => t.id === current);
   let next: number;
   if (key === 'ArrowRight') next = menuFocusStep(at, SETTINGS_TABS.length, 1);

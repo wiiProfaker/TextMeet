@@ -43,6 +43,8 @@ import { CatalogDownloads } from './models/catalog-downloads';
 import { FakeModelStore } from './models/fake-model-store';
 import { ModelManager, type ModelStore } from './models/model-manager';
 import { modelsRoot } from './models/models-dir';
+import { withQueueDownload } from './models/models-state';
+import { trackQueueDownloads } from './models/queue-downloads';
 import { isModelGroupId, llmFilePath } from './models/registry';
 import { createNotifier, type Notify } from './notifications';
 import { DEV_FOLDER_NAME, LIBRARY_FOLDER_NAME, resolveLibraryDir } from './paths';
@@ -432,9 +434,11 @@ async function start(logger: Logger): Promise<void> {
     },
   });
   aiRunner = ai;
+  // Модель, которую качает сама очередь расшифровки, видна ходом на карточке каталога.
+  const queueModels = trackQueueDownloads(models, () => sendToMain(IPC.modelsChanged));
   const queue = new TranscriptionQueue({
     spawn: () => spawnTranscriptionWorker(logger, { fakeEngines: fakeAsr }),
-    models,
+    models: queueModels,
     ffmpegPath: () => resolveFfmpegPath(),
     // Запись начинается и кончается по ходу расшифровки: число потоков спрашивается каждый раз.
     threads: () => (controller.getState().phase === 'idle' ? FULL_THREADS : RECORDING_THREADS),
@@ -611,7 +615,12 @@ async function start(logger: Logger): Promise<void> {
     transcription: queue,
     models,
     ai,
-    downloads: catalogDownloads,
+    downloads: {
+      start: (id) => catalogDownloads.start(id),
+      cancel: (id) => catalogDownloads.cancel(id),
+      snapshot: () => withQueueDownload(catalogDownloads.snapshot(), queueModels.active()),
+      isBusy: () => catalogDownloads.isBusy(),
+    },
   });
 
   app.on('before-quit', (event) => {

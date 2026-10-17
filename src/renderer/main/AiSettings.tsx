@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { AI_PROMPT_MAX, DEFAULT_AI_PROMPT, resolveAiPrompt } from '../../shared/ai-prompt';
+import { AI_PROMPT_MAX, DEFAULT_AI_PROMPT, pasteCut, resolveAiPrompt } from '../../shared/ai-prompt';
 import type { SettingsState } from '../../shared/ipc';
 import { errorText } from './errors';
 
@@ -25,6 +25,9 @@ interface Props {
  */
 export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave }: Props) {
   const [text, setText] = useState(() => resolveAiPrompt(aiPrompt));
+  /** Последняя вставка не поместилась — поле обрезало её (подсказка до следующей правки). */
+  const [cut, setCut] = useState(false);
+  const pastedCut = useRef(false);
   const hintId = useId();
   const field = useRef<HTMLTextAreaElement>(null);
   /** Набранное (или «Вернуть стандартный» — null), но ещё не отправленное. */
@@ -94,6 +97,9 @@ export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave
 
   const change = (value: string) => {
     setText(value);
+    // Подсказка «Обрезано…» — до следующей правки после той вставки.
+    if (pastedCut.current) pastedCut.current = false;
+    else setCut(false);
     pending.current = { value };
     cancelTimer();
     timer.current = setTimeout(flush, SAVE_DELAY_MS);
@@ -121,8 +127,23 @@ export function AiSettings({ aiPrompt, save, onSaved, onError, onErrorAfterLeave
           maxLength={AI_PROMPT_MAX}
           value={text}
           onChange={(e) => change(e.currentTarget.value)}
+          onPaste={(e) => {
+            const area = e.currentTarget;
+            const cut = pasteCut({
+              length: area.value.length,
+              selected: area.selectionEnd - area.selectionStart,
+              pasted: e.clipboardData.getData('text').length,
+            });
+            pastedCut.current = cut;
+            setCut(cut);
+          }}
           onBlur={flush}
         />
+        {cut && (
+          <small className="cut" role="status">
+            Обрезано до {AI_PROMPT_MAX} знаков.
+          </small>
+        )}
         <small id={hintId}>
           Используется для «Итогов встречи» и добавляется перед текстом, когда вы нажимаете «Скопировать для ИИ».
         </small>

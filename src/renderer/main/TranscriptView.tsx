@@ -4,7 +4,7 @@ import { speakerLabel, type SpeakerId, type Transcript, type TranscriptSegment }
 import { editTexts, type TranscriptEdit } from '../../shared/transcript-edit';
 import { errorText } from './errors';
 import { ChevronIcon, PlayIcon } from './icons';
-import { shouldFollow } from './playback';
+import { isManualScrollKey, shouldFollow } from './playback';
 import { SegmentText } from './SegmentText';
 import { SpeakerChips } from './SpeakerChips';
 import { SpeakerSlotContext } from './speaker-slot';
@@ -40,7 +40,6 @@ const UNDO_MS = 10_000;
 const EDIT_UNAVAILABLE = 'Идёт расшифровка заново — пока текст не правится. Дождитесь её окончания.';
 
 /** Клавиши, которыми человек листает текст сам. */
-const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 
 interface RowProps {
   segment: TranscriptSegment;
@@ -95,6 +94,7 @@ const Row = memo(function Row({
         <button
           type="button"
           className="t tbtn"
+          data-time
           aria-label={`Слушать с ${time}`}
           onClick={() => onPlayAt(segment.start)}
         >
@@ -175,6 +175,8 @@ export function TranscriptView({
   const [editingId, setEditingId] = useState<string | null>(null);
   /** Удалённые реплики, которые ещё можно вернуть; последняя удалённая — в конце. */
   const [removed, setRemoved] = useState<readonly TranscriptSegment[]>([]);
+  const removedRef = useRef(removed);
+  removedRef.current = removed;
   const [undoError, setUndoError] = useState<string | null>(null);
   /** Реплика, у которой открыто меню «Кто говорит». */
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -260,7 +262,11 @@ export function TranscriptView({
   const pickSpeaker = useCallback(
     (segment: TranscriptSegment, speakerId: SpeakerId | 'new') => {
       if (!onEdit || speakerId === segment.speakerId) return;
-      onEdit({ kind: 'speaker', segmentId: segment.id, speakerId }).catch((err: unknown) => onError(errorText(err)));
+      // Спикеры удалённых реплик, которые ещё можно «Вернуть», новому собеседнику свои номера не отдают.
+      const reserved = [...new Set(removedRef.current.map((s) => s.speakerId))];
+      onEdit({ kind: 'speaker', segmentId: segment.id, speakerId, ...(speakerId === 'new' && { reserved }) }).catch(
+        (err: unknown) => onError(errorText(err)),
+      );
     },
     [onEdit, onError],
   );
@@ -333,12 +339,15 @@ export function TranscriptView({
         onWheel={manualScroll}
         onTouchMove={manualScroll}
         onKeyDown={(e) => {
-          if (!SCROLL_KEYS.has(e.key)) return;
           const target = e.target as HTMLElement;
-          // В поле клавиши двигают курсор, а Пробел на кнопке нажимает её — это не листание текста.
-          if (target.closest('input, textarea')) return;
-          if (e.key === ' ' && target.closest('button, [role="button"]')) return;
-          manualScroll();
+          const on = target.closest('input, textarea')
+            ? 'field'
+            : target.closest('[data-time]')
+              ? 'time'
+              : target.closest('button, [role="button"]')
+                ? 'button'
+                : 'other';
+          if (isManualScrollKey(e.key, on)) manualScroll();
         }}
         onPointerDown={(e) => {
           // Полоса прокрутки — щелчок по самой области текста.
@@ -372,7 +381,22 @@ export function TranscriptView({
               <button ref={undoButton} type="button" className="lnk" onClick={() => void restore()}>
                 Вернуть
               </button>
-              {undoError && <span className="undo-err">{undoError}</span>}
+              {undoError && (
+                <>
+                  <span className="undo-err">{undoError}</span>
+                  <button
+                    type="button"
+                    className="lnk"
+                    aria-label="Закрыть сообщение об ошибке"
+                    onClick={() => {
+                      setRemoved([]);
+                      setUndoError(null);
+                    }}
+                  >
+                    Закрыть
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

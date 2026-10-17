@@ -95,3 +95,31 @@ test('a meeting is transcribed with the model chosen in the window and shows it'
   const transcript = JSON.parse(await readFile(join(libraryDir, ID, 'transcript.json'), 'utf8')) as Record<string, unknown>;
   expect(transcript).toMatchObject({ model: 't-one', modelTitle: 'T-one' });
 });
+
+test('the transcribe dialog says when the model list did not load', async () => {
+  launched = await launchApp({
+    meetings: [
+      {
+        id: ID,
+        json: meetingJson(ID, {
+          title: 'Созвон с Ириной',
+          durationSec: 3,
+          tracks: [{ kind: 'mic', file: 'mic.webm', startOffsetMs: 0 }],
+        }),
+        audio: { 'mic.webm': 2 },
+      },
+    ],
+  });
+  const { app, page } = launched;
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('models:get');
+    ipcMain.handle('models:get', () => {
+      throw new Error('Список моделей не прочитался.');
+    });
+  });
+  await page.getByRole('button', { name: /Созвон с Ириной/ }).click();
+  await page.getByRole('button', { name: 'Расшифровать', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('Список моделей не загрузился — расшифруем моделью из настроек.');
+  await expect(dialog.getByRole('combobox', { name: 'Модель расшифровки' })).toHaveCount(0);
+});

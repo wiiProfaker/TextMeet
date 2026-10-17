@@ -63,6 +63,11 @@ describe('model card texts', () => {
     expect(downloadText(0, 0)).toBe('Скачиваем…');
   });
 
+  it('says when the model is downloaded for a meeting being transcribed', () => {
+    expect(downloadText(120 * MB, 464 * MB, true)).toBe('Скачивается для расшифровки встречи — 120 из 464 МБ');
+    expect(downloadText(0, 0, true)).toBe('Скачивается для расшифровки встречи…');
+  });
+
   it('names the download button by its visible word, also after a failure', () => {
     expect(downloadButton('T-one', false)).toEqual({ text: 'Скачать', label: 'Скачать: T-one' });
     expect(downloadButton('T-one', true)).toEqual({ text: 'Повторить', label: 'Повторить: T-one' });

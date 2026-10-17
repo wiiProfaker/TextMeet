@@ -89,7 +89,7 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
 
   /** ←/→, Home, End в строке вкладок: вкладка открывается сразу, фокус — на ней. */
   const tabKeys = (event: KeyboardEvent<HTMLDivElement>) => {
-    const next = tabAfterKey(tab, event.key);
+    const next = tabAfterKey(tab, event.key, { alt: event.altKey, ctrl: event.ctrlKey, meta: event.metaKey });
     if (!next) return;
     event.preventDefault();
     onTabChange(next);

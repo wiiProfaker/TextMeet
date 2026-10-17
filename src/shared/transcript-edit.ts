@@ -15,8 +15,11 @@ export type TranscriptEdit =
   | { kind: 'text'; segmentId: string; text: string }
   /** «Вернуть» удалённую реплику. */
   | { kind: 'restore'; segment: TranscriptSegment }
-  /** Кто говорит в реплике; 'new' — новый собеседник. */
-  | { kind: 'speaker'; segmentId: string; speakerId: SpeakerId | 'new' }
+  /**
+   * Кто говорит в реплике; 'new' — новый собеседник. reserved — спикеры удалённых реплик, которые ещё можно «Вернуть»:
+   * их номера новому собеседнику не достаются (иначе возвращённая реплика оказалась бы у него).
+   */
+  | { kind: 'speaker'; segmentId: string; speakerId: SpeakerId | 'new'; reserved?: readonly SpeakerId[] }
   /** Все реплики from становятся репликами into. */
   | { kind: 'merge'; from: SpeakerId; into: SpeakerId };
 
@@ -35,9 +38,12 @@ export const isStaleEditMessage = (message: string): boolean =>
 /** Наибольший номер собеседника: s999 (так в схеме). */
 const MAX_OTHER = 999;
 
-/** Следующий свободный номер собеседника: после s1, s3 — s4. */
-export function nextSpeakerId(transcript: Pick<Transcript, 'speakers' | 'segments'>): SpeakerId {
-  const ids = [...transcript.speakers.map((s) => s.id), ...transcript.segments.map((s) => s.speakerId)];
+/** Следующий свободный номер собеседника: после s1, s3 — s4. Номера из reserved тоже заняты. */
+export function nextSpeakerId(
+  transcript: Pick<Transcript, 'speakers' | 'segments'>,
+  reserved: readonly SpeakerId[] = [],
+): SpeakerId {
+  const ids = [...transcript.speakers.map((s) => s.id), ...transcript.segments.map((s) => s.speakerId), ...reserved];
   const max = Math.max(0, ...ids.map((id) => Number(/^s(\d+)$/.exec(id)?.[1] ?? 0)));
   if (max >= MAX_OTHER) throw new Error(editTexts.tooManySpeakers);
   return `s${max + 1}`;
@@ -98,9 +104,15 @@ function restore(transcript: Transcript, segment: TranscriptSegment, now: Date):
   return changed(transcript, segments, now);
 }
 
-function changeSpeaker(transcript: Transcript, segmentId: string, target: SpeakerId | 'new', now: Date): Transcript {
+function changeSpeaker(
+  transcript: Transcript,
+  segmentId: string,
+  target: SpeakerId | 'new',
+  reserved: readonly SpeakerId[],
+  now: Date,
+): Transcript {
   const segment = findSegment(transcript, segmentId);
-  const speakerId = target === 'new' ? nextSpeakerId(transcript) : target;
+  const speakerId = target === 'new' ? nextSpeakerId(transcript, reserved) : target;
   if (target !== 'new') {
     requireSpeaker(transcript, target);
     if (segment.speakerId === target) return transcript;
@@ -125,7 +137,7 @@ export function applyEdit(transcript: Transcript, edit: TranscriptEdit, now: Dat
     case 'restore':
       return restore(transcript, edit.segment, now);
     case 'speaker':
-      return changeSpeaker(transcript, edit.segmentId, edit.speakerId, now);
+      return changeSpeaker(transcript, edit.segmentId, edit.speakerId, edit.reserved ?? [], now);
     case 'merge':
       return merge(transcript, edit.from, edit.into, now);
   }

@@ -68,7 +68,7 @@ export function AiModelSettings() {
     state &&
     ids.length > 0 && (
       <div className="mgroup" role="group" aria-label={title}>
-        <h3>{title}</h3>
+        <h2>{title}</h2>
         {ids.map((id) => (
           <AiModelCard key={id} id={id} state={state} run={run} />
         ))}

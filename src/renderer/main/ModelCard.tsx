@@ -35,8 +35,9 @@ export function ModelCard({ id, state, actions }: { id: AsrModelId; state: Model
       selected={selected}
       download={
         download && {
-          text: downloadText(download.done, download.total),
+          text: downloadText(download.done, download.total, download.queued),
           fraction: download.total > 0 ? download.done / download.total : 0,
+          cancellable: !download.queued,
         }
       }
       error={state.downloadError?.id === id ? state.downloadError.message : null}

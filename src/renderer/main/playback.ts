@@ -33,3 +33,17 @@ export const MANUAL_SCROLL_PAUSE_MS = 5000;
 export function shouldFollow(state: { playing: boolean; editing: boolean; now: number; lastManualScroll: number }): boolean {
   return state.playing && !state.editing && state.now - state.lastManualScroll >= MANUAL_SCROLL_PAUSE_MS;
 }
+
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
+
+/** Где нажата клавиша в тексте встречи: поле правки, кнопка времени реплики, другая кнопка, остальное. */
+export type ScrollKeyTarget = 'field' | 'time' | 'button' | 'other';
+
+/**
+ * Клавиша в тексте встречи — это человек листает сам (текст на время перестаёт идти за звуком)? В поле клавиши
+ * двигают курсор, Пробел на кнопке нажимает её, стрелки на кнопке времени — переход между репликами, не листание.
+ */
+export function isManualScrollKey(key: string, target: ScrollKeyTarget): boolean {
+  if (!SCROLL_KEYS.has(key) || target === 'field' || target === 'time') return false;
+  return !(key === ' ' && target === 'button');
+}

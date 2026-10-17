@@ -35,6 +35,7 @@ export function TranscribeDialog({
 }: Props) {
   const [participants, setParticipants] = useState(() => choiceFor(participantsHint));
   const [models, setModels] = useState<ModelsState | null>(null);
+  const [modelsFailed, setModelsFailed] = useState(false);
   /** null — пока не выбрали сами: модель из настроек. */
   const [model, setModel] = useState<AsrModelId | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +58,10 @@ export function TranscribeDialog({
       .then((state) => {
         if (active) setModels(state);
       })
-      .catch((err: unknown) => console.error('TextMeet: список моделей не получен', errorText(err)));
+      .catch((err: unknown) => {
+        console.error('TextMeet: список моделей не получен', errorText(err));
+        if (active) setModelsFailed(true);
+      });
     return () => {
       active = false;
     };
@@ -102,6 +106,7 @@ export function TranscribeDialog({
             <span>Текст расшифруется с нуля: ваши правки и имена собеседников пропадут.</span>
           </p>
         )}
+        {modelsFailed && <p className="hint">Список моделей не загрузился — расшифруем моделью из настроек.</p>}
         {models && (
           <div className="dlg-field">
             <div className="q">Модель</div>

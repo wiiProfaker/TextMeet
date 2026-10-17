@@ -19,6 +19,7 @@ export const TranscriptEditSchema = z.discriminatedUnion('kind', [
     kind: z.literal('speaker'),
     segmentId: z.string().min(1).max(40),
     speakerId: z.union([SpeakerIdSchema, z.literal('new')]),
+    reserved: z.array(SpeakerIdSchema).max(1000).optional(),
   }),
   z.object({ kind: z.literal('merge'), from: SpeakerIdSchema, into: SpeakerIdSchema }),
 ]);

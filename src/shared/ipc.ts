@@ -108,6 +108,8 @@ export const IPC = {
   recorderPeaks: 'recorder:peaks',
   recorderTrackEnded: 'recorder:track-ended',
   recorderStopped: 'recorder:stopped',
+  /** Окно записи живо (каждые 2 с): сторож перезапускает зависшее окно (recorder-watchdog.ts). */
+  recorderAlive: 'recorder:alive',
 } as const;
 
 /** Что показать под переключателем «Запускать при входе в систему». */
@@ -267,6 +269,7 @@ export interface RecorderMessageContract {
   [IPC.recorderPeaks]: RecorderPeaks;
   [IPC.recorderTrackEnded]: RecorderTrackEnded;
   [IPC.recorderStopped]: RecorderStopped;
+  [IPC.recorderAlive]: void;
 }
 export type RecorderMessageChannel = keyof RecorderMessageContract;
 
@@ -376,6 +379,8 @@ export interface RecorderBridge {
   peaks(message: RecorderPeaks): void;
   trackEnded(message: RecorderTrackEnded): void;
   stopped(message: RecorderStopped): void;
+  /** «Живо»: каждые 2 с, пока окно отвечает. */
+  alive(): void;
   onStart(listener: Listener<RecorderStartCommand>): Unsubscribe;
   onStop(listener: () => void): Unsubscribe;
   onPlaySound(listener: Listener<SoundKind>): Unsubscribe;

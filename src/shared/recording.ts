@@ -145,3 +145,6 @@ export interface RecorderTrackEnded {
 export interface RecorderStopped {
   meetingId: string;
 }
+
+/** Как часто окно записи сообщает main, что живо (сторож зависания — src/main/recording/recorder-watchdog.ts). */
+export const RECORDER_BEAT_MS = 2000;

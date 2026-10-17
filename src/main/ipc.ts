@@ -62,6 +62,8 @@ export interface IpcDeps {
   recorderContents(): WebContents | null;
   appInfo(): AppInfo;
   onRecorderReady(): void;
+  /** Сердцебиение окна записи — сторожу зависания. */
+  onRecorderAlive(): void;
   /** Горячая клавиша сменилась — обновить подсказку в меню трея. */
   hotkeyChanged(): void;
   /** Встреча изменилась — окно перечитает список встреч. */
@@ -141,6 +143,7 @@ const TranscribeRequestSchema = z.object({
 
 const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
+  [IPC.recorderAlive]: z.undefined(),
   [IPC.recorderStarted]: z.object({
     meetingId: MeetingIdSchema,
     tracks: z.array(z.object({ kind: RecordedTrackKindSchema, startedAt: z.number().finite() })).min(1),
@@ -559,6 +562,7 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   onRecorder(IPC.recorderReady, () => deps.onRecorderReady());
+  onRecorder(IPC.recorderAlive, () => deps.onRecorderAlive());
   onRecorder(IPC.recorderStarted, (message) => deps.controller.onStarted(message));
   onRecorder(IPC.recorderStartFailed, (message) => deps.controller.onStartFailed(message));
   onRecorder(IPC.recorderChunk, (message) => {

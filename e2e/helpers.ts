@@ -30,6 +30,8 @@ export interface LaunchOptions {
   installedModels?: string[];
   /** Пауза поддельного движка итогов между кусками ответа, мс (по умолчанию 20). */
   llmTokenMs?: number;
+  /** Ещё переменные окружения программы (тестовые подмены TEXTMEET_*). */
+  env?: Record<string, string>;
 }
 
 export interface LaunchedApp {
@@ -248,6 +250,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         TEXTMEET_TEST_LLM: resolve('src/test-support/fake-llama-server.mjs'),
         TEXTMEET_FAKE_LLM_TOKEN_MS: String(options.llmTokenMs ?? 20),
         TEXTMEET_FAKE_LLM_LOG: llmLog,
+        ...options.env,
       },
     });
     page = await mainWindow(app);

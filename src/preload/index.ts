@@ -114,6 +114,7 @@ const recorder: RecorderBridge = {
   peaks: (message) => send(IPC.recorderPeaks, message),
   trackEnded: (message) => send(IPC.recorderTrackEnded, message),
   stopped: (message) => send(IPC.recorderStopped, message),
+  alive: () => send(IPC.recorderAlive),
   onStart: (listener) => subscribe(IPC.recorderStart, listener),
   onStop: (listener) => subscribe(IPC.recorderStop, () => listener()),
   onPlaySound: (listener) => subscribe(IPC.recorderPlaySound, listener),

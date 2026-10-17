@@ -52,6 +52,7 @@ import { applyPermissionPolicy } from './permissions';
 import { RecordingController } from './recording/controller';
 import { freeDiskBytes } from './recording/monitors';
 import { recoverInterruptedRecordings } from './recording/recovery';
+import { RecorderWatchdog } from './recording/recorder-watchdog';
 import { createSettingsStore } from './settings/settings-store';
 import { dialogTexts, notificationTexts } from './texts';
 import { TranscriptionQueue } from './transcription/queue';
@@ -125,6 +126,10 @@ let aiRunner: AiRunner | null = null;
 /** Окно записи падало снова и снова, и его больше не перезапускают. */
 let recorderBroken = false;
 const recorderCrashes: number[] = [];
+/** Сторож зависшего окна записи: нет «сердцебиения» — окно перезапускается, как после падения. */
+let recorderWatchdog: RecorderWatchdog | null = null;
+/** Только для автотестов: порог зависания окна записи, мс (по умолчанию 15 с). */
+const recorderHungMs = Number(testVars.TEXTMEET_TEST_RECORDER_HANG_MS ?? 0) || undefined;
 // Второй запуск или щелчок по Dock могут прийти, пока start() ещё не создал окна:
 // тогда просьбу показать окно только запоминаем, иначе появится второе, «чужое» главное окно.
 let windowsCreated = false;
@@ -207,8 +212,21 @@ function startRecorderWindow(logger: Logger, controller: RecordingController, no
   recorderReady = false;
   const win = createRecorderWindow(logger, testMedia);
   hideInsteadOfClose(win);
+  recorderWatchdog?.stop();
+  // Окно повисло (не упало): завершаем его процесс — дальше тот же путь, что после падения.
+  const watchdog = new RecorderWatchdog({
+    hungMs: recorderHungMs,
+    onHung: () => {
+      if (quitApproved || win.isDestroyed()) return;
+      logger.error('Окно записи не отвечает — перезапускаем');
+      win.webContents.forcefullyCrashRenderer();
+    },
+  });
+  recorderWatchdog = watchdog;
+  win.once('closed', () => watchdog.stop());
   win.webContents.on('render-process-gone', (_event, details) => {
     logger.error(`Окно записи завершилось: ${details.reason} (код ${details.exitCode})`);
+    watchdog.stop();
     if (quitApproved) return;
     recorderReady = false;
     controller.onRecorderGone();
@@ -551,7 +569,9 @@ async function start(logger: Logger): Promise<void> {
     onRecorderReady: () => {
       recorderReady = true;
       logger.info('Окно записи готово');
+      recorderWatchdog?.start();
     },
+    onRecorderAlive: () => recorderWatchdog?.beat(),
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
     libraryChanged: () => sendToMain(IPC.libraryChanged),
     search: searchIndex,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_AI_PROMPT } from '../../shared/ai-prompt';
 import type { ExportDoc } from '../../shared/export-doc';
-import { AI_RULES, aiMessages, fitsWindow, meetingText, sourceHash, summaryTask } from './ai-messages';
+import { AI_RULES, aiMessages, fitsWindow, meetingText, sourceHash, stripPreamble, summaryTask } from './ai-messages';
 
 const doc: ExportDoc = {
   title: 'Созвон',
@@ -9,6 +9,26 @@ const doc: ExportDoc = {
   participantsLine: 'Участники: Я, Ирина',
   paragraphs: [{ speaker: 'Ирина', time: '0:05', text: 'Переносим на пятницу.' }],
 };
+
+describe('stripPreamble', () => {
+  it('stripPreamble drops an introduction line and keeps the rest', () => {
+    expect(stripPreamble('На основе предоставленного текста встречи, вот итоги:\n\n**Главное**\n1. …')).toBe('**Главное**\n1. …');
+    expect(stripPreamble('Вот итоги встречи:\n- пункт')).toBe('- пункт');
+    expect(stripPreamble('Исходя из расшифровки:\nТекст')).toBe('Текст');
+  });
+
+  it('stripPreamble keeps answers that start with the content', () => {
+    expect(stripPreamble('**Главное**\nНа основе опроса решили…')).toBe('**Главное**\nНа основе опроса решили…');
+    expect(stripPreamble('Вот так: да.')).toBe('Вот так: да.'); // одна строка — не трогаем
+    expect(stripPreamble('Вот итоги:\n')).toBe('Вот итоги:\n'); // за вступлением пока ничего — не трогаем
+    expect(stripPreamble('Вотум доверия обсуждали:\nТекст')).toBe('Вотум доверия обсуждали:\nТекст');
+  });
+
+  it('AI_RULES ask to start with the content and keep headings short', () => {
+    expect(AI_RULES).toContain('без вступлений');
+    expect(AI_RULES).toContain('«Главное», «Решения», «Задачи», «Открытые вопросы»');
+  });
+});
 
 describe('aiMessages', () => {
   it('puts the hidden rules first, then the meeting, then the task', () => {

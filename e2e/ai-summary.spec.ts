@@ -172,3 +172,29 @@ test('a crashed engine shows the reason and «Повторить» starts it aga
   await block(page).getByRole('button', { name: 'Повторить' }).click();
   await expect.poll(async () => (await llmRequests(llmLog)).length).toBe(2);
 });
+
+test('a busy engine explains itself instead of an empty block', async () => {
+  launched = await launch({ installedModels: ['qwen3.5-9b'] });
+  const { app, page } = launched;
+  // Модель занята (удаляется, готовится другой запрос, программа закрывается) — main отвечает «busy».
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('ai:summarize');
+    ipcMain.handle('ai:summarize', () => 'busy');
+  });
+  await open(page, /Созвон с Ириной/);
+  await summaryButton(page).click();
+  await expect(block(page)).toContainText('Модель сейчас занята — попробуйте ещё раз через несколько секунд.');
+  await block(page).getByRole('button', { name: 'Закрыть' }).click();
+  await expect(block(page)).toHaveCount(0);
+});
+
+test('"Итоги готовы" is announced while the block is collapsed', async () => {
+  launched = await launch({ installedModels: ['qwen3.5-9b'], llmTokenMs: 200 });
+  const { page } = launched;
+  await open(page, /Созвон с Ириной/);
+  await summaryButton(page).click();
+  await expect(block(page)).toContainText('Qwen3.5 9B · пишет…');
+  await block(page).getByRole('button', { name: 'Свернуть' }).click();
+  await expect(block(page)).toHaveCount(0);
+  await expect(page.getByRole('status').filter({ hasText: 'Итоги готовы' })).toHaveCount(1, { timeout: 20_000 });
+});

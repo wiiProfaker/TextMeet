@@ -30,7 +30,7 @@ async function meeting(lib: string, title = 'Созвон с Ириной'): Pro
 
 /** Движок, которым управляет тест: загрузка, счёт «кусочков», поток ответа. */
 function controllableEngine() {
-  const requests: { request: ChatRequest; options: StreamOptions; finish(): void; fail(err: unknown): void }[] = [];
+  const requests: { request: ChatRequest; options: StreamOptions; finish(reason?: string): void; fail(err: unknown): void }[] = [];
   let tokens = 100;
   let failReady: unknown = null;
   const engine = {
@@ -40,7 +40,7 @@ function controllableEngine() {
         countTokens: async () => tokens,
         streamChat: (request: ChatRequest, options: StreamOptions) =>
           new Promise<{ finishReason: string | null }>((resolve, reject) => {
-            requests.push({ request, options, finish: () => resolve({ finishReason: 'stop' }), fail: reject });
+            requests.push({ request, options, finish: (reason = 'stop') => resolve({ finishReason: reason }), fail: reject });
             options.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
           }),
       };
@@ -114,6 +114,36 @@ describe('AiRunner', () => {
     expect(t.saved).toHaveBeenCalledWith(id);
     expect(t.engine.idle).toHaveBeenCalled();
     expect(t.runner.state()).toEqual({ job: null, finished: { meetingId: id, kind: 'summary', status: 'done' }, failures: [] });
+  });
+
+  it('saves a summary cut by the length limit as truncated', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    await t.runner.summarize(id);
+    const request = await t.write('**Главное**\n1. Пятница');
+    request.finish('length');
+    await idle(t.runner);
+    expect((await readAi(t.lib, id)).doc.summary).toMatchObject({ status: 'done', truncated: true });
+  });
+
+  it('saves a whole summary as not truncated', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    await t.runner.summarize(id);
+    (await t.write('Текст')).finish();
+    await idle(t.runner);
+    expect((await readAi(t.lib, id)).doc.summary?.truncated).toBeUndefined();
+  });
+
+  it('saves the summary without the introduction line', async () => {
+    const t = setup();
+    const id = await meeting(t.lib);
+    await t.runner.summarize(id);
+    const request = await t.write('Вот итоги:', '\n', 'Текст');
+    expect(t.runner.state().job?.text).toBe('Текст');
+    request.finish();
+    await idle(t.runner);
+    expect((await readAi(t.lib, id)).doc.summary?.text).toBe('Текст');
   });
 
   it('asks a question with the question alone as the task, and keeps the questions in order', async () => {

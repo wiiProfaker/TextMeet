@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { createPortal } from 'react-dom';
 import { speakerLabel, type SpeakerId, type Transcript, type TranscriptSegment } from '../../shared/transcript';
 import { editTexts, type TranscriptEdit } from '../../shared/transcript-edit';
 import { errorText } from './errors';
@@ -6,6 +7,7 @@ import { ChevronIcon, PlayIcon } from './icons';
 import { shouldFollow } from './playback';
 import { SegmentText } from './SegmentText';
 import { SpeakerChips } from './SpeakerChips';
+import { SpeakerSlotContext } from './speaker-slot';
 import { SpeakerMenu, type SpeakerOption } from './SpeakerMenu';
 import { formatTimestamp } from '../../shared/format';
 import { speakerTone } from './transcription-format';
@@ -176,6 +178,7 @@ export function TranscriptView({
   const [undoError, setUndoError] = useState<string | null>(null);
   /** Реплика, у которой открыто меню «Кто говорит». */
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const speakerSlot = useContext(SpeakerSlotContext);
   const speakers = useMemo(
     () => transcript.speakers.map((s) => ({ id: s.id, label: speakerLabel(s.id, names) })),
     [transcript.speakers, names],
@@ -308,15 +311,20 @@ export function TranscriptView({
   const manualScroll = () => {
     lastManualScroll.current = Date.now();
   };
+  // Спикеры — в строке под названием встречи, если шапка дала для них место.
+  const chips = (inline: boolean) => (
+    <SpeakerChips
+      speakers={transcript.speakers}
+      names={names}
+      inline={inline}
+      onRename={onEdit ? onRenameSpeaker : null}
+      onMerge={mergeSpeakers}
+      onError={onError}
+    />
+  );
   return (
     <>
-      <SpeakerChips
-        speakers={transcript.speakers}
-        names={names}
-        onRename={onEdit ? onRenameSpeaker : null}
-        onMerge={mergeSpeakers}
-        onError={onError}
-      />
+      {speakerSlot ? createPortal(chips(true), speakerSlot) : chips(false)}
       <div
         ref={box}
         className="tx"

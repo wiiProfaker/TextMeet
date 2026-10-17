@@ -1,4 +1,4 @@
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { isAsrModelId } from '../../shared/asr-models';
 import { formatDurationShort, formatLongDate } from '../../shared/format';
 import type { ImportProgress } from '../../shared/import';
@@ -11,6 +11,8 @@ import { isImportFailure, participantsText } from './format';
 import { SearchViewContext, usePlayback, useTranscript, type Playback, type TranscriptLoad } from './hooks';
 import { FolderIcon, TrashIcon, WarnIcon } from './icons';
 import { AiBlock, AiSummaryButton, useAiPanel } from './AiBlock';
+import { loadShare } from './ai-column';
+import { ColumnSplitter } from './ColumnSplitter';
 import { CopyForAiButton } from './CopyForAiButton';
 import { ExportMenu } from './ExportMenu';
 import { importView } from './import-format';
@@ -20,8 +22,18 @@ import { segmentAt } from './playback';
 import { ConfirmDialog } from './ConfirmDialog';
 import { MeetingMenu } from './MeetingMenu';
 import { TranscribeDialog } from './TranscribeDialog';
+import { SpeakerSlotContext } from './speaker-slot';
 import { progressView, transcribeActions, type ProgressView } from './transcription-format';
 import { TranscriptView } from './TranscriptView';
+
+/** localStorage окна; недоступен — null (ширина итогов по умолчанию). */
+function windowStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 interface Props {
   entry: MeetingListEntry;
@@ -268,6 +280,10 @@ function MeetingView({
   onOpenMeeting,
 }: Props & { entry: Extract<MeetingListEntry, { kind: 'ok' }> }) {
   const [dialog, setDialog] = useState(false);
+  // Ширина колонки итогов — одна на всю программу (localStorage окна); строка спикеров — в шапке под названием.
+  const [aiShare, setAiShare] = useState(() => loadShare(windowStorage()));
+  const [speakerSlot, setSpeakerSlot] = useState<HTMLElement | null>(null);
+  const area = useRef<HTMLDivElement>(null);
   const { meeting, mixReady, mixFailed } = entry;
   const busy = meeting.status === 'queued' || meeting.status === 'transcribing' ? meeting.status : null;
   const [load, setTranscript, reloadTranscript] = useTranscript(
@@ -335,7 +351,10 @@ function MeetingView({
     <main className="pane" aria-label="Встреча">
       <header className="head">
         <MeetingTitle meetingId={meeting.id} title={meeting.title} onError={onError} />
-        <div className="meta">{meta.join(' · ')}</div>
+        <div className="meta">
+          <span>{meta.join(' · ')}</span>
+          <span ref={setSpeakerSlot} className="meta-spk" />
+        </div>
         <div className="acts">
           {actions.header && (
             <button type="button" className="btn" onClick={() => setDialog(true)}>
@@ -382,22 +401,35 @@ function MeetingView({
           </div>
         </div>
       )}
-      <AiBlock panel={ai} onOpenSettings={onOpenAiSettings} onOpenMeeting={onOpenMeeting} onError={onError} />
-      {meeting.status === 'importing' ? (
-        <ImportBlock fileName={meeting.sourceFileName} progress={importing} />
-      ) : (
-        <Body
-          meeting={meeting}
-          load={load}
-          busy={busy}
-          progress={progress}
-          playback={playback}
-          canPlay={canPlay}
-          onEdit={edit}
-          onError={onError}
-          onTranscribe={actions.body ? () => setDialog(true) : null}
-        />
-      )}
+      {/* Итоги — колонкой справа от текста; в узкой области — сверху над ним (решения Плана 8, §2.1). */}
+      <div className="mwrap">
+        <div ref={area} className="mbody" style={{ '--ai-share': aiShare } as CSSProperties}>
+          <div className="mmain">
+            <SpeakerSlotContext.Provider value={speakerSlot}>
+              {meeting.status === 'importing' ? (
+                <ImportBlock fileName={meeting.sourceFileName} progress={importing} />
+              ) : (
+                <Body
+                  meeting={meeting}
+                  load={load}
+                  busy={busy}
+                  progress={progress}
+                  playback={playback}
+                  canPlay={canPlay}
+                  onEdit={edit}
+                  onError={onError}
+                  onTranscribe={actions.body ? () => setDialog(true) : null}
+                />
+              )}
+            </SpeakerSlotContext.Provider>
+          </div>
+          {ai.visible && <ColumnSplitter share={aiShare} onChange={setAiShare} areaRef={area} />}
+          {/* Свёрнутый блок остаётся на месте пустым: он объявляет экранному диктору «Итоги готовы». */}
+          <div className={ai.visible ? 'mside' : 'mside off'}>
+            <AiBlock panel={ai} onOpenSettings={onOpenAiSettings} onOpenMeeting={onOpenMeeting} onError={onError} />
+          </div>
+        </div>
+      </div>
       {mixReady ? (
         <Player meetingId={meeting.id} playback={playback} />
       ) : (

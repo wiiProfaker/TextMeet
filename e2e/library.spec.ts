@@ -504,3 +504,19 @@ test('the clear button empties the search and keeps the focus in the field', asy
   await expect(box).toHaveValue('');
   await expect(box).toBeFocused();
 });
+
+test('speaker chips are in the line under the title and rename still works', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page, libraryDir } = launched;
+  await openMeeting(page);
+  const header = page.getByRole('main', { name: 'Встреча' }).locator('header');
+  const speakers = header.getByRole('list', { name: 'Спикеры' });
+  await expect(speakers.getByRole('button', { name: 'Спикер 1' })).toBeVisible();
+  // Отдельной полосы спикеров под шапкой больше нет: список один, и он в шапке.
+  await expect(page.getByRole('list', { name: 'Спикеры' })).toHaveCount(1);
+  await speakers.getByRole('button', { name: 'Спикер 1' }).click();
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).fill('Ирина');
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).press('Enter');
+  await expect(speakers.getByRole('button', { name: 'Ирина' })).toBeVisible();
+  await expect.poll(async () => (await pollMeetingJson(libraryDir, ID))?.speakerNames).toEqual({ s1: 'Ирина' });
+});

@@ -198,3 +198,121 @@ test('"Итоги готовы" is announced while the block is collapsed', asyn
   await expect(block(page)).toHaveCount(0);
   await expect(page.getByRole('status').filter({ hasText: 'Итоги готовы' })).toHaveCount(1, { timeout: 20_000 });
 });
+
+// Итоги колонкой справа от текста (решения Плана 8, §2.1).
+const READY_SUMMARY = {
+  text: '### Главное\n- Запуск переносится на пятницу.\n\n### Задачи\n1. Предупредить Олега.',
+  model: 'qwen3.5-9b',
+  modelTitle: 'Qwen3.5 9B',
+  createdAt: '2026-09-27T13:55:00.000Z',
+  status: 'done',
+  sourceHash: 'x',
+};
+
+async function launchWithSummary(): Promise<LaunchedApp> {
+  const app = await launch({ installedModels: ['qwen3.5-9b'] });
+  await writeFile(join(app.libraryDir, ID, 'ai.json'), JSON.stringify({ version: 1, summary: READY_SUMMARY, questions: [] }));
+  return app;
+}
+
+/** Размер окна — и дождаться, пока страница его получила (рамка окна — несколько десятков точек). */
+async function setWindowSize({ app, page }: LaunchedApp, width: number, height: number): Promise<void> {
+  await app.evaluate(
+    ({ BrowserWindow }, size) =>
+      BrowserWindow.getAllWindows()
+        .find((w) => /[\/]main[\/]index\.html/.test(w.webContents.getURL()))
+        ?.setSize(size.width, size.height),
+    { width, height },
+  );
+  await expect.poll(() => page.evaluate((w) => Math.abs(window.innerWidth - w), width)).toBeLessThan(40);
+}
+
+const text = (page: Page) => page.getByRole('region', { name: 'Текст встречи' });
+const splitter = (page: Page) => page.getByRole('separator', { name: 'Ширина итогов' });
+
+async function boxes(page: Page) {
+  const summary = await block(page).boundingBox();
+  const transcriptBox = await text(page).boundingBox();
+  if (!summary || !transcriptBox) throw new Error('итоги или текст встречи не видны');
+  return { summary, text: transcriptBox };
+}
+
+test('summary sits to the right of the transcript in a wide window', async () => {
+  launched = await launchWithSummary();
+  const { page } = launched;
+  await setWindowSize(launched, 1300, 800);
+  await open(page, /Созвон с Ириной/);
+  await expect(block(page).getByRole('heading', { name: 'Главное' })).toBeVisible();
+  await expect.poll(async () => {
+    const b = await boxes(page);
+    return b.summary.x >= b.text.x + b.text.width - 1 && b.summary.height > 400;
+  }).toBe(true);
+});
+
+test('summary moves above the transcript in a narrow window and back to the right when widened', async () => {
+  launched = await launchWithSummary();
+  const { page } = launched;
+  await setWindowSize(launched, 1300, 800);
+  await open(page, /Созвон с Ириной/);
+  await expect(block(page).getByRole('heading', { name: 'Главное' })).toBeVisible();
+  await expect.poll(async () => (await boxes(page)).summary.x > (await boxes(page)).text.x).toBe(true);
+  const wideWidth = (await boxes(page)).summary.width;
+
+  await setWindowSize(launched, 760, 700);
+  await expect.poll(async () => {
+    const b = await boxes(page);
+    return b.summary.y + b.summary.height <= b.text.y + 1;
+  }).toBe(true);
+  await expect(splitter(page)).toBeHidden();
+
+  await setWindowSize(launched, 1300, 800);
+  await expect.poll(async () => {
+    const b = await boxes(page);
+    return b.summary.x >= b.text.x + b.text.width - 1 && Math.abs(b.summary.width - wideWidth) <= 2;
+  }).toBe(true);
+});
+
+test('dragging the splitter changes the summary width and it is remembered after a restart', async () => {
+  launched = await launchWithSummary();
+  const { page } = launched;
+  await setWindowSize(launched, 1300, 800);
+  await open(page, /Созвон с Ириной/);
+  await expect(block(page).getByRole('heading', { name: 'Главное' })).toBeVisible();
+  const before = (await boxes(page)).summary.width;
+  const handle = await splitter(page).boundingBox();
+  if (!handle) throw new Error('ручки нет');
+  await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x + handle.width / 2 - 150, handle.y + handle.height / 2, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => (await boxes(page)).summary.width).toBeGreaterThan(before + 100);
+  const dragged = (await boxes(page)).summary.width;
+
+  // Ширина — настройка окна: после перезапуска окна та же.
+  await page.reload();
+  await open(page, /Созвон с Ириной/);
+  await expect(block(page).getByRole('heading', { name: 'Главное' })).toBeVisible();
+  await expect.poll(async () => Math.abs((await boxes(page)).summary.width - dragged)).toBeLessThanOrEqual(2);
+
+  // С клавиатуры: фокус на ручке, стрелка вправо — итоги уже.
+  await splitter(page).focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await boxes(page)).summary.width).toBeLessThan(dragged - 5);
+  await expect(splitter(page)).toHaveAttribute('aria-valuenow', /^\d+$/);
+});
+
+test('collapse gives the transcript the full width and "Итоги встречи" brings the column back', async () => {
+  launched = await launchWithSummary();
+  const { page } = launched;
+  await setWindowSize(launched, 1300, 800);
+  await open(page, /Созвон с Ириной/);
+  await expect(block(page).getByRole('heading', { name: 'Главное' })).toBeVisible();
+  const narrow = (await boxes(page)).text.width;
+  await block(page).getByRole('button', { name: 'Свернуть' }).click();
+  await expect(block(page)).toHaveCount(0);
+  await expect(splitter(page)).toHaveCount(0);
+  await expect.poll(async () => (await text(page).boundingBox())?.width ?? 0).toBeGreaterThan(narrow + 200);
+  await summaryButton(page).click();
+  await expect(block(page).getByRole('heading', { name: 'Главное' })).toBeVisible();
+  await expect.poll(async () => (await boxes(page)).summary.x >= (await boxes(page)).text.x + (await boxes(page)).text.width - 1).toBe(true);
+});

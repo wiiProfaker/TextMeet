@@ -15,8 +15,8 @@ export const IDLE_MS = 5 * 60_000;
 /** Сколько строк вывода сервера попадает в журнал при сбое (текст встреч сервер не выводит). */
 export const OUTPUT_LINES = 50;
 const POLL_MS = 250;
-/** Сколько ждать выхода процесса после просьбы завершиться. */
-const EXIT_WAIT_MS = 2000;
+/** Сколько ждать выхода процесса после просьбы завершиться (и ещё столько же — после принудительного завершения). */
+export const EXIT_WAIT_MS = 2000;
 
 /** Чем запускать сервер: llama-server программы или (в автотестах) поддельный сервер. */
 export interface LlamaCommand {
@@ -38,6 +38,10 @@ export interface LlamaServerDeps {
   logger: Pick<Logger, 'info' | 'error'>;
   startTimeoutMs?: number;
   idleMs?: number;
+  /** Процесс движка запущен (номер процесса и файл) — main записывает его, чтобы убрать после падения программы. */
+  onSpawn?(pid: number, file: string): void;
+  /** Процесс движка вышел. */
+  onExit?(): void;
 }
 
 /** Папка движка: в собранной программе — resources/llama, в разработке — vendor/llama (scripts/fetch-llama.mjs). */
@@ -126,8 +130,12 @@ class LlamaProcess {
     this.stopping = true;
     const child = this.child;
     if (!child || this.exited) return;
-    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+    const exited = new Promise<boolean>((resolve) => child.once('exit', () => resolve(true)));
     child.kill();
+    if (await Promise.race([exited, sleep(EXIT_WAIT_MS).then(() => false)])) return;
+    // Не ответил на просьбу (на Mac — SIGTERM) — завершаем принудительно, иначе новый запуск занял бы видеопамять вторым.
+    this.deps.logger.info('Движок итогов не завершился сам — завершаем принудительно');
+    child.kill('SIGKILL');
     await Promise.race([exited, sleep(EXIT_WAIT_MS)]);
   }
 
@@ -152,6 +160,8 @@ class LlamaProcess {
       env: { ...(command.env ?? process.env), LLAMA_API_KEY: apiKey },
     });
     this.child = child;
+    if (child.pid !== undefined) this.deps.onSpawn?.(child.pid, command.file);
+    child.once('exit', () => this.deps.onExit?.());
     // Вывод читается всегда: непрочитанный заполнил бы канал, и сервер встал бы.
     child.stdout?.on('data', (data: Buffer) => this.keep(data));
     child.stderr?.on('data', (data: Buffer) => this.keep(data));
@@ -210,6 +220,8 @@ class LlamaProcess {
 
 export class LlamaServer {
   private running: LlamaProcess | null = null;
+  /** Завершение прежнего процесса: новый запуск ждёт его, чтобы двух серверов не было (решения Плана 8, §5.1). */
+  private stopping: Promise<void> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly deps: LlamaServerDeps) {}
@@ -225,6 +237,7 @@ export class LlamaServer {
    */
   async ready(model: LlamaModel, signal?: AbortSignal): Promise<LlmEndpoint> {
     this.cancelIdle();
+    if (this.stopping) await this.stopping;
     const current = this.running;
     if (current && (current.exited || current.model.path !== model.path || current.model.contextTokens !== model.contextTokens)) {
       await this.stop();
@@ -256,7 +269,15 @@ export class LlamaServer {
     this.cancelIdle();
     const running = this.running;
     this.running = null;
-    await running?.stop();
+    if (!running) {
+      await this.stopping;
+      return;
+    }
+    const stopping = running.stop().finally(() => {
+      if (this.stopping === stopping) this.stopping = null;
+    });
+    this.stopping = stopping;
+    await stopping;
   }
 
   private cancelIdle(): void {

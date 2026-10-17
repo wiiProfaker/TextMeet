@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeTempDir } from '../../test-support/temp-dir';
 import { countTokens } from './llm-client';
-import { llamaArgs, llamaDir, LlamaServer, llamaServerFile, type LlamaServerDeps } from './llama-server';
+import { EXIT_WAIT_MS, llamaArgs, llamaDir, LlamaServer, llamaServerFile, type LlamaServerDeps } from './llama-server';
 
 const FAKE_SERVER = join(__dirname, '..', '..', 'test-support', 'fake-llama-server.mjs');
 
@@ -174,5 +174,50 @@ describe('LlamaServer', () => {
     expect(server.isRunning()).toBe(true);
     await server.ready(model);
     expect(await starts()).toHaveLength(1);
+  });
+
+  it('a request during the idle shutdown waits for the old process before starting a new one', async () => {
+    let alive = 0;
+    let maxAlive = 0;
+    const spawned: number[] = [];
+    const { server, logger } = await setup(
+      { TEXTMEET_FAKE_LLM_EXIT_DELAY_MS: '300' },
+      {
+        idleMs: 10,
+        onSpawn: (pid) => {
+          spawned.push(pid);
+          alive += 1;
+          maxAlive = Math.max(maxAlive, alive);
+        },
+        onExit: () => {
+          alive -= 1;
+        },
+      },
+    );
+    await server.ready(model);
+    server.idle();
+    await vi.waitFor(() => expect(logger.info).toHaveBeenCalledWith('Движок итогов завершается: 5 минут без запросов'));
+    await server.ready(model);
+    expect(spawned).toHaveLength(2);
+    expect(maxAlive).toBe(1);
+  });
+
+  it('reports the spawned process and its exit', async () => {
+    const onSpawn = vi.fn();
+    const onExit = vi.fn();
+    const { server } = await setup({}, { onSpawn, onExit });
+    await server.ready(model);
+    expect(onSpawn).toHaveBeenCalledWith(expect.any(Number), process.execPath);
+    await server.stop();
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it.skipIf(process.platform === 'win32')('stop kills the engine that ignores the polite request', async () => {
+    const { server, lastAlive } = await setup({ TEXTMEET_FAKE_LLM_IGNORE_TERM: '1' });
+    await server.ready(model);
+    const started = Date.now();
+    await server.stop();
+    expect(Date.now() - started).toBeLessThanOrEqual(2 * EXIT_WAIT_MS + 200);
+    await vi.waitFor(async () => expect(await lastAlive()).toBe(false));
   });
 });

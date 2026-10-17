@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +24,7 @@ import {
   type RecorderCommandContract,
 } from '../shared/ipc';
 import { currentAiModel } from './ai/ai-models';
+import { clearEnginePid, killOrphanEngine, parseTasklistImage, recordEnginePid, type EnginePidDeps } from './ai/engine-pid';
 import { AiRunner, llamaEngine } from './ai/ai-runner';
 import { llamaDir, LlamaServer, llamaServerFile, type LlamaCommand } from './ai/llama-server';
 import { macMenuTemplate } from './app-menu';
@@ -315,6 +317,21 @@ async function recoverAndMix(
   }
 }
 
+/** Исполняемый файл процесса по номеру (для уборки оставшегося движка итогов); нет процесса или ошибка — null. */
+function processImage(pid: number): Promise<string | null> {
+  const [file, args] =
+    process.platform === 'win32'
+      ? ['tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH']]
+      : ['ps', ['-p', String(pid), '-o', 'comm=']];
+  return new Promise((resolve) => {
+    execFile(file, args, { windowsHide: true, timeout: 10_000 }, (err, stdout) => {
+      if (err) return resolve(null);
+      const line = stdout.split(/\r?\n/).find((l) => l.trim() !== '') ?? '';
+      resolve(process.platform === 'win32' ? parseTasklistImage(line) : line.trim() || null);
+    });
+  });
+}
+
 async function start(logger: Logger): Promise<void> {
   process.on('uncaughtException', (err) => logger.error('Необработанная ошибка', err));
   process.on('unhandledRejection', (reason) => logger.error('Необработанный отказ промиса', reason));
@@ -375,13 +392,34 @@ async function start(logger: Logger): Promise<void> {
           ),
           args: [],
         };
+  const enginePid: EnginePidDeps = {
+    pidFile: join(app.getPath('userData'), 'llama-server.pid'),
+    platform: process.platform,
+    processImage,
+    kill: (pid) => process.kill(pid),
+    logger,
+  };
+  // Движок итогов, оставшийся после падения программы, держал бы видеопамять — завершаем до первого запроса.
+  await killOrphanEngine(enginePid).catch((err: unknown) =>
+    logger.warn('Не удалось проверить движок итогов, оставшийся с прошлого запуска', err),
+  );
+  const llamaServer = new LlamaServer({
+    command: llamaCommand,
+    logger,
+    onSpawn: (pid, file) => {
+      recordEnginePid(enginePid, pid, file).catch((err: unknown) => logger.warn('Не удалось записать номер движка итогов', err));
+    },
+    onExit: () => {
+      clearEnginePid(enginePid).catch((err: unknown) => logger.warn('Не удалось стереть номер движка итогов', err));
+    },
+  });
   const ai = new AiRunner({
     libraryDir,
     model: async () => {
       const { selected } = await currentAiModel({ models, settings, logger });
       return selected && { id: selected, path: llmFilePath(models.root, selected) };
     },
-    engine: llamaEngine(new LlamaServer({ command: llamaCommand, logger })),
+    engine: llamaEngine(llamaServer),
     aiPrompt: () => settings.settled().then(() => settings.get().aiPrompt),
     now: () => new Date(),
     logger,

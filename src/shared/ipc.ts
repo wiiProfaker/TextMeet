@@ -25,6 +25,7 @@ import type { SearchResult } from './search';
 import type { Settings } from './settings';
 import type { SpeakerId, Transcript } from './transcript';
 import type { TranscriptEdit } from './transcript-edit';
+import type { AvailableUpdate } from './update';
 import type { ModelGroupId, ModelsState, TranscribeRequest, TranscriptionProgress } from './transcription';
 
 export const IPC = {
@@ -34,6 +35,13 @@ export const IPC = {
   chooseLibraryDir: 'settings:choose-library-dir',
   setMicrophone: 'settings:set-microphone',
   setRecordSounds: 'settings:set-record-sounds',
+  setCheckUpdates: 'settings:set-check-updates',
+  /** Новая версия, которую стоит показать (null — нет, скрыта или проверка выключена). */
+  getUpdate: 'update:get',
+  /** «Скрыть»: больше не показывать про эту версию. */
+  dismissUpdate: 'update:dismiss',
+  /** «Скачать»: страница выпуска в браузере. */
+  openUpdate: 'update:open',
   setAiPrompt: 'settings:set-ai-prompt',
   setHotkey: 'settings:set-hotkey',
   suspendHotkey: 'settings:suspend-hotkey',
@@ -95,6 +103,7 @@ export const IPC = {
   aiState: 'ai:state',
   /** ai.json встречи записан — перечитать итоги. */
   aiChanged: 'ai:changed',
+  updateChanged: 'update:changed',
   importProgress: 'import:progress',
   /** Звук файла не скопировался: недоделанная встреча убрана. */
   importFailed: 'import:failed',
@@ -188,6 +197,10 @@ export interface MainInvokeContract {
   [IPC.chooseLibraryDir]: { arg: void; result: SettingsState };
   [IPC.setMicrophone]: { arg: string | null; result: SettingsState };
   [IPC.setRecordSounds]: { arg: boolean; result: SettingsState };
+  [IPC.setCheckUpdates]: { arg: boolean; result: SettingsState };
+  [IPC.getUpdate]: { arg: void; result: AvailableUpdate | null };
+  [IPC.dismissUpdate]: { arg: string; result: void };
+  [IPC.openUpdate]: { arg: void; result: void };
   [IPC.setAiPrompt]: { arg: string | null; result: SettingsState };
   [IPC.setHotkey]: { arg: string | null; result: HotkeyChange };
   [IPC.suspendHotkey]: { arg: boolean; result: void };
@@ -250,6 +263,7 @@ export interface MainEventContract {
   [IPC.showMeeting]: string;
   [IPC.aiState]: AiState;
   [IPC.aiChanged]: string;
+  [IPC.updateChanged]: AvailableUpdate | null;
   [IPC.importProgress]: ImportProgress[];
   [IPC.importFailed]: ImportFailedEvent;
 }
@@ -286,6 +300,10 @@ export interface TextMeetApi {
   chooseLibraryDir(): Promise<SettingsState>;
   setMicrophone(deviceId: string | null): Promise<SettingsState>;
   setRecordSounds(enabled: boolean): Promise<SettingsState>;
+  setCheckUpdates(enabled: boolean): Promise<SettingsState>;
+  getUpdate(): Promise<AvailableUpdate | null>;
+  dismissUpdate(version: string): Promise<void>;
+  openUpdate(): Promise<void>;
   /** «Запрос для ИИ»: null — стандартный, '' — без запроса. */
   setAiPrompt(prompt: string | null): Promise<SettingsState>;
   /** null — вернуть комбинацию по умолчанию. */
@@ -370,6 +388,7 @@ export interface TextMeetApi {
   onShowMeeting(listener: Listener<string>): Unsubscribe;
   onAiState(listener: Listener<AiState>): Unsubscribe;
   onAiChanged(listener: Listener<string>): Unsubscribe;
+  onUpdateChanged(listener: Listener<AvailableUpdate | null>): Unsubscribe;
   onImportProgress(listener: Listener<ImportProgress[]>): Unsubscribe;
   onImportFailed(listener: Listener<ImportFailedEvent>): Unsubscribe;
 }

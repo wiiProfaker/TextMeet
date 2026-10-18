@@ -468,6 +468,23 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+/* «Вышла версия…» над «Импорт файла» (решения Плана 8, §4.4): тихая строка, не всплывает поверх. */
+.upd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.upd span {
+  flex: 1 1 auto;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;

@@ -32,6 +32,10 @@ export const SettingsSchema = z.object({
    * берётся первая скачанная (shared/llm-models.ts, effectiveAiModel).
    */
   aiModel: z.enum(LLM_MODEL_IDS).nullable().default(null).catch(null),
+  /** Раз в день спрашивать GitHub, не вышла ли новая версия (решения Плана 8, §4.4). */
+  checkUpdates: z.boolean().default(true).catch(true),
+  /** Версия, про которую нажали «Скрыть». */
+  dismissedUpdate: z.string().max(50).nullable().default(null).catch(null),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;

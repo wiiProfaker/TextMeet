@@ -11,6 +11,8 @@ import {
   type WebContents,
 } from 'electron';
 import { z } from 'zod';
+import type { AvailableUpdate } from '../shared/update';
+import { RELEASES_PAGE_PREFIX, visibleUpdate } from './updates/update-check';
 import {
   IPC,
   type AppInfo,
@@ -63,6 +65,8 @@ export interface IpcDeps {
   recorderContents(): WebContents | null;
   appInfo(): AppInfo;
   onRecorderReady(): void;
+  /** Проверка новой версии: что найдено; changed — сказать окну, что показывать. */
+  updates: { found(): AvailableUpdate | null; changed(update: AvailableUpdate | null): void };
   /** Сердцебиение окна записи — сторожу зависания. */
   onRecorderAlive(): void;
   /** Горячая клавиша сменилась — обновить подсказку в меню трея. */
@@ -282,6 +286,25 @@ export function registerIpc(deps: IpcDeps): void {
   handle(IPC.setRecordSounds, async (arg) => {
     await deps.settings.update({ recordSounds: z.boolean().parse(arg) });
     return settingsState();
+  });
+
+  // «Вышла новая версия» (решения Плана 8, §4.4).
+  const shownUpdate = () => visibleUpdate(deps.updates.found(), deps.settings.get());
+  handle(IPC.setCheckUpdates, async (arg) => {
+    await deps.settings.update({ checkUpdates: z.boolean().parse(arg) });
+    deps.updates.changed(shownUpdate());
+    return settingsState();
+  });
+  handle(IPC.getUpdate, () => shownUpdate());
+  handle(IPC.dismissUpdate, async (arg) => {
+    await deps.settings.update({ dismissedUpdate: z.string().min(1).max(50).parse(arg) });
+    deps.updates.changed(shownUpdate());
+  });
+  handle(IPC.openUpdate, async () => {
+    // Только ссылка, прошедшая проверку (страница выпусков нашего репозитория).
+    const update = shownUpdate();
+    if (!update || !update.url.startsWith(RELEASES_PAGE_PREFIX)) return;
+    await shell.openExternal(update.url);
   });
 
   handle(IPC.setAiPrompt, async (arg) => {

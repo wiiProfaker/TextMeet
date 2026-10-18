@@ -26,6 +26,7 @@ import { SearchResults } from './SearchResults';
 import { SettingsPane } from './SettingsPane';
 import { DEFAULT_SETTINGS_TAB, type SettingsTab } from './settings-tabs';
 import { StopDialog } from './StopDialog';
+import { UpdateBanner } from './UpdateBanner';
 
 type Selection = { kind: 'meeting'; id: string } | { kind: 'settings' } | null;
 
@@ -264,6 +265,7 @@ export function App() {
               onSelect={(id) => setSelection({ kind: 'meeting', id })}
             />
           )}
+          <UpdateBanner recording={recording.phase !== 'idle'} onError={setError} />
           <div className="foot">
             <button type="button" className="btn grow" disabled={picking} aria-busy={picking} onClick={pickFiles}>
               <ImportIcon />

@@ -10,6 +10,7 @@ import {
   globalShortcut,
   Menu,
   powerMonitor,
+  net,
   protocol,
   session,
   shell,
@@ -59,6 +60,7 @@ import { TranscriptionQueue } from './transcription/queue';
 import { spawnTranscriptionWorker } from './transcription/worker-host';
 import { testEnv } from './test-hooks';
 import { createTray, type AppTray } from './tray';
+import { LATEST_RELEASE_URL, UpdateChecker, visibleUpdate } from './updates/update-check';
 import { createMainWindow, createRecorderWindow, testMediaMode } from './windows';
 
 // Тестовые подмены TEXTMEET_*: только в разработке и в тестовой копии сборки (test-hooks.ts). В выпуске — пусто.
@@ -352,6 +354,16 @@ function processImage(pid: number): Promise<string | null> {
   });
 }
 
+/** Ответ GitHub о последнем выпуске; без данных о человеке, не дольше 15 с; не 200 — ошибка (её пишет журнал). */
+async function fetchReleaseJson(url: string): Promise<unknown> {
+  const response = await net.fetch(url, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': `TextMeet/${app.getVersion()}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status !== 200) throw new Error(`GitHub ответил ${response.status}`);
+  return response.json();
+}
+
 async function start(logger: Logger): Promise<void> {
   process.on('uncaughtException', (err) => logger.error('Необработанная ошибка', err));
   process.on('unhandledRejection', (reason) => logger.error('Необработанный отказ промиса', reason));
@@ -548,7 +560,20 @@ async function start(logger: Logger): Promise<void> {
   });
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, libraryDir()));
 
+  // «Вышла новая версия»: раз в день спрашиваем GitHub (в автотестах — свой адрес и без минутной паузы).
+  const updates = new UpdateChecker({
+    current: app.getVersion(),
+    url: testVars.TEXTMEET_TEST_UPDATE_URL ?? LATEST_RELEASE_URL,
+    fetchJson: fetchReleaseJson,
+    enabled: () => settings.get().checkUpdates,
+    onFound: (found) => sendToMain(IPC.updateChanged, visibleUpdate(found, settings.get())),
+    logger,
+    ...(testVars.TEXTMEET_TEST_UPDATE_DELAY_MS !== undefined && {
+      firstDelayMs: Number(testVars.TEXTMEET_TEST_UPDATE_DELAY_MS) || 0,
+    }),
+  });
   registerIpc({
+    updates: { found: () => updates.found(), changed: (update) => sendToMain(IPC.updateChanged, update) },
     settings,
     logger,
     platform: process.platform,
@@ -668,6 +693,7 @@ async function start(logger: Logger): Promise<void> {
     onSystemEnding();
   });
   windowsCreated = true;
+  updates.start();
   tray = createTray(
     { openWindow: () => openMainWindow(logger), toggleRecording: () => void controller.toggle(), quit: () => app.quit() },
     hotkeyManager.accelerator,

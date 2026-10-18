@@ -226,6 +226,19 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
               )}
             </div>
           </div>
+          <div className="fld tight">
+            <div className="lb">Обновления</div>
+            <div className="ctl">
+              <Toggle
+                checked={settings.checkUpdates}
+                label="Проверять, не вышла ли новая версия"
+                hint="Раз в день программа спрашивает GitHub о новой версии. Ничего о вас не отправляется."
+                onChange={(value) =>
+                  setInstantly({ checkUpdates: value }, () => window.textmeet.setCheckUpdates(value))
+                }
+              />
+            </div>
+          </div>
           {info && (
             <footer className="about">
               TextMeet {info.version} ·{' '}

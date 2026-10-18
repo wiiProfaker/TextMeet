@@ -5,7 +5,6 @@ import { makeTempDir } from '../../test-support/temp-dir';
 import {
   clearEnginePid,
   killOrphanEngine,
-  parseTasklistImage,
   recordEnginePid,
   sameEngine,
   type EnginePidDeps,
@@ -21,22 +20,31 @@ const pidDeps = (over: Partial<EnginePidDeps> = {}): EnginePidDeps => ({
 });
 
 describe('engine pid file', () => {
-  it('parseTasklistImage reads the image name and ignores "no tasks" lines', () => {
-    expect(parseTasklistImage('"llama-server.exe","4242","Console","1","812 345 K"')).toBe('llama-server.exe');
-    expect(parseTasklistImage('INFO: No tasks are running which match the specified criteria.')).toBeNull();
-    expect(parseTasklistImage('')).toBeNull();
-  });
-
-  it('sameEngine compares the file name on Windows and the full path elsewhere', () => {
-    expect(sameEngine('LLAMA-SERVER.EXE', 'C:\\x\\llama-server.exe', 'win32')).toBe(true);
-    expect(sameEngine('chrome.exe', 'C:\\x\\llama-server.exe', 'win32')).toBe(false);
+  it('sameEngine compares the full path of the executable, on Windows without regard to case', () => {
+    const ours = 'C:\\Program Files\\TextMeet\\resources\\llama\\llama-server.exe';
+    expect(sameEngine('c:\\program files\\textmeet\\resources\\llama\\LLAMA-SERVER.EXE', ours, 'win32')).toBe(true);
+    expect(sameEngine('C:/Program Files/TextMeet/resources/llama/llama-server.exe', ours, 'win32')).toBe(true);
+    expect(sameEngine('C:\\Users\\me\\AppData\\Local\\Jan\\llama-server.exe', ours, 'win32')).toBe(false);
+    expect(sameEngine('C:\\Windows\\chrome.exe', ours, 'win32')).toBe(false);
     expect(sameEngine('/A/llama-server', '/A/llama-server', 'darwin')).toBe(true);
     expect(sameEngine('/B/llama-server', '/A/llama-server', 'darwin')).toBe(false);
   });
 
+  it('killOrphanEngine leaves alone another program called llama-server', async () => {
+    const killed: number[] = [];
+    const deps = pidDeps({
+      processImage: async () => 'C:\\Users\\me\\AppData\\Local\\Jan\\llama-server.exe',
+      kill: (pid) => killed.push(pid),
+      platform: 'win32',
+    });
+    await recordEnginePid(deps, 4242, 'C:\\Program Files\\TextMeet\\resources\\llama\\llama-server.exe');
+    expect(await killOrphanEngine(deps)).toBe(false);
+    expect(killed).toEqual([]);
+  });
+
   it('killOrphanEngine kills our engine left from the previous run and removes the pid file', async () => {
     const killed: number[] = [];
-    const deps = pidDeps({ processImage: async () => 'LLAMA-SERVER.EXE', kill: (pid) => killed.push(pid), platform: 'win32' });
+    const deps = pidDeps({ processImage: async () => 'c:\\program files\\textmeet\\resources\\llama\\LLAMA-SERVER.EXE', kill: (pid) => killed.push(pid), platform: 'win32' });
     await recordEnginePid(deps, 4242, 'C:\\Program Files\\TextMeet\\resources\\llama\\llama-server.exe');
     expect(await killOrphanEngine(deps)).toBe(true);
     expect(killed).toEqual([4242]);

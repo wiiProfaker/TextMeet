@@ -2,7 +2,7 @@
 // записываются в userData/llama-server.pid при запуске движка и стираются при его выходе. При следующем запуске
 // программа завершает оставшийся сервер — только если под этим номером всё ещё наш llama-server (номер могли занять).
 import { readFile, rm } from 'node:fs/promises';
-import { basename, win32 } from 'node:path';
+import { win32 } from 'node:path';
 import { z } from 'zod';
 import { writeFileAtomic } from '../fs/atomic-write';
 import type { Logger } from '../logger';
@@ -10,7 +10,7 @@ import type { Logger } from '../logger';
 export interface EnginePidDeps {
   pidFile: string;
   platform: NodeJS.Platform;
-  /** Имя (Windows: «llama-server.exe») или полный путь (Mac: `ps -p N -o comm=`) исполняемого файла процесса; нет такого — null. */
+  /** Полный путь исполняемого файла процесса (Windows — Get-Process, Mac — `ps -p N -o comm=`); нет такого — null. */
   processImage(pid: number): Promise<string | null>;
   kill(pid: number): void;
   logger: Pick<Logger, 'info' | 'warn'>;
@@ -18,15 +18,12 @@ export interface EnginePidDeps {
 
 const PidRecordSchema = z.object({ pid: z.number().int().positive(), file: z.string().min(1) });
 
-/** Строка `tasklist /FO CSV /NH`: первое поле в кавычках — имя исполняемого файла. «INFO: No tasks…» — null. */
-export function parseTasklistImage(csvLine: string): string | null {
-  const match = /^"([^"]+)","\d+"/.exec(csvLine.trim());
-  return match ? match[1]! : null;
-}
-
-/** Windows — имя файла без учёта регистра; Mac и прочие — полный путь. */
+/**
+ * Тот же ли это файл движка: полный путь, на Windows — без учёта регистра и вида косой черты. По одному имени нельзя:
+ * llama-server.exe бывает и у других программ на llama.cpp.
+ */
 export function sameEngine(image: string, file: string, platform: NodeJS.Platform): boolean {
-  if (platform === 'win32') return basename(image).toLowerCase() === win32.basename(file).toLowerCase();
+  if (platform === 'win32') return win32.normalize(image.trim()).toLowerCase() === win32.normalize(file).toLowerCase();
   return image.trim() === file;
 }
 

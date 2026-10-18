@@ -47,6 +47,22 @@ describe('RecorderWatchdog', () => {
     dog.stop();
   });
 
+  it('does not take a sleep of the computer for a hang', () => {
+    const onHung = vi.fn();
+    const dog = new RecorderWatchdog({ onHung });
+    dog.start();
+    dog.beat();
+    vi.advanceTimersByTime(RECORDER_BEAT_MS);
+    // Ноутбук проспал час: часы ушли вперёд, а таймеры стояли. Первая проверка после пробуждения — раньше сердцебиения.
+    vi.setSystemTime(Date.now() + 60 * 60_000);
+    vi.advanceTimersByTime(1000);
+    dog.beat();
+    vi.advanceTimersByTime(RECORDER_BEAT_MS);
+    dog.beat();
+    expect(onHung).not.toHaveBeenCalled();
+    dog.stop();
+  });
+
   it('stop() silences it', () => {
     const onHung = vi.fn();
     const dog = new RecorderWatchdog({ onHung });

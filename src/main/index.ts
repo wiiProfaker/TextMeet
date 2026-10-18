@@ -25,7 +25,7 @@ import {
   type RecorderCommandContract,
 } from '../shared/ipc';
 import { currentAiModel } from './ai/ai-models';
-import { clearEnginePid, killOrphanEngine, parseTasklistImage, recordEnginePid, type EnginePidDeps } from './ai/engine-pid';
+import { clearEnginePid, killOrphanEngine, recordEnginePid, type EnginePidDeps } from './ai/engine-pid';
 import { AiRunner, llamaEngine } from './ai/ai-runner';
 import { llamaDir, LlamaServer, llamaServerFile, type LlamaCommand } from './ai/llama-server';
 import { macMenuTemplate } from './app-menu';
@@ -339,17 +339,23 @@ async function recoverAndMix(
   }
 }
 
-/** Исполняемый файл процесса по номеру (для уборки оставшегося движка итогов); нет процесса или ошибка — null. */
+/**
+ * Полный путь исполняемого файла процесса по номеру (для уборки оставшегося движка итогов); нет процесса, чужой
+ * процесс без доступа к пути или ошибка — null. Запускается, только если с прошлого раза остался файл с номером.
+ */
 function processImage(pid: number): Promise<string | null> {
   const [file, args] =
     process.platform === 'win32'
-      ? ['tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH']]
+      ? [
+          'powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).Path`],
+        ]
       : ['ps', ['-p', String(pid), '-o', 'comm=']];
   return new Promise((resolve) => {
-    execFile(file, args, { windowsHide: true, timeout: 10_000 }, (err, stdout) => {
+    execFile(file, args, { windowsHide: true, timeout: 15_000 }, (err, stdout) => {
       if (err) return resolve(null);
       const line = stdout.split(/\r?\n/).find((l) => l.trim() !== '') ?? '';
-      resolve(process.platform === 'win32' ? parseTasklistImage(line) : line.trim() || null);
+      resolve(line.trim() || null);
     });
   });
 }

@@ -8,30 +8,33 @@ export const RECORDER_HUNG_MS = 15_000;
 /** Как часто сторож проверяет. */
 const CHECK_MS = 1000;
 
+/**
+ * Тишину считаем проверками без сердцебиения, а не по часам: во время сна компьютера таймеры стоят, а часы идут, —
+ * по часам первая проверка после пробуждения приняла бы сон за зависание и оборвала бы запись.
+ */
 export class RecorderWatchdog {
-  private lastBeat = 0;
+  /** Проверок подряд без сердцебиения. */
+  private missed = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private reported = false;
-  private readonly now: () => number;
   private readonly hungMs: number;
   private readonly checkMs: number;
 
-  constructor(private readonly deps: { onHung(): void; now?(): number; hungMs?: number; checkMs?: number }) {
-    this.now = deps.now ?? Date.now;
+  constructor(private readonly deps: { onHung(): void; hungMs?: number; checkMs?: number }) {
     this.hungMs = deps.hungMs ?? RECORDER_HUNG_MS;
     this.checkMs = deps.checkMs ?? CHECK_MS;
   }
 
   /** Сердцебиение от окна записи. */
   beat(): void {
-    this.lastBeat = this.now();
+    this.missed = 0;
   }
 
   /** Следить с этого момента (окно готово); stop() — перестать (выход, окно пересоздаётся). */
   start(): void {
     this.stop();
     // Первое сердцебиение ждём hungMs от запуска.
-    this.lastBeat = this.now();
+    this.missed = 0;
     this.reported = false;
     this.timer = setInterval(() => this.check(), this.checkMs);
     this.timer.unref?.();
@@ -44,7 +47,9 @@ export class RecorderWatchdog {
 
   /** Зависание объявляется один раз на запуск окна. */
   private check(): void {
-    if (this.reported || this.now() - this.lastBeat < this.hungMs) return;
+    if (this.reported) return;
+    this.missed += 1;
+    if (this.missed * this.checkMs < this.hungMs) return;
     this.reported = true;
     this.stop();
     this.deps.onHung();

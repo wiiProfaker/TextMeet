@@ -3,10 +3,10 @@
 // (models/registry.ts, transcription/asr-config.ts).
 
 export const ASR_MODEL_IDS = [
+  'whisper-large-v3-turbo',
   'gigaam-v3-e2e-rnnt',
   'parakeet-tdt-0.6b-v3',
   'qwen3-asr-0.6b',
-  'whisper-large-v3-turbo',
   'nemotron-3.5-asr',
   't-one',
   'parakeet-unified-en-0.6b',
@@ -15,8 +15,14 @@ export const ASR_MODEL_IDS = [
 
 export type AsrModelId = (typeof ASR_MODEL_IDS)[number];
 
-/** Модель по умолчанию — и та, что берётся вместо неизвестной (настройки и встречи более новой версии программы). */
-export const DEFAULT_ASR_MODEL: AsrModelId = 'gigaam-v3-e2e-rnnt';
+/**
+ * Модель по умолчанию — и та, что берётся вместо неизвестной (настройки и встречи более новой версии программы).
+ * Whisper — по решению пользователя 2026-10-18 (План 8); GigaAM и остальные выбираются в настройках.
+ */
+export const DEFAULT_ASR_MODEL: AsrModelId = 'whisper-large-v3-turbo';
+
+/** Модель, на которой измерены доли прогресса и сторож зависания расшифровки (progress.ts): самая быстрая из русских. */
+const CALIBRATION_ASR_MODEL: AsrModelId = 'gigaam-v3-e2e-rnnt';
 
 /** Группа каталога: модели, понимающие русский, и модели только для английского. */
 export type AsrModelGroup = 'ru' | 'en';
@@ -42,6 +48,17 @@ export interface AsrModelInfo {
 }
 
 export const ASR_MODELS: readonly AsrModelInfo[] = [
+  {
+    id: 'whisper-large-v3-turbo',
+    title: 'Whisper large-v3-turbo',
+    author: 'OpenAI',
+    description: 'Самая известная модель. На процессоре медленная, иногда пропускает куски фраз.',
+    languages: 'Русский · знает около 100 языков',
+    group: 'ru',
+    accuracy: 3,
+    rtf: 0.55,
+    hallucinates: true,
+  },
   {
     id: 'gigaam-v3-e2e-rnnt',
     title: 'GigaAM v3',
@@ -73,17 +90,6 @@ export const ASR_MODELS: readonly AsrModelInfo[] = [
     group: 'ru',
     accuracy: 4,
     rtf: 0.21,
-    hallucinates: true,
-  },
-  {
-    id: 'whisper-large-v3-turbo',
-    title: 'Whisper large-v3-turbo',
-    author: 'OpenAI',
-    description: 'Самая известная модель. На процессоре медленная, иногда пропускает куски фраз.',
-    languages: 'Русский · знает около 100 языков',
-    group: 'ru',
-    accuracy: 3,
-    rtf: 0.55,
     hallucinates: true,
   },
   {
@@ -151,7 +157,7 @@ export function speedLevel(rtf: number): number {
   return index === -1 ? 1 : 5 - index;
 }
 
-/** Во сколько раз модель медленнее модели по умолчанию (не меньше 1) — для сторожа зависания и прогресса. */
+/** Во сколько раз модель медленнее GigaAM (на ней измерен прогресс; не меньше 1) — для сторожа зависания и прогресса. */
 export function slowdown(id: AsrModelId): number {
-  return Math.max(1, asrModel(id).rtf / asrModel(DEFAULT_ASR_MODEL).rtf);
+  return Math.max(1, asrModel(id).rtf / asrModel(CALIBRATION_ASR_MODEL).rtf);
 }

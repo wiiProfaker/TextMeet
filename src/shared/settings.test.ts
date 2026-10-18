@@ -10,7 +10,7 @@ describe('SettingsSchema', () => {
       microphoneId: null,
       recordHotkey: null,
       recordSounds: true,
-      asrModel: 'gigaam-v3-e2e-rnnt',
+      asrModel: 'whisper-large-v3-turbo',
       exportDir: null,
       aiPrompt: null,
       aiModel: null,
@@ -46,8 +46,12 @@ describe('SettingsSchema', () => {
 
   it('reads an unknown or broken model as the default one without dropping the other settings', () => {
     const parsed = SettingsSchema.parse({ asrModel: 'whisper-tiny', recordSounds: false });
-    expect(parsed).toMatchObject({ asrModel: 'gigaam-v3-e2e-rnnt', recordSounds: false });
-    expect(SettingsSchema.parse({ asrModel: 42 }).asrModel).toBe('gigaam-v3-e2e-rnnt');
+    expect(parsed).toMatchObject({ asrModel: 'whisper-large-v3-turbo', recordSounds: false });
+    expect(SettingsSchema.parse({ asrModel: 42 }).asrModel).toBe('whisper-large-v3-turbo');
+  });
+
+  it('keeps GigaAM for people who already had it in their settings', () => {
+    expect(SettingsSchema.parse({ asrModel: 'gigaam-v3-e2e-rnnt' }).asrModel).toBe('gigaam-v3-e2e-rnnt');
   });
 
   it('keeps the folder of the last export', () => {

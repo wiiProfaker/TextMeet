@@ -16,7 +16,7 @@ describe('buildModelsState', () => {
       true,
     );
     expect(state.models.map((m) => m.id)).toEqual([...ASR_MODEL_IDS]);
-    expect(state.models[0]).toEqual({ id: 'gigaam-v3-e2e-rnnt', sizeBytes: 10, installed: true });
+    expect(state.models.find((m) => m.id === 'gigaam-v3-e2e-rnnt')).toEqual({ id: 'gigaam-v3-e2e-rnnt', sizeBytes: 10, installed: true });
     expect(state.models.find((m) => m.id === 't-one')).toEqual({ id: 't-one', sizeBytes: groupSize('t-one'), installed: false });
     expect(state.voices).toEqual({ sizeBytes: 3, installed: true });
     expect(state).toMatchObject({

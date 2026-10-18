@@ -85,3 +85,26 @@ jobs:
             release/*.exe
             release/*.dmg
           if-no-files-found: error
+
+  # Метка v* — черновик выпуска на GitHub с обоими установщиками (решения Плана 8, §4.1). Публикует его человек кнопкой
+  # «Publish release». Право писать в репозиторий — только у этого задания.
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          path: artifacts
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft \
+            --title "TextMeet ${GITHUB_REF_NAME#v}" \
+            --notes-file "docs/release-notes/${GITHUB_REF_NAME}.md" \
+            artifacts/TextMeet-windows/*.exe artifacts/TextMeet-mac/*.dmg

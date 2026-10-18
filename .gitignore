@@ -20,7 +20,9 @@ coverage/
 *.opus
 *.webm
 *.onnx
+*.gguf
 *.bin
+*.mp4
 
 # Результаты Playwright
 test-results/

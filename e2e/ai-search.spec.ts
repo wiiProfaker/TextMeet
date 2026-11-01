@@ -1,5 +1,5 @@
 // Итоги в поиске и в выгрузке (План 9, решения §2.3): готовые итоги лежат в ai.json встречи.
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { launchApp, meetingJson, type LaunchedApp } from './helpers';
@@ -13,8 +13,9 @@ test.afterEach(async () => {
 
 const ID = '2026-09-27_1620_a1b2c3';
 
-async function launchWithSummary(): Promise<LaunchedApp> {
-  const app = await launchApp({
+function launchWithSummary(): Promise<LaunchedApp> {
+  const answer = { model: 'qwen3.5-9b', modelTitle: 'Qwen3.5 9B', createdAt: '2026-09-27T13:55:00.000Z', status: 'done' };
+  return launchApp({
     meetings: [{ id: ID, json: meetingJson(ID, { status: 'done', title: 'Созвон с Ириной', speakerNames: { s1: 'Ирина' } }) }],
     transcripts: {
       [ID]: {
@@ -25,17 +26,14 @@ async function launchWithSummary(): Promise<LaunchedApp> {
         segments: [{ id: 'a', start: 5, end: 9, speakerId: 's1', text: 'Смотри, по бюджету.', edited: false }],
       },
     },
+    aiDocs: {
+      [ID]: {
+        version: 1,
+        summary: { ...answer, text: '### Главное\n- Подрядчики — **отдельной строкой**.', sourceHash: 'h' },
+        questions: [{ ...answer, id: 'q1', question: 'Кто такой Олег?', answer: 'Олег считает смету.' }],
+      },
+    },
   });
-  const answer = { model: 'qwen3.5-9b', modelTitle: 'Qwen3.5 9B', createdAt: '2026-09-27T13:55:00.000Z', status: 'done' };
-  await writeFile(
-    join(app.libraryDir, ID, 'ai.json'),
-    JSON.stringify({
-      version: 1,
-      summary: { ...answer, text: '### Главное\n- Подрядчики — **отдельной строкой**.', sourceHash: 'h' },
-      questions: [{ ...answer, id: 'q1', question: 'Кто такой Олег?', answer: 'Олег считает смету.' }],
-    }),
-  );
-  return app;
 }
 
 test('the search finds words of the summary and of the answers and opens the summary', async () => {

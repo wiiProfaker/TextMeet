@@ -132,7 +132,10 @@ test('a refusal stays while the next files are checked; the button is free once 
 
   const button = page.getByRole('button', { name: 'Импорт файла' });
   await button.click();
-  await button.click({ timeout: 2_000 });
+  // Кнопка свободна, как только закрылось окно выбора. Окно «Файл добавлен» могло уже открыться поверх неё (на быстрой
+  // машине первый файл успевает) — поэтому нажатие напрямую: здесь проверяется кнопка, а не то окно.
+  await expect(button).toBeEnabled({ timeout: 2_000 });
+  await button.dispatchEvent('click');
   await expect.poll(() => meetingIds(libraryDir), { timeout: 20_000 }).toHaveLength(4);
   await expect(page.getByRole('alert')).toHaveText(
     'Добавлено 3 файла из 4. Не удалось добавить «отчёт.pdf»: не получилось прочитать звук из файла.',

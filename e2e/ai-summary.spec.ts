@@ -106,7 +106,9 @@ test('own questions are answered, kept in order and deleted', async () => {
   await open(page, /Созвон с Ириной/);
   await summaryButton(page).click();
   const field = block(page).getByRole('textbox', { name: 'Свой вопрос к встрече' });
-  await expect(field).toBeEnabled({ timeout: 15_000 });
+  // Поле свободно и до того, как запрос пошёл, — вопрос задаём, когда итоги дописаны.
+  await expect(block(page).getByRole('status')).toHaveText('Итоги готовы', { timeout: 15_000 });
+  await expect(field).toBeEnabled();
   await field.fill('Что решили по срокам?');
   await field.press('Enter');
   await expect(block(page)).toContainText('Ответ: Что решили по срокам?', { timeout: 15_000 });
@@ -188,6 +190,25 @@ test('a busy engine explains itself instead of an empty block', async () => {
   await expect(block(page)).toHaveCount(0);
 });
 
+test('the busy notice goes away once the model has worked and is free again', async () => {
+  launched = await launchWithSummary();
+  const { app, page } = launched;
+  const busyText = 'Модель сейчас занята — попробуйте ещё раз через несколько секунд.';
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('ai:ask');
+    ipcMain.handle('ai:ask', () => 'busy');
+  });
+  await open(page, /Созвон с Ириной/);
+  const field = block(page).getByRole('textbox', { name: 'Свой вопрос к встрече' });
+  await field.fill('Что решили?');
+  await field.press('Enter');
+  await expect(block(page)).toContainText(busyText);
+  // Модель занялась и освободилась — сообщение о занятости больше не про сейчас.
+  await page.evaluate((id) => window.textmeet.summarize(id), ID);
+  await expect(block(page).getByRole('status')).toHaveText('Итоги готовы', { timeout: 15_000 });
+  await expect(block(page)).not.toContainText(busyText);
+});
+
 test('"Итоги готовы" is announced while the block is collapsed', async () => {
   launched = await launch({ installedModels: ['qwen3.5-9b'], llmTokenMs: 200 });
   const { page } = launched;
@@ -230,6 +251,14 @@ async function setWindowSize({ app, page }: LaunchedApp, width: number, height: 
 const text = (page: Page) => page.getByRole('region', { name: 'Текст встречи' });
 const splitter = (page: Page) => page.getByRole('separator', { name: 'Ширина итогов' });
 
+/** Какую долю области встречи занимает колонка итогов. */
+const columnShare = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    const side = document.querySelector('.mside')?.getBoundingClientRect().width ?? 0;
+    const area = document.querySelector('.mbody')?.getBoundingClientRect().width ?? 1;
+    return side / area;
+  });
+
 async function boxes(page: Page) {
   const summary = await block(page).boundingBox();
   const transcriptBox = await text(page).boundingBox();
@@ -256,7 +285,7 @@ test('summary moves above the transcript in a narrow window and back to the righ
   await open(page, /Созвон с Ириной/);
   await expect(block(page).getByRole('heading', { name: 'Главное' })).toBeVisible();
   await expect.poll(async () => (await boxes(page)).summary.x > (await boxes(page)).text.x).toBe(true);
-  const wideWidth = (await boxes(page)).summary.width;
+  const wideShare = await columnShare(page);
 
   await setWindowSize(launched, 760, 700);
   await expect.poll(async () => {
@@ -268,8 +297,10 @@ test('summary moves above the transcript in a narrow window and back to the righ
   await setWindowSize(launched, 1300, 800);
   await expect.poll(async () => {
     const b = await boxes(page);
-    return b.summary.x >= b.text.x + b.text.width - 1 && Math.abs(b.summary.width - wideWidth) <= 2;
+    return b.summary.x >= b.text.x + b.text.width - 1;
   }).toBe(true);
+  // Доля колонки прежняя; точные пиксели зависят от окончательного размера окна (на Mac он бывает чуть другим).
+  await expect.poll(async () => Math.abs((await columnShare(page)) - wideShare)).toBeLessThan(0.01);
 });
 
 test('dragging the splitter changes the summary width and it is remembered after a restart', async () => {

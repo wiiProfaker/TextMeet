@@ -32,6 +32,8 @@ export interface LaunchOptions {
   llmTokenMs?: number;
   /** Ещё переменные окружения программы (тестовые подмены TEXTMEET_*). */
   env?: Record<string, string>;
+  /** Итоги встреч: id → ai.json. Кладутся до запуска: первое чтение библиотеки для поиска их уже видит. */
+  aiDocs?: Record<string, unknown>;
 }
 
 export interface LaunchedApp {
@@ -217,6 +219,9 @@ async function writeFixtures(
   }
   for (const [id, transcript] of Object.entries(options.transcripts ?? {})) {
     await writeFile(join(libraryDir, id, 'transcript.json'), serialize(transcript));
+  }
+  for (const [id, doc] of Object.entries(options.aiDocs ?? {})) {
+    await writeFile(join(libraryDir, id, 'ai.json'), serialize(doc));
   }
 }
 

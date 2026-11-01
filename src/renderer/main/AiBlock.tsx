@@ -88,6 +88,12 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     [meetingId],
   );
 
+  // Модель занялась работой — блок сам показывает чем; когда она освободится, «занята» уже было бы неправдой.
+  const working = job !== null || other !== null;
+  useEffect(() => {
+    if (working && busyNotice) setBusyNotice(false);
+  }, [working, busyNotice]);
+
   const expand = useCallback(() => {
     collapsedMeetings.delete(meetingId);
     setCollapsed(false);

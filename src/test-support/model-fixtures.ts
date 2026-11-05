@@ -4,6 +4,7 @@
 // verified.json: в папке и списке моделей программы им не место — программа о них не знает и их не удаляет.
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_ASR_MODEL } from '../shared/asr-models';
 import { downloadFile } from '../main/models/download';
 import { ModelManager } from '../main/models/model-manager';
 import { modelsRoot } from '../main/models/models-dir';
@@ -49,7 +50,7 @@ const FIXTURES = {
 export type FixtureName = keyof typeof FIXTURES;
 
 /** Модели на месте (скачиваются, если нет): по умолчанию — GigaAM и общие модели голосов. */
-export async function ensureModels(groups: readonly ModelGroupId[] = ['gigaam-v3-e2e-rnnt', 'voices']): Promise<void> {
+export async function ensureModels(groups: readonly ModelGroupId[] = [DEFAULT_ASR_MODEL, 'voices']): Promise<void> {
   await new ModelManager({ root: MODELS_ROOT, logger: quiet, freeBytes: freeDiskBytes }).ensure(groups);
 }
 

@@ -31,7 +31,7 @@ describe('catalogSections', () => {
     expect(sections).toEqual({
       selected: 'parakeet-tdt-0.6b-v3',
       downloaded: ['gigaam-v3-e2e-rnnt', 'canary-180m-flash'],
-      russian: ['whisper-large-v3-turbo', 'qwen3-asr-0.6b', 'nemotron-3.5-asr', 't-one'],
+      russian: ['qwen3-asr-0.6b', 'whisper-large-v3-turbo', 'nemotron-3.5-asr', 't-one'],
       english: ['parakeet-unified-en-0.6b'],
     });
   });

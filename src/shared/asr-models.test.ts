@@ -18,10 +18,6 @@ describe('ASR model catalog', () => {
     }
   });
 
-  it('Whisper is the default model (the user chose it on 2026-10-18), the catalog starts with it', () => {
-    expect(DEFAULT_ASR_MODEL).toBe('whisper-large-v3-turbo');
-  });
-
   it('starts with the default model and keeps the English-only models last', () => {
     expect(ASR_MODELS[0]!.id).toBe(DEFAULT_ASR_MODEL);
     const groups = ASR_MODELS.map((m) => m.group);
@@ -29,7 +25,7 @@ describe('ASR model catalog', () => {
   });
 
   it('filters the text only of the models that make things up', () => {
-    expect(ASR_MODELS.filter((m) => m.hallucinates).map((m) => m.id)).toEqual(['whisper-large-v3-turbo', 'qwen3-asr-0.6b']);
+    expect(ASR_MODELS.filter((m) => m.hallucinates).map((m) => m.id)).toEqual(['qwen3-asr-0.6b', 'whisper-large-v3-turbo']);
   });
 
   it('recognizes catalog ids', () => {
@@ -53,8 +49,8 @@ describe('ASR model catalog', () => {
     expect(speedLevel(0.55)).toBe(1);
   });
 
-  it('tells how much slower than GigaAM (the model progress is measured on) a model is, never less than once', () => {
-    expect(slowdown('gigaam-v3-e2e-rnnt')).toBe(1);
+  it('tells how much slower than the default a model is, never less than once', () => {
+    expect(slowdown(DEFAULT_ASR_MODEL)).toBe(1);
     expect(slowdown('whisper-large-v3-turbo')).toBeCloseTo(0.55 / 0.035);
   });
 });

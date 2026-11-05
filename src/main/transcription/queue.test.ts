@@ -187,8 +187,8 @@ describe('TranscriptionQueue', () => {
     const t = setup();
     await t.queue.enqueue(lib, meeting.id);
     const command = await transcribeSent(t.worker);
-    expect(command).toMatchObject({ modelsDir: 'M', model: 'whisper-large-v3-turbo', ffmpegPath: 'ffmpeg', threads: 7 });
-    expect(t.ensured).toEqual([['whisper-large-v3-turbo', 'voices']]);
+    expect(command).toMatchObject({ modelsDir: 'M', model: 'gigaam-v3-e2e-rnnt', ffmpegPath: 'ffmpeg', threads: 7 });
+    expect(t.ensured).toEqual([['gigaam-v3-e2e-rnnt', 'voices']]);
     expect(command.input).toEqual({
       tracks: [
         { kind: 'mic', file: join(audioDir(lib, meeting.id), 'mic.webm'), offsetSec: 0 },
@@ -205,9 +205,9 @@ describe('TranscriptionQueue', () => {
 
     t.worker().post(done(command.jobId));
     await vi.waitFor(() => expect(t.finished).toHaveLength(1));
-    expect(t.finished[0]).toMatchObject({ ok: true, meeting: { status: 'done', model: 'whisper-large-v3-turbo' } });
+    expect(t.finished[0]).toMatchObject({ ok: true, meeting: { status: 'done', model: 'gigaam-v3-e2e-rnnt' } });
     const transcript = await readTranscript(lib, meeting.id);
-    expect(transcript).toMatchObject({ model: 'whisper-large-v3-turbo', modelTitle: 'Whisper large-v3-turbo' });
+    expect(transcript).toMatchObject({ model: 'gigaam-v3-e2e-rnnt', modelTitle: 'GigaAM v3' });
     expect(transcript?.segments.map((s) => s.text)).toEqual(['Привет.', 'Здравствуйте.']);
     expect(transcript?.segments[0]?.edited).toBe(false);
     expect(t.queue.isBusy()).toBe(false);
@@ -242,7 +242,7 @@ describe('TranscriptionQueue', () => {
     // Модель другая — у второй встречи новый процесс.
     await vi.waitFor(() => expect(t.workers).toHaveLength(2));
     const second = await transcribeSent(t.worker);
-    expect(second.model).toBe('whisper-large-v3-turbo');
+    expect(second.model).toBe('gigaam-v3-e2e-rnnt');
     expect(vi.mocked(logger.warn).mock.calls.map(([m]) => m).join('\n')).toContain('whisper-tiny');
   });
 
@@ -425,7 +425,7 @@ describe('TranscriptionQueue', () => {
       meetingId: meeting.id,
       stage: 'download',
       fraction: 0,
-      download: { done: 100, total: 400, title: 'Whisper large-v3-turbo' },
+      download: { done: 100, total: 400, title: 'GigaAM v3' },
     });
     expect((await readMeeting(lib, meeting.id)).errorMessage).toContain('нет связи');
     expect(t.workers).toHaveLength(0);

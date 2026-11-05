@@ -24,9 +24,8 @@ test('the catalog downloads, cancels, selects and deletes models', async () => {
   await openSettings(page, 'Расшифровка');
 
   const selected = page.getByRole('group', { name: 'Выбрана' });
-  await expect(selected.getByRole('article', { name: 'Whisper large-v3-turbo' })).toBeVisible();
+  await expect(selected.getByRole('article', { name: 'GigaAM v3' })).toBeVisible();
   await expect(selected).toContainText('Скачается при первой расшифровке.');
-  await expect(selected).toContainText('Рекомендуется');
   const russian = page.getByRole('group', { name: 'Понимают русский' });
   await expect(russian.getByRole('article')).toHaveCount(5);
   await expect(page.getByRole('group', { name: 'Только английский' }).getByRole('article')).toHaveCount(2);
@@ -52,10 +51,10 @@ test('the catalog downloads, cancels, selects and deletes models', async () => {
   await expect.poll(async () => (await settingsFile(userDataDir)).asrModel).toBe('t-one');
   await expect(page.getByRole('list', { name: 'Общие модели' })).toContainText('Разделение по голосам и поиск речи');
 
-  // Удалили выбранную — новые встречи пойдут на модель по умолчанию, Whisper.
+  // Удалили выбранную — новые встречи пойдут на GigaAM.
   await selected.getByRole('button', { name: 'Удалить: T-one' }).click();
-  await expect(selected.getByRole('article', { name: 'Whisper large-v3-turbo' })).toBeVisible();
-  await expect.poll(async () => (await settingsFile(userDataDir)).asrModel).toBe('whisper-large-v3-turbo');
+  await expect(selected.getByRole('article', { name: 'GigaAM v3' })).toBeVisible();
+  await expect.poll(async () => (await settingsFile(userDataDir)).asrModel).toBe('gigaam-v3-e2e-rnnt');
   await expect(russian.getByRole('article', { name: 'T-one' })).toBeVisible();
 });
 
@@ -81,7 +80,7 @@ test('a meeting is transcribed with the model chosen in the window and shows it'
 
   const dialog = page.getByRole('dialog', { name: 'Расшифровать' });
   const select = dialog.getByRole('combobox', { name: 'Модель расшифровки' });
-  await expect(select).toHaveValue('whisper-large-v3-turbo');
+  await expect(select).toHaveValue('gigaam-v3-e2e-rnnt');
   await expect(select.locator('option[value="canary-180m-flash"]')).toHaveText(/только английский — скачается, \d+ МБ/);
   // Список моделей — первое поле окна: Shift+Tab с него ведёт по кругу на последнюю кнопку, а не за окно.
   await select.focus();

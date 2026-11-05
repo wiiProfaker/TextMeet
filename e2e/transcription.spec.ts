@@ -59,7 +59,7 @@ test('a new recording is transcribed after the stop dialog', async () => {
   await expect(text).toContainText('Я');
   await expect(text).toContainText('Проверка расшифровки');
   const [id] = (await readdir(libraryDir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
-  expect(await readMeetingJson(libraryDir, id!)).toMatchObject({ status: 'done', model: 'whisper-large-v3-turbo' });
+  expect(await readMeetingJson(libraryDir, id!)).toMatchObject({ status: 'done', model: 'gigaam-v3-e2e-rnnt' });
 });
 
 test('«Расшифровать» on a saved recording asks for participants and shows the text of both tracks', async () => {
@@ -203,7 +203,7 @@ test('settings show the transcription model and that it is not downloaded yet', 
   await openSettings(page, 'Расшифровка');
   await expect(page.getByRole('tabpanel', { name: 'Расшифровка' })).toBeVisible();
   const selected = page.getByRole('group', { name: 'Выбрана' });
-  await expect(selected.getByRole('article', { name: 'Whisper large-v3-turbo' })).toBeVisible();
+  await expect(selected.getByRole('article', { name: 'GigaAM v3' })).toBeVisible();
   await expect(selected).toContainText('Скачается при первой расшифровке.');
   // Общие модели голосов ещё не скачаны — их строки нет.
   await expect(page.getByRole('list', { name: 'Общие модели' })).toHaveCount(0);

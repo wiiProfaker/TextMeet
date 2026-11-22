@@ -20,8 +20,13 @@ coverage/
 *.opus
 *.webm
 *.onnx
+*.gguf
 *.bin
+*.mp4
 
 # Результаты Playwright
 test-results/
 playwright-report/
+
+# Рабочие макеты обсуждений (superpowers:brainstorming)
+.superpowers/

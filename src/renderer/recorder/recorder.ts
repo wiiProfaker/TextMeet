@@ -1,5 +1,5 @@
 // Скрытое окно записи: по командам main включает устройства, пишет дорожки кусками и шлёт уровни.
-import type { RecorderStartCommand } from '../../shared/recording';
+import { RECORDER_BEAT_MS, type RecorderStartCommand } from '../../shared/recording';
 import { startCapture, type Capture } from './capture';
 import { LevelMeter } from './levels';
 import { testSystemAudioFrom, toFailure } from './media';
@@ -74,3 +74,5 @@ window.recorder.onStart((command) => enqueue(() => start(command)));
 window.recorder.onStop(() => enqueue(stop));
 window.recorder.onPlaySound((kind) => playSound(kind));
 window.recorder.ready();
+// Сердцебиение для сторожа в main: зависшее окно (не упавшее) перезапускается, как упавшее.
+setInterval(() => window.recorder.alive(), RECORDER_BEAT_MS);

@@ -8,7 +8,7 @@ import { llmModel, type LlmModelId, type LlmModelInfo } from '../../shared/llm-m
 import { loadExportDoc } from '../export/export-meeting';
 import type { Logger } from '../logger';
 import { aiTexts } from '../texts';
-import { aiMessages, fitsWindow, meetingText, QUESTION_MAX_TOKENS, sourceHash, SUMMARY_MAX_TOKENS, summaryTask } from './ai-messages';
+import { aiMessages, fitsWindow, meetingText, QUESTION_MAX_TOKENS, sourceHash, SUMMARY_MAX_TOKENS, stripPreamble, summaryTask } from './ai-messages';
 import { updateAi } from './ai-store';
 import { countTokens, LlmError, streamChat, type ChatRequest, type StreamOptions } from './llm-client';
 import type { LlamaModel, LlamaServer } from './llama-server';
@@ -211,15 +211,20 @@ export class AiRunner {
       const messages = aiMessages(meetingText(input.doc), input.task);
       const tokens = await session.countTokens(messages.map((m) => m.content).join('\n'), signal);
       if (!fitsWindow(tokens, input.info.contextTokens)) throw new LlmError('too-long', `${tokens} «кусочков»`);
-      await session.streamChat(
+      // Ответ как пришёл; на экран и в файл — без строки-вступления (на экране она может мелькнуть до перевода строки).
+      let written = '';
+      const { finishReason } = await session.streamChat(
         { messages, maxTokens: kind === 'summary' ? SUMMARY_MAX_TOKENS : QUESTION_MAX_TOKENS },
         {
           signal,
-          onText: (text) => this.update(running, { stage: 'writing', text: running.job.text + text }, running.job.stage !== 'writing'),
+          onText: (text) => {
+            written += text;
+            this.update(running, { stage: 'writing', text: stripPreamble(written) }, running.job.stage !== 'writing');
+          },
         },
       );
       if (running.job.text.trim() === '') throw new LlmError('engine', 'модель ответила пустым текстом');
-      await this.save(running, input, 'done');
+      await this.save(running, input, 'done', finishReason === 'length');
     } catch (err) {
       if (signal.aborted) {
         // Остановили: написанное сохраняется; встречу удаляют — нет.
@@ -257,9 +262,15 @@ export class AiRunner {
     });
   }
 
-  private async save(running: Running, input: JobInput, status: 'done' | 'stopped'): Promise<void> {
+  private async save(running: Running, input: JobInput, status: 'done' | 'stopped', truncated = false): Promise<void> {
     const { meetingId, kind, question, text } = running.job;
-    const common = { model: input.model.id, modelTitle: input.info.title, createdAt: this.deps.now().toISOString(), status };
+    const common = {
+      model: input.model.id,
+      modelTitle: input.info.title,
+      createdAt: this.deps.now().toISOString(),
+      status,
+      ...(truncated && { truncated: true }),
+    };
     try {
       await updateAi(
         this.deps.libraryDir(),

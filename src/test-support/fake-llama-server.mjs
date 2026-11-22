@@ -5,7 +5,9 @@
 // Особые слова в задании или тексте: «УПАДИ» — процесс падает посреди ответа; «ОЧЕНЬ_ДЛИННАЯ_ВСТРЕЧА» — /tokenize
 // насчитывает миллион «кусочков». Переменные: TEXTMEET_FAKE_LLM_LOAD_MS — сколько «грузится модель» (по умолчанию 50),
 // TEXTMEET_FAKE_LLM_TOKEN_MS — пауза между кусками ответа (по умолчанию 20), TEXTMEET_FAKE_LLM_LOG — файл, куда
-// дописываются параметры запуска и запросы (по строке JSON).
+// дописываются параметры запуска и запросы (по строке JSON); TEXTMEET_FAKE_LLM_EXIT_DELAY_MS — на просьбу завершиться
+// (SIGTERM) выйти не сразу, а через столько мс; TEXTMEET_FAKE_LLM_IGNORE_TERM=1 — не выходить на SIGTERM вовсе. На
+// Windows просьбы нет: child.kill() там завершает процесс сразу.
 import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 
@@ -25,6 +27,9 @@ const log = (entry) => {
   if (logFile) appendFileSync(logFile, `${JSON.stringify(entry)}\n`);
 };
 log({ kind: 'start', args, pid: process.pid });
+const exitDelayMs = Number(process.env.TEXTMEET_FAKE_LLM_EXIT_DELAY_MS ?? 0);
+if (process.env.TEXTMEET_FAKE_LLM_IGNORE_TERM === '1') process.on('SIGTERM', () => undefined);
+else if (exitDelayMs > 0) process.on('SIGTERM', () => setTimeout(() => process.exit(0), exitDelayMs));
 process.stderr.write('fake llama-server: loading model\n');
 
 let loaded = false;

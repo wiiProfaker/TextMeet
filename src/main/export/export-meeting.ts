@@ -7,7 +7,8 @@ import { resolveAiPrompt, withAiPrompt } from '../../shared/ai-prompt';
 import { buildExportDoc, toHtml, toPlainText, type ExportDoc } from '../../shared/export-doc';
 import type { ExportFormat } from '../../shared/ipc';
 import { readAi } from '../ai/ai-store';
-import { humanFsError } from '../fs/fs-errors';
+import { writeFileAtomic, type RenameFn } from '../fs/atomic-write';
+import { FILE_BUSY_REASON, humanFsError } from '../fs/fs-errors';
 import { readMeeting } from '../library/library';
 import { readTranscript } from '../library/transcript-store';
 import type { Logger } from '../logger';
@@ -34,6 +35,10 @@ export interface ExportDeps {
   /** Папка последнего сохранения (настройки); null — ещё не сохраняли. */
   exportDir(): string | null;
   rememberExportDir(dir: string): Promise<unknown>;
+  /** Файл с дописанным расширением уже есть: заменить? (окно сохранения спрашивало про имя без расширения). */
+  confirmReplace(path: string): Promise<boolean>;
+  /** Переименование временного файла поверх выгрузки (в тестах — сбой); по умолчанию — системное. */
+  rename?: RenameFn;
   documentsDir(): string;
   platform: string;
   logger: Pick<Logger, 'warn'>;
@@ -99,13 +104,21 @@ async function startDir(deps: ExportDeps): Promise<string> {
   return isFolder ? last : deps.documentsDir();
 }
 
-/** Окно сохранения → файл. Не атомарно: файл, открытый в Word, даёт понятное «файл занят другой программой». */
+const exists = (path: string): Promise<boolean> => fsp.stat(path).then(() => true, () => false);
+
+/**
+ * Окно сохранения → файл. Окно спросило про замену только того имени, которое вернуло: если расширение дописали мы и
+ * такой файл уже есть — спрашиваем сами. Запись атомарная (временный файл → переименование): при сбое прежний файл
+ * цел, полуфайла нет.
+ */
 export async function saveMeeting(deps: ExportDeps, meetingId: string, format: ExportFormat): Promise<{ saved: boolean }> {
   const doc = await loadExportDoc(deps.libraryDir(), meetingId, true, deps.logger);
   const dir = await startDir(deps);
   const picked = await deps.chooseSavePath(join(dir, exportFileName(doc.title, format)), format);
   if (picked === null) return { saved: false };
-  const path = extname(picked).toLowerCase() === `.${format}` ? picked : `${picked}.${format}`;
+  const appended = extname(picked).toLowerCase() !== `.${format}`;
+  const path = appended ? `${picked}.${format}` : picked;
+  if (appended && (await exists(path)) && !(await deps.confirmReplace(path))) return { saved: false };
   let data: Uint8Array | string;
   try {
     data = await fileData(doc, format, deps.platform);
@@ -113,8 +126,13 @@ export async function saveMeeting(deps: ExportDeps, meetingId: string, format: E
     throw new Error(exportTexts.notBuilt, { cause: err });
   }
   try {
-    await fsp.writeFile(path, data);
+    await writeFileAtomic(path, data, deps.rename);
   } catch (err) {
+    // Временный файл рядом записался, а заменить им прежний не дали — прежний открыт в другой программе (Word).
+    const code = (err as NodeJS.ErrnoException).code;
+    if ((code === 'EPERM' || code === 'EACCES' || code === 'EBUSY') && (await exists(path))) {
+      throw new Error(`Не удалось сохранить файл: ${FILE_BUSY_REASON}`, { cause: err });
+    }
     throw humanFsError('Не удалось сохранить файл', err);
   }
   // Файл уже сохранён — неудача с настройками только в журнал.

@@ -504,3 +504,70 @@ test('the clear button empties the search and keeps the focus in the field', asy
   await expect(box).toHaveValue('');
   await expect(box).toBeFocused();
 });
+
+test('speaker chips are in the line under the title and rename still works', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { page, libraryDir } = launched;
+  await openMeeting(page);
+  const header = page.getByRole('main', { name: 'Встреча' }).locator('header');
+  const speakers = header.getByRole('list', { name: 'Спикеры' });
+  await expect(speakers.getByRole('button', { name: 'Спикер 1' })).toBeVisible();
+  // Отдельной полосы спикеров под шапкой больше нет: список один, и он в шапке.
+  await expect(page.getByRole('list', { name: 'Спикеры' })).toHaveCount(1);
+  await speakers.getByRole('button', { name: 'Спикер 1' }).click();
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).fill('Ирина');
+  await speakers.getByRole('textbox', { name: 'Имя спикера' }).press('Enter');
+  await expect(speakers.getByRole('button', { name: 'Ирина' })).toBeVisible();
+  await expect.poll(async () => (await pollMeetingJson(libraryDir, ID))?.speakerNames).toEqual({ s1: 'Ирина' });
+});
+
+test('the undo error bar can be closed', async () => {
+  launched = await launchApp({ meetings: [doneMeeting()], transcripts: { [ID]: TRANSCRIPT } });
+  const { app, page } = launched;
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  await text.getByRole('button', { name: 'Без подрядчиков.' }).click();
+  await text.getByRole('textbox', { name: 'Текст реплики' }).fill('');
+  await text.getByRole('textbox', { name: 'Текст реплики' }).press('Enter');
+  await expect(text.getByRole('status')).toContainText('Реплика 0:04 удалена');
+  // «Вернуть» не удаётся (например, диск недоступен).
+  await app.evaluate(({ ipcMain }) => {
+    ipcMain.removeHandler('library:edit-transcript');
+    ipcMain.handle('library:edit-transcript', () => {
+      throw new Error('Не удалось сохранить текст встречи: диск недоступен.');
+    });
+  });
+  await page.getByRole('button', { name: 'Вернуть' }).click();
+  await expect(text.getByRole('status')).toContainText('диск недоступен');
+  await text.getByRole('button', { name: 'Закрыть сообщение об ошибке' }).click();
+  await expect(text.getByRole('status')).toBeEmpty();
+});
+
+test('arrow keys on the time button keep following the sound', async () => {
+  const long = 'Обсуждаем бюджет на октябрь, сроки подрядчиков и что ещё нужно доделать по дизайну до пятницы, иначе не успеем.';
+  const segments = Array.from({ length: 18 }, (_, i) => ({
+    id: `seg-${i}`,
+    start: i,
+    end: i + 0.9,
+    speakerId: i % 2 ? 's1' : 'me',
+    text: `${i}. ${long}`,
+    edited: false,
+  }));
+  launched = await launchApp({
+    meetings: [{ ...doneMeeting({ durationSec: 18 }), audio: { 'mic.webm': 18 } }],
+    transcripts: { [ID]: { ...TRANSCRIPT, speakers: [{ id: 'me', kind: 'me' }, { id: 's1', kind: 'other' }], segments } },
+  });
+  const { app, page } = launched;
+  await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((w) => w.webContents.getURL().includes('main'))
+      ?.setSize(900, 560),
+  );
+  await openMeeting(page);
+  const text = page.getByLabel('Текст встречи');
+  await text.getByRole('button', { name: 'Слушать с 0:00' }).click({ timeout: 15_000 });
+  await page.keyboard.press('ArrowDown');
+  // Подсветка идёт за звуком и остаётся на экране, хотя прошло меньше паузы после ручной прокрутки (5 с).
+  await expect.poll(async () => (await audioState(page))?.time ?? 0, { timeout: 10_000 }).toBeGreaterThanOrEqual(3.5);
+  await expect(text.locator('.row[aria-current="true"]')).toBeInViewport({ timeout: 500 });
+});

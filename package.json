@@ -1,7 +1,7 @@
 {
   "name": "textmeet",
   "productName": "TextMeet",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "description": "Запись и расшифровка встреч",
   "private": true,
   "main": "out/main/index.js",
@@ -16,6 +16,8 @@
     "test:catalog": "vitest run --config vitest.catalog.config.ts",
     "test:llm": "npm run fetch:llama && vitest run --config vitest.llm.config.ts",
     "fetch:llama": "node scripts/fetch-llama.mjs",
+    "icons": "electron scripts/render-icons.cjs",
+    "notices": "node scripts/build-notices.mjs",
     "e2e": "npm run build && playwright test",
     "dist:win": "npm run build && npm run fetch:llama && electron-builder --win --publish never",
     "dist:mac": "npm run build && npm run fetch:llama && electron-builder --mac dir --arm64 --publish never",
@@ -29,6 +31,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@electron/fuses": "1.8.0",
     "@fontsource/golos-text": "5.3.0",
     "@fontsource/literata": "5.3.0",
     "@playwright/test": "1.63.0",

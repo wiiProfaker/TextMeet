@@ -11,6 +11,15 @@ export interface CatalogDownloadsSnapshot {
   downloadError: { id: CatalogModelId; message: string } | null;
 }
 
+/** Скачивание из каталога важнее; нет его — показать скачивание, начатое очередью расшифровки (без «Отменить»). */
+export function withQueueDownload(
+  snapshot: CatalogDownloadsSnapshot,
+  queued: { group: CatalogModelId; done: number; total: number } | null,
+): CatalogDownloadsSnapshot {
+  if (snapshot.download || !queued) return snapshot;
+  return { ...snapshot, download: { id: queued.group, done: queued.done, total: queued.total, remainingSec: null, queued: true } };
+}
+
 type Groups = readonly (ModelGroupState & { id: ModelGroupId })[];
 
 /** Группы, которых нет в ответе хранилища, — не скачаны (размер — из реестра). */

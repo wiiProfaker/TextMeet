@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { readdir, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { launchApp, pollMeetingJson, readMeetingJson, waitForRecorder, type LaunchedApp } from './helpers';
@@ -199,4 +199,32 @@ test('asks before quitting during a recording and saves it on exit', async () =>
 
   const [id] = await meetingIds(libraryDir);
   expect(await readMeetingJson(libraryDir, id!)).toMatchObject({ status: 'recorded' });
+});
+
+test('a hung recorder window is restarted and recording works again', async () => {
+  // Порог зависания — 5 с вместо 15 (тестовая подмена); больше 2 с между «сердцебиениями» живого окна.
+  launched = await launchApp({ env: { TEXTMEET_TEST_RECORDER_HANG_MS: '5000' } });
+  const { app, page, libraryDir, userDataDir } = launched;
+  await waitForRecorder(page);
+  // Окно записи зависает: бесконечный цикл, но процесс не падает.
+  await app.evaluate(({ BrowserWindow }) => {
+    const recorder = BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'TextMeet — запись');
+    void recorder?.webContents.executeJavaScript('setTimeout(() => { for (;;) {} }, 0)');
+  });
+  const log = join(userDataDir, 'logs', 'textmeet.log');
+  await expect
+    .poll(async () => (await readFile(log, 'utf8').catch(() => '')).includes('Окно записи не отвечает — перезапускаем'), {
+      timeout: 15_000,
+    })
+    .toBe(true);
+  // Новое окно записи готово (первое «готово» — у зависшего окна).
+  await expect
+    .poll(async () => (await readFile(log, 'utf8').catch(() => '')).split('Окно записи готово').length - 1, { timeout: 15_000 })
+    .toBeGreaterThanOrEqual(2);
+
+  await startRecording(page);
+  await page.getByRole('button', { name: /Остановить запись/ }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Пропустить' }).click();
+  const [id] = await meetingIds(libraryDir);
+  expect(await readdir(join(libraryDir, id!, 'audio'))).toContain('mic.webm');
 });

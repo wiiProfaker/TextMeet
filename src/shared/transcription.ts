@@ -35,6 +35,8 @@ export interface CatalogDownload {
   total: number;
   /** Сколько секунд осталось, примерно; null — пока не понятно (скачивание только началось). */
   remainingSec: number | null;
+  /** Скачивание начала очередь расшифровки («Расшифровать» с нескачанной моделью): отменить его из каталога нельзя. */
+  queued?: true;
 }
 
 export interface ModelsState {

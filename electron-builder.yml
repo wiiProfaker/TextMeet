@@ -2,10 +2,22 @@ appId: dev.textmeet.app
 productName: TextMeet
 directories:
   output: release
+# Защита выпуска (решения Плана 8, §5.1): программу нельзя запустить как Node и подключить к ней отладчик, а app.asar
+# проверяется на целостность. Сквозной тест собранной программы идёт на тестовой копии (scripts/make-test-copy.mjs).
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+  resetAdHocDarwinSignature: true
 files:
   - out/**
   - package.json
+# Значок (решения Плана 8, §3): PNG 1024×1024 из build/icon*.svg (npm run icons); .ico и .icns electron-builder
+# делает сам. Windows — рисунок во весь квадрат, Mac — по сетке значков macOS.
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
@@ -14,6 +26,7 @@ nsis:
   perMachine: false
   artifactName: TextMeet-Setup-${version}.exe
 mac:
+  icon: build/icon-mac.png
   target: dir
   identity: null
   category: public.app-category.productivity
@@ -23,6 +36,9 @@ mac:
 # Движок итогов (llama-server и его библиотеки) кладёт в vendor/llama скрипт scripts/fetch-llama.mjs (npm run
 # fetch:llama); в программе он лежит рядом с app.asar — в resources/llama.
 extraResources:
+  # Список чужих частей и их лицензий (npm run notices) — «Лицензии» в настройках «Общие».
+  - from: THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
   - from: vendor/llama
     to: llama
     filter: ['**/*', '!.build']

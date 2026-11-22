@@ -16,6 +16,14 @@ export const DEFAULT_AI_PROMPT = [
 ].join('\n');
 
 /** Запрос в настройках: null — стандартный, '' — без запроса, иначе — свой текст. */
+/**
+ * Вставка не помещается в поле запроса: поле само обрежет её до AI_PROMPT_MAX знаков — окно скажет об этом.
+ * length — сколько знаков в поле, selected — сколько из них выделено (их заменит вставка), pasted — длина вставки.
+ */
+export function pasteCut(field: { length: number; selected: number; pasted: number }): boolean {
+  return field.length - field.selected + field.pasted > AI_PROMPT_MAX;
+}
+
 export const AiPromptSchema = z.string().max(AI_PROMPT_MAX).nullable();
 
 const normalize = (text: string): string => text.replace(/\r\n?/g, '\n');

@@ -16,6 +16,7 @@ import {
   aiBlockVisible,
   aiBusyText,
   aiStageText,
+  AI_BUSY_TEXT,
   ASK_PLACEHOLDER,
   ASK_PLACEHOLDER_WAIT,
   NO_MODEL_TEXT,
@@ -43,6 +44,8 @@ export interface AiPanel {
   visible: boolean;
   /** «Модель не скачана» — после нажатия «Итоги встречи» или «Спросить». */
   noModel: boolean;
+  /** «Модель сейчас занята» — main ответил «busy» (модель удаляется, готовится другой запрос, программа закрывается). */
+  busyNotice: boolean;
   /** «Итоги встречи» в шапке: итоги есть — развернуть блок; нет — начать. */
   openSummary(): void;
   /** «Обновить» (после «Заменить») и «Повторить». */
@@ -52,6 +55,8 @@ export interface AiPanel {
   collapse(): void;
   /** «Закрыть» у «Модель не скачана». */
   close(): void;
+  /** «Закрыть» у «Модель сейчас занята». */
+  closeBusy(): void;
   /** Развернуть блок и показать его (переход из найденного). */
   reveal(): void;
   /** Растёт с каждым reveal(): блок прокручивается в поле зрения. */
@@ -68,6 +73,7 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
   const state = useAiState();
   const [opened, setOpened] = useState(false);
   const [noModel, setNoModel] = useState(false);
+  const [busyNotice, setBusyNotice] = useState(false);
   const [collapsed, setCollapsed] = useState(() => collapsedMeetings.has(meetingId));
   const [revealed, setRevealed] = useState(0);
   const job = state.job?.meetingId === meetingId ? state.job : null;
@@ -81,6 +87,12 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     },
     [meetingId],
   );
+
+  // Модель занялась работой — блок сам показывает чем; когда она освободится, «занята» уже было бы неправдой.
+  const working = job !== null || other !== null;
+  useEffect(() => {
+    if (working && busyNotice) setBusyNotice(false);
+  }, [working, busyNotice]);
 
   const expand = useCallback(() => {
     collapsedMeetings.delete(meetingId);
@@ -97,6 +109,7 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     try {
       const result = await run();
       setNoModel(result === 'no-model');
+      setBusyNotice(result === 'busy');
       return result === 'started';
     } catch (err) {
       onError(errorText(err));
@@ -114,7 +127,8 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     failure,
     finished: state.finished,
     noModel,
-    visible: aiBlockVisible({ view, job, failure, opened: opened || noModel, collapsed }),
+    busyNotice,
+    visible: aiBlockVisible({ view, job, failure, opened: opened || noModel || busyNotice, collapsed }),
     openSummary: () => {
       const action = summaryAction(view, other);
       if (action === 'open') expand();
@@ -139,6 +153,10 @@ export function useAiPanel(meetingId: string, textKey: unknown, onError: (messag
     },
     close: () => {
       setNoModel(false);
+      setOpened(false);
+    },
+    closeBusy: () => {
+      setBusyNotice(false);
       setOpened(false);
     },
     reveal,
@@ -274,7 +292,13 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
     if (panel.revealed > 0) section.current?.scrollIntoView({ block: 'nearest' });
   }, [panel.revealed]);
 
-  if (!panel.visible) return null;
+  const live = (
+    <span className="sr-only" role="status">
+      {announcement}
+    </span>
+  );
+  // Свёрнутый блок всё равно говорит экранному диктору «Итоги готовы» / «Ответ готов».
+  if (!panel.visible) return live;
   const summary = view?.doc.summary ?? null;
   const questions = view?.doc.questions ?? [];
   const summaryJob = job?.kind === 'summary' ? job : null;
@@ -303,9 +327,14 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
         {caption && <span>{caption}</span>}
         <span className="lnks">
           {summaryJob ? (
-            <button type="button" className="btn" onClick={panel.stop}>
-              Остановить
-            </button>
+            <>
+              <button type="button" className="btn" onClick={panel.stop}>
+                Остановить
+              </button>
+              <button type="button" className="lnk" onClick={panel.collapse}>
+                Свернуть
+              </button>
+            </>
           ) : panel.noModel && !summary ? (
             <button type="button" className="lnk" onClick={panel.close}>
               Закрыть
@@ -331,6 +360,15 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
           {aiBusyText(other)}{' '}
           <button type="button" className="lnk" onClick={() => onOpenMeeting(other.meetingId)}>
             Перейти
+          </button>
+        </p>
+      )}
+
+      {panel.busyNotice && !job && !other && (
+        <p>
+          {AI_BUSY_TEXT}{' '}
+          <button type="button" className="lnk" onClick={panel.closeBusy}>
+            Закрыть
           </button>
         </p>
       )}
@@ -413,9 +451,7 @@ export function AiBlock({ panel, onOpenSettings, onOpenMeeting, onError }: Block
         </form>
       )}
       {(summary || questions.length > 0 || job) && <p className="ai-foot">{AI_FOOT}</p>}
-      <span className="sr-only" role="status">
-        {announcement}
-      </span>
+      {live}
 
       {confirm && (
         <ConfirmDialog

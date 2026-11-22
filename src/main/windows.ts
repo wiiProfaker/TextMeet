@@ -31,6 +31,8 @@ export function createMainWindow(logger: Logger, options: { show: boolean }): Br
     minHeight: 480,
     show: false,
     title: 'TextMeet',
+    // Собранная программа берёт значок из своего .exe / .app; в разработке — из build/ (иначе значок Electron).
+    ...(!app.isPackaged && { icon: join(app.getAppPath(), 'build', 'icon.png') }),
     webPreferences: {
       preload: PRELOAD,
       sandbox: true,
@@ -45,13 +47,13 @@ export function createMainWindow(logger: Logger, options: { show: boolean }): Br
 }
 
 /** Режим автотестов (TEXTMEET_TEST_MEDIA): звук компьютера — тон ('tone') или отказ ('fail'). */
-export function testMediaMode(): 'tone' | 'fail' | null {
-  const mode = process.env.TEXTMEET_TEST_MEDIA;
+export function testMediaMode(env: Readonly<Record<string, string>>): 'tone' | 'fail' | null {
+  const mode = env.TEXTMEET_TEST_MEDIA;
   return mode === 'tone' || mode === 'fail' ? mode : null;
 }
 
 /** Скрытое окно записи: живёт всё время работы программы, не зависит от главного окна. */
-export function createRecorderWindow(logger: Logger): BrowserWindow {
+export function createRecorderWindow(logger: Logger, testMedia: 'tone' | 'fail' | null): BrowserWindow {
   const win = new BrowserWindow({
     show: false,
     width: 400,
@@ -70,7 +72,6 @@ export function createRecorderWindow(logger: Logger): BrowserWindow {
     },
   });
   lockDown(win);
-  const testMedia = testMediaMode();
   loadPage(win, 'recorder', logger, testMedia ? { testSystemAudio: testMedia } : {});
   return win;
 }

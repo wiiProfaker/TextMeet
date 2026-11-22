@@ -16,6 +16,8 @@ const answerFields = {
   modelTitle: z.string().max(200),
   createdAt: z.iso.datetime(),
   status: AiAnswerStatusSchema.default('done'),
+  /** Ответ оборвал предел длины (finish_reason «length»): подпись — «не поместилось целиком». Нет поля — целиком. */
+  truncated: z.boolean().optional(),
 };
 
 export const AiSummarySchema = z.object({
@@ -45,10 +47,17 @@ export type AiDoc = z.infer<typeof AiDocSchema>;
 
 export const EMPTY_AI_DOC: AiDoc = { version: 1, summary: null, questions: [] };
 
-/** Подпись итогов или ответа: «Qwen3.5 9B · 27.09, 16:55»; остановленный — с «· остановлено»; withYear — для выгрузки. */
-export function aiCaption(record: { modelTitle: string; createdAt: string; status: AiAnswerStatus }, withYear = false): string {
+/**
+ * Подпись итогов или ответа: «Qwen3.5 9B · 27.09, 16:55»; остановленный — с «· остановлено», оборванный пределом
+ * длины — с «· не поместилось целиком»; withYear — для выгрузки.
+ */
+export function aiCaption(
+  record: { modelTitle: string; createdAt: string; status: AiAnswerStatus; truncated?: boolean },
+  withYear = false,
+): string {
   const parts = [record.modelTitle, formatStamp(record.createdAt, withYear)];
   if (record.status === 'stopped') parts.push('остановлено');
+  else if (record.truncated) parts.push('не поместилось целиком');
   return parts.join(' · ');
 }
 

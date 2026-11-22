@@ -120,6 +120,16 @@ describe('applyEdit — speaker', () => {
     ]);
   });
 
+  it('a new speaker does not take the number of a removed speaker that can still be restored', () => {
+    // Последнюю реплику s2 удалили — s2 исчез из спикеров, но её ещё можно «Вернуть».
+    const t = applyEdit(base(), { kind: 'text', segmentId: 'c', text: '' }, NOW);
+    expect(t.speakers.map((s) => s.id)).toEqual(['me', 's1']);
+    const next = applyEdit(t, { kind: 'speaker', segmentId: 'd', speakerId: 'new', reserved: ['s2'] }, NOW);
+    expect(next.segments.find((s) => s.id === 'd')?.speakerId).toBe('s3');
+    expect(nextSpeakerId(t, ['s2', 'me'])).toBe('s3');
+    expect(nextSpeakerId(t)).toBe('s2');
+  });
+
   it('returns the same transcript when the speaker is the same', () => {
     const t = base();
     expect(applyEdit(t, { kind: 'speaker', segmentId: 'a', speakerId: 's1' }, NOW)).toBe(t);

@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   app,
   clipboard,
@@ -8,6 +10,7 @@ import {
   globalShortcut,
   Menu,
   powerMonitor,
+  net,
   protocol,
   session,
   shell,
@@ -22,6 +25,7 @@ import {
   type RecorderCommandContract,
 } from '../shared/ipc';
 import { currentAiModel } from './ai/ai-models';
+import { clearEnginePid, killOrphanEngine, recordEnginePid, type EnginePidDeps } from './ai/engine-pid';
 import { AiRunner, llamaEngine } from './ai/ai-runner';
 import { llamaDir, LlamaServer, llamaServerFile, type LlamaCommand } from './ai/llama-server';
 import { macMenuTemplate } from './app-menu';
@@ -40,6 +44,8 @@ import { CatalogDownloads } from './models/catalog-downloads';
 import { FakeModelStore } from './models/fake-model-store';
 import { ModelManager, type ModelStore } from './models/model-manager';
 import { modelsRoot } from './models/models-dir';
+import { withQueueDownload } from './models/models-state';
+import { trackQueueDownloads } from './models/queue-downloads';
 import { isModelGroupId, llmFilePath } from './models/registry';
 import { createNotifier, type Notify } from './notifications';
 import { DEV_FOLDER_NAME, LIBRARY_FOLDER_NAME, resolveLibraryDir } from './paths';
@@ -47,42 +53,53 @@ import { applyPermissionPolicy } from './permissions';
 import { RecordingController } from './recording/controller';
 import { freeDiskBytes } from './recording/monitors';
 import { recoverInterruptedRecordings } from './recording/recovery';
+import { RecorderWatchdog } from './recording/recorder-watchdog';
 import { createSettingsStore } from './settings/settings-store';
 import { dialogTexts, notificationTexts } from './texts';
 import { TranscriptionQueue } from './transcription/queue';
 import { spawnTranscriptionWorker } from './transcription/worker-host';
+import { testEnv } from './test-hooks';
 import { createTray, type AppTray } from './tray';
+import { LATEST_RELEASE_URL, UpdateChecker, visibleUpdate } from './updates/update-check';
 import { createMainWindow, createRecorderWindow, testMediaMode } from './windows';
+
+// Тестовые подмены TEXTMEET_*: только в разработке и в тестовой копии сборки (test-hooks.ts). В выпуске — пусто.
+const testVars = testEnv({
+  packaged: app.isPackaged,
+  resourcesPath: process.resourcesPath,
+  env: process.env,
+  exists: existsSync,
+});
 
 // Версия для разработки (npm run dev / npm start) иначе делила бы с установленной программой папку данных
 // и блокировку «один экземпляр»: запуск молча уступал бы установленной версии, а тестовые данные попадали
 // бы в настоящие. Поэтому у неё своя папка данных и своя библиотека по умолчанию.
-const isDevRun = !app.isPackaged && !process.env.TEXTMEET_USER_DATA;
+const isDevRun = !app.isPackaged && !testVars.TEXTMEET_USER_DATA;
 
 // Только для автотестов: отдельные папки данных и «домашняя» папка, чтобы не трогать настоящие.
 // Папка данных задаётся до requestSingleInstanceLock(): блокировка привязана к ней.
-if (process.env.TEXTMEET_USER_DATA) app.setPath('userData', process.env.TEXTMEET_USER_DATA);
+if (testVars.TEXTMEET_USER_DATA) app.setPath('userData', testVars.TEXTMEET_USER_DATA);
 else if (isDevRun) app.setPath('userData', join(app.getPath('appData'), DEV_FOLDER_NAME));
-const homeDir = (): string => process.env.TEXTMEET_HOME ?? app.getPath('home');
+const homeDir = (): string => testVars.TEXTMEET_HOME ?? app.getPath('home');
 const logFile = (): string => join(app.getPath('userData'), 'logs', 'textmeet.log');
 
 // Только для автотестов (TEXTMEET_TEST_MEDIA): поддельный микрофон Chromium вместо настоящего
 // и никаких системных запросов разрешений — на машинах GitHub Actions на них некому ответить.
 // Разрешение на микрофон по-прежнему решает обработчик программы (permissions.ts).
-const testMedia = testMediaMode();
+const testMedia = testMediaMode(testVars);
 if (testMedia) app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 // Только для автотестов: поддельные движки расшифровки (worker.ts) и поддельное хранилище моделей — без моделей и
 // их скачивания; TEXTMEET_TEST_DOWNLOAD_MS — сколько длится шаг «скачивания» из каталога (по умолчанию мгновенно).
-const fakeAsr = process.env.TEXTMEET_TEST_ASR === 'fake';
-const fakeDownloadStepMs = Number(process.env.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
+const fakeAsr = testVars.TEXTMEET_TEST_ASR === 'fake';
+const fakeDownloadStepMs = Number(testVars.TEXTMEET_TEST_DOWNLOAD_MS ?? 0) || 0;
 /** Только для автотестов: модели, уже «скачанные» в поддельном хранилище (через запятую). */
-const fakeInstalled = (process.env.TEXTMEET_TEST_INSTALLED ?? '').split(',').filter(isModelGroupId);
+const fakeInstalled = (testVars.TEXTMEET_TEST_INSTALLED ?? '').split(',').filter(isModelGroupId);
 /** Только для автотестов: поддельный llama-server (скрипт src/test-support/fake-llama-server.mjs) вместо настоящего. */
-const fakeLlm = process.env.TEXTMEET_TEST_LLM;
+const fakeLlm = testVars.TEXTMEET_TEST_LLM;
 /** Идут автотесты: уведомления о расшифровке только в журнал — настоящие всплывали бы на экране у разработчика. */
-const testRun = testMedia !== null || !!process.env.TEXTMEET_TEST_ASR;
+const testRun = testMedia !== null || !!testVars.TEXTMEET_TEST_ASR;
 /** Только для автотестов: «Корзина» — обычная папка (на машинах CI настоящей Корзины может не быть). */
-const testTrash = testRun ? process.env.TEXTMEET_TEST_TRASH : undefined;
+const testTrash = testRun ? testVars.TEXTMEET_TEST_TRASH : undefined;
 const trash: Trash = testTrash ? folderTrash(testTrash) : (path) => shell.trashItem(path);
 
 /** Потоков для расшифровки: все ядра, кроме одного (не больше 8); во время записи — 2 (§5.3 решений Плана 3). */
@@ -111,6 +128,10 @@ let aiRunner: AiRunner | null = null;
 /** Окно записи падало снова и снова, и его больше не перезапускают. */
 let recorderBroken = false;
 const recorderCrashes: number[] = [];
+/** Сторож зависшего окна записи: нет «сердцебиения» — окно перезапускается, как после падения. */
+let recorderWatchdog: RecorderWatchdog | null = null;
+/** Только для автотестов: порог зависания окна записи, мс (по умолчанию 15 с). */
+const recorderHungMs = Number(testVars.TEXTMEET_TEST_RECORDER_HANG_MS ?? 0) || undefined;
 // Второй запуск или щелчок по Dock могут прийти, пока start() ещё не создал окна:
 // тогда просьбу показать окно только запоминаем, иначе появится второе, «чужое» главное окно.
 let windowsCreated = false;
@@ -191,10 +212,23 @@ function sendToRecorder<C extends RecorderCommandChannel>(channel: C, ...payload
 
 function startRecorderWindow(logger: Logger, controller: RecordingController, notify: Notify): BrowserWindow {
   recorderReady = false;
-  const win = createRecorderWindow(logger);
+  const win = createRecorderWindow(logger, testMedia);
   hideInsteadOfClose(win);
+  recorderWatchdog?.stop();
+  // Окно повисло (не упало): завершаем его процесс — дальше тот же путь, что после падения.
+  const watchdog = new RecorderWatchdog({
+    hungMs: recorderHungMs,
+    onHung: () => {
+      if (quitApproved || win.isDestroyed()) return;
+      logger.error('Окно записи не отвечает — перезапускаем');
+      win.webContents.forcefullyCrashRenderer();
+    },
+  });
+  recorderWatchdog = watchdog;
+  win.once('closed', () => watchdog.stop());
   win.webContents.on('render-process-gone', (_event, details) => {
     logger.error(`Окно записи завершилось: ${details.reason} (код ${details.exitCode})`);
+    watchdog.stop();
     if (quitApproved) return;
     recorderReady = false;
     controller.onRecorderGone();
@@ -305,6 +339,37 @@ async function recoverAndMix(
   }
 }
 
+/**
+ * Полный путь исполняемого файла процесса по номеру (для уборки оставшегося движка итогов); нет процесса, чужой
+ * процесс без доступа к пути или ошибка — null. Запускается, только если с прошлого раза остался файл с номером.
+ */
+function processImage(pid: number): Promise<string | null> {
+  const [file, args] =
+    process.platform === 'win32'
+      ? [
+          'powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid} -ErrorAction SilentlyContinue).Path`],
+        ]
+      : ['ps', ['-p', String(pid), '-o', 'comm=']];
+  return new Promise((resolve) => {
+    execFile(file, args, { windowsHide: true, timeout: 15_000 }, (err, stdout) => {
+      if (err) return resolve(null);
+      const line = stdout.split(/\r?\n/).find((l) => l.trim() !== '') ?? '';
+      resolve(line.trim() || null);
+    });
+  });
+}
+
+/** Ответ GitHub о последнем выпуске; без данных о человеке, не дольше 15 с; не 200 — ошибка (её пишет журнал). */
+async function fetchReleaseJson(url: string): Promise<unknown> {
+  const response = await net.fetch(url, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': `TextMeet/${app.getVersion()}` },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (response.status !== 200) throw new Error(`GitHub ответил ${response.status}`);
+  return response.json();
+}
+
 async function start(logger: Logger): Promise<void> {
   process.on('uncaughtException', (err) => logger.error('Необработанная ошибка', err));
   process.on('unhandledRejection', (reason) => logger.error('Необработанный отказ промиса', reason));
@@ -344,7 +409,7 @@ async function start(logger: Logger): Promise<void> {
     platform: process.platform,
     homeDir: app.getPath('home'),
     localAppData: process.env.LOCALAPPDATA,
-    override: process.env.TEXTMEET_MODELS_DIR,
+    override: testVars.TEXTMEET_MODELS_DIR,
   });
   const models: ModelStore = fakeAsr
     ? new FakeModelStore(modelsDir, fakeDownloadStepMs, fakeInstalled)
@@ -365,13 +430,34 @@ async function start(logger: Logger): Promise<void> {
           ),
           args: [],
         };
+  const enginePid: EnginePidDeps = {
+    pidFile: join(app.getPath('userData'), 'llama-server.pid'),
+    platform: process.platform,
+    processImage,
+    kill: (pid) => process.kill(pid),
+    logger,
+  };
+  // Движок итогов, оставшийся после падения программы, держал бы видеопамять — завершаем до первого запроса.
+  await killOrphanEngine(enginePid).catch((err: unknown) =>
+    logger.warn('Не удалось проверить движок итогов, оставшийся с прошлого запуска', err),
+  );
+  const llamaServer = new LlamaServer({
+    command: llamaCommand,
+    logger,
+    onSpawn: (pid, file) => {
+      recordEnginePid(enginePid, pid, file).catch((err: unknown) => logger.warn('Не удалось записать номер движка итогов', err));
+    },
+    onExit: () => {
+      clearEnginePid(enginePid).catch((err: unknown) => logger.warn('Не удалось стереть номер движка итогов', err));
+    },
+  });
   const ai = new AiRunner({
     libraryDir,
     model: async () => {
       const { selected } = await currentAiModel({ models, settings, logger });
       return selected && { id: selected, path: llmFilePath(models.root, selected) };
     },
-    engine: llamaEngine(new LlamaServer({ command: llamaCommand, logger })),
+    engine: llamaEngine(llamaServer),
     aiPrompt: () => settings.settled().then(() => settings.get().aiPrompt),
     now: () => new Date(),
     logger,
@@ -384,9 +470,11 @@ async function start(logger: Logger): Promise<void> {
     },
   });
   aiRunner = ai;
+  // Модель, которую качает сама очередь расшифровки, видна ходом на карточке каталога.
+  const queueModels = trackQueueDownloads(models, () => sendToMain(IPC.modelsChanged));
   const queue = new TranscriptionQueue({
-    spawn: () => spawnTranscriptionWorker(logger),
-    models,
+    spawn: () => spawnTranscriptionWorker(logger, { fakeEngines: fakeAsr }),
+    models: queueModels,
     ffmpegPath: () => resolveFfmpegPath(),
     // Запись начинается и кончается по ходу расшифровки: число потоков спрашивается каждый раз.
     threads: () => (controller.getState().phase === 'idle' ? FULL_THREADS : RECORDING_THREADS),
@@ -478,7 +566,20 @@ async function start(logger: Logger): Promise<void> {
   });
   protocol.handle(MEDIA_SCHEME, (request) => serveMedia(request, libraryDir()));
 
+  // «Вышла новая версия»: раз в день спрашиваем GitHub (в автотестах — свой адрес и без минутной паузы).
+  const updates = new UpdateChecker({
+    current: app.getVersion(),
+    url: testVars.TEXTMEET_TEST_UPDATE_URL ?? LATEST_RELEASE_URL,
+    fetchJson: fetchReleaseJson,
+    enabled: () => settings.get().checkUpdates,
+    onFound: (found) => sendToMain(IPC.updateChanged, visibleUpdate(found, settings.get())),
+    logger,
+    ...(testVars.TEXTMEET_TEST_UPDATE_DELAY_MS !== undefined && {
+      firstDelayMs: Number(testVars.TEXTMEET_TEST_UPDATE_DELAY_MS) || 0,
+    }),
+  });
   registerIpc({
+    updates: { found: () => updates.found(), changed: (update) => sendToMain(IPC.updateChanged, update) },
     settings,
     logger,
     platform: process.platform,
@@ -499,7 +600,9 @@ async function start(logger: Logger): Promise<void> {
     onRecorderReady: () => {
       recorderReady = true;
       logger.info('Окно записи готово');
+      recorderWatchdog?.start();
     },
+    onRecorderAlive: () => recorderWatchdog?.beat(),
     hotkeyChanged: () => tray?.update(controller.getState().phase, hotkeyManager.accelerator),
     libraryChanged: () => sendToMain(IPC.libraryChanged),
     search: searchIndex,
@@ -540,6 +643,22 @@ async function start(logger: Logger): Promise<void> {
       exportDir: () => settings.get().exportDir,
       aiPrompt: () => settings.settled().then(() => settings.get().aiPrompt),
       rememberExportDir: (dir) => settings.update({ exportDir: dir }),
+      confirmReplace: async (path) => {
+        const text = dialogTexts.replaceExport(basename(path));
+        const options: Electron.MessageBoxOptions = {
+          type: 'question',
+          title: text.title,
+          message: text.message,
+          detail: text.detail,
+          buttons: text.buttons,
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+        };
+        const owner = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+        const { response } = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options);
+        return response === 1;
+      },
       documentsDir: () => app.getPath('documents'),
       platform: process.platform,
       logger,
@@ -547,7 +666,12 @@ async function start(logger: Logger): Promise<void> {
     transcription: queue,
     models,
     ai,
-    downloads: catalogDownloads,
+    downloads: {
+      start: (id) => catalogDownloads.start(id),
+      cancel: (id) => catalogDownloads.cancel(id),
+      snapshot: () => withQueueDownload(catalogDownloads.snapshot(), queueModels.active()),
+      isBusy: () => catalogDownloads.isBusy(),
+    },
   });
 
   app.on('before-quit', (event) => {
@@ -575,6 +699,7 @@ async function start(logger: Logger): Promise<void> {
     onSystemEnding();
   });
   windowsCreated = true;
+  updates.start();
   tray = createTray(
     { openWindow: () => openMainWindow(logger), toggleRecording: () => void controller.toggle(), quit: () => app.quit() },
     hotkeyManager.accelerator,

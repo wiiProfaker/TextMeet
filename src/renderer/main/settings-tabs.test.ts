@@ -8,6 +8,15 @@ describe('SETTINGS_TABS', () => {
   });
 });
 
+describe('tabAfterKey with modifiers', () => {
+  it('arrows with Alt, Ctrl or Cmd do not switch tabs', () => {
+    expect(tabAfterKey('record', 'ArrowRight', { alt: true, ctrl: false, meta: false })).toBeNull();
+    expect(tabAfterKey('record', 'ArrowLeft', { alt: false, ctrl: true, meta: false })).toBeNull();
+    expect(tabAfterKey('record', 'Home', { alt: false, ctrl: false, meta: true })).toBeNull();
+    expect(tabAfterKey('record', 'ArrowRight', { alt: false, ctrl: false, meta: false })).toBe('transcription');
+  });
+});
+
 describe('tabAfterKey', () => {
   it('goes right and left round the tabs', () => {
     expect(tabAfterKey('record', 'ArrowRight')).toBe('transcription');

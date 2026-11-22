@@ -31,6 +31,15 @@ describe('AI block texts', () => {
     );
   });
 
+  it('aiCaption marks a truncated answer', () => {
+    expect(aiCaption({ modelTitle: 'Qwen3.5 9B', createdAt: '2026-10-16T17:57:00.000Z', status: 'done', truncated: true })).toMatch(
+      /· не поместилось целиком$/,
+    );
+    expect(aiCaption({ modelTitle: 'Qwen3.5 9B', createdAt: '2026-10-16T17:57:00.000Z', status: 'done', truncated: false })).not.toMatch(
+      /не поместилось/,
+    );
+  });
+
   it('names the meeting the model is busy with', () => {
     expect(aiBusyText(job())).toBe('Модель сейчас пишет итоги встречи «Планёрка с дизайнерами».');
     expect(aiBusyText(job({ kind: 'question' }))).toBe('Модель сейчас отвечает на вопрос по встрече «Планёрка с дизайнерами».');

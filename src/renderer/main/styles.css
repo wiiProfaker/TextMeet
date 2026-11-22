@@ -468,6 +468,23 @@ textarea:focus-visible {
   gap: 8px;
 }
 
+/* «Вышла версия…» над «Импорт файла» (решения Плана 8, §4.4): тихая строка, не всплывает поверх. */
+.upd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.upd span {
+  flex: 1 1 auto;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
@@ -524,10 +541,10 @@ textarea:focus-visible {
 }
 
 .head {
-  padding: 26px 36px 16px;
+  padding: 20px 36px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -544,12 +561,22 @@ textarea:focus-visible {
 .meta {
   color: var(--muted);
   font-size: 13px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 4px;
+}
+
+/* Слот строки спикеров: сами спикеры — отдельным элементом строки, со своим переносом. */
+.meta-spk {
+  display: contents;
 }
 
 .acts {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  margin-top: 8px;
   flex-wrap: wrap;
 }
 
@@ -1106,6 +1133,20 @@ button.chip {
   cursor: pointer;
 }
 
+/* Спикеры в строке под названием встречи (решения Плана 8, §2.2): без своей рамки и отступов полосы. */
+.spk.inline {
+  padding: 0;
+  border: 0;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.spk.inline .chip {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+}
+
 button.chip:hover {
   border-color: var(--muted);
 }
@@ -1620,7 +1661,7 @@ button.chip:hover {
   gap: 8px;
 }
 
-.mgroup h3 {
+.mgroup h2 {
   margin: 0;
   font-size: 11.5px;
   font-weight: 600;
@@ -1978,6 +2019,105 @@ mark {
   content-visibility: visible;
 }
 
+/* ---- Встреча: текст слева, итоги колонкой справа (решения Плана 8, §2.1) ---- */
+.mwrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  container-type: inline-size;
+}
+
+.mbody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.mmain {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mside {
+  flex: none;
+  width: clamp(260px, calc(var(--ai-share) * 100%), 60%);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Свёрнутые итоги: колонки нет, остаётся только объявление для экранного диктора. */
+.mside.off {
+  width: 0;
+}
+
+.mside .ai {
+  flex: 1;
+  max-height: none;
+  margin: 14px 24px 14px 0;
+}
+
+.splitter {
+  flex: none;
+  width: 13px;
+  margin: 14px 0;
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.splitter::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms;
+}
+
+.splitter:hover::after,
+.splitter:active::after {
+  background: var(--muted);
+}
+
+.splitter:focus-visible {
+  outline: none;
+}
+
+.splitter:focus-visible::after {
+  width: 3px;
+  left: 5px;
+  background: var(--accent);
+}
+
+/* Две колонки не помещаются (итоги не уже 260 px) — итоги сверху над текстом, как раньше. */
+@container (max-width: 640px) {
+  .mbody {
+    flex-direction: column;
+  }
+
+  .mside {
+    order: -1;
+    width: auto;
+  }
+
+  .splitter {
+    display: none;
+  }
+
+  .mside .ai {
+    flex: none;
+    max-height: 48vh;
+    margin: 14px 36px 2px;
+  }
+}
+
 /* ---- Встреча: блок «Итоги встречи» (решения Плана 9, §2.2; листы 18–20 макета) ---- */
 .ai {
   flex: none;
@@ -1995,19 +2135,28 @@ mark {
 
 .ai-h {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  column-gap: 8px;
+  row-gap: 4px;
 }
 
 .ai-h b {
   font-family: var(--f-text);
   font-size: 16px;
   font-weight: 600;
+  white-space: nowrap;
 }
 
+/* В узкой колонке подпись и ссылки переносятся строкой ниже, а не уезжают за край. */
 .ai-h > span {
   color: var(--muted);
   font-size: 12px;
+}
+
+.ai-h .lnks {
+  flex-wrap: wrap;
+  white-space: nowrap;
 }
 
 .ai-h .lnks,

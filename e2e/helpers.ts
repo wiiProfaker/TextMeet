@@ -30,6 +30,10 @@ export interface LaunchOptions {
   installedModels?: string[];
   /** Пауза поддельного движка итогов между кусками ответа, мс (по умолчанию 20). */
   llmTokenMs?: number;
+  /** Ещё переменные окружения программы (тестовые подмены TEXTMEET_*). */
+  env?: Record<string, string>;
+  /** Итоги встреч: id → ai.json. Кладутся до запуска: первое чтение библиотеки для поиска их уже видит. */
+  aiDocs?: Record<string, unknown>;
 }
 
 export interface LaunchedApp {
@@ -216,6 +220,9 @@ async function writeFixtures(
   for (const [id, transcript] of Object.entries(options.transcripts ?? {})) {
     await writeFile(join(libraryDir, id, 'transcript.json'), serialize(transcript));
   }
+  for (const [id, doc] of Object.entries(options.aiDocs ?? {})) {
+    await writeFile(join(libraryDir, id, 'ai.json'), serialize(doc));
+  }
 }
 
 export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedApp> {
@@ -248,6 +255,7 @@ export async function launchApp(options: LaunchOptions = {}): Promise<LaunchedAp
         TEXTMEET_TEST_LLM: resolve('src/test-support/fake-llama-server.mjs'),
         TEXTMEET_FAKE_LLM_TOKEN_MS: String(options.llmTokenMs ?? 20),
         TEXTMEET_FAKE_LLM_LOG: llmLog,
+        ...options.env,
       },
     });
     page = await mainWindow(app);

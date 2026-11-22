@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { defaultMeetingTitle } from '../library/naming';
 import { fitLength, pickRecordedAt, titleFromFileName } from './naming';
 
 const NOW = new Date('2026-10-05T12:00:00.000Z');
@@ -44,6 +45,19 @@ describe('titleFromFileName', () => {
     expect(titleFromFileName('  итоги.v2.m4a ', at)).toBe('итоги.v2');
     expect(titleFromFileName('GMT20261002-071500_Recording.mp4', at)).toBe('GMT20261002-071500_Recording');
     expect(titleFromFileName('запись', at)).toBe('запись');
+  });
+
+  it('keeps dots that are not an extension', () => {
+    expect(titleFromFileName('Встреча 2026.10.05', at)).toBe('Встреча 2026.10.05');
+    expect(titleFromFileName('Встреча 2026.10.05.m4a', at)).toBe('Встреча 2026.10.05');
+    expect(titleFromFileName('Созвон с Ириной.mp4', at)).toBe('Созвон с Ириной');
+    expect(titleFromFileName('Отчёт v1.2', at)).toBe('Отчёт v1.2');
+    expect(titleFromFileName('Разговор. Часть первая', at)).toBe('Разговор. Часть первая');
+  });
+
+  it('a name of invisible characters becomes the default title', () => {
+    expect(titleFromFileName('​‍ .mp3', at)).toBe(defaultMeetingTitle(at));
+    expect(titleFromFileName('​Созвон​.mp3', at)).toBe('Созвон');
   });
 
   it('uses the date of the recording when the name is empty', () => {

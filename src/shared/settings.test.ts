@@ -14,6 +14,19 @@ describe('SettingsSchema', () => {
       exportDir: null,
       aiPrompt: null,
       aiModel: null,
+      checkUpdates: true,
+      dismissedUpdate: null,
+    });
+  });
+
+  it('reads an old settings file: update checks are on, nothing is dismissed', () => {
+    const parsed = SettingsSchema.parse({ schemaVersion: 1, aiModel: 'qwen3.5-9b' });
+    expect(parsed.checkUpdates).toBe(true);
+    expect(parsed.dismissedUpdate).toBeNull();
+    expect(SettingsSchema.parse({ dismissedUpdate: 5 }).dismissedUpdate).toBeNull();
+    expect(SettingsSchema.parse({ checkUpdates: false, dismissedUpdate: '1.1.0' })).toMatchObject({
+      checkUpdates: false,
+      dismissedUpdate: '1.1.0',
     });
   });
 

@@ -9,6 +9,8 @@ import { speakerTone } from './transcription-format';
 interface Props {
   speakers: readonly TranscriptSpeaker[];
   names: Readonly<Record<string, string>>;
+  /** В строке под названием встречи («· Спикеры: …»), а не отдельной полосой над текстом. */
+  inline?: boolean;
   /** null — спикеров сейчас не переименовать (идёт расшифровка заново). */
   onRename: ((speakerId: SpeakerId, name: string | null) => Promise<void>) | null;
   onMerge(from: SpeakerId, into: SpeakerId): Promise<void>;
@@ -68,7 +70,7 @@ function NameField({
  * Строка «Спикеры»: щелчок по чипу — переименовать во всей встрече; пустое имя вернёт «Спикер N» / «Я». Имя,
  * которое уже есть у другого спикера, — просьба объединить их (окно подтверждения, лист 11 макета).
  */
-export function SpeakerChips({ speakers, names, onRename, onMerge, onError }: Props) {
+export function SpeakerChips({ speakers, names, inline = false, onRename, onMerge, onError }: Props) {
   const [editing, setEditing] = useState<SpeakerId | null>(null);
   const [merge, setMerge] = useState<{ from: SpeakerId; into: SpeakerId } | null>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -113,8 +115,8 @@ export function SpeakerChips({ speakers, names, onRename, onMerge, onError }: Pr
 
   return (
     <>
-      <div ref={list} className="spk" role="list" aria-label="Спикеры">
-        <span aria-hidden="true">Спикеры</span>
+      <div ref={list} className={inline ? 'spk inline' : 'spk'} role="list" aria-label="Спикеры">
+        <span aria-hidden="true">{inline ? '· Спикеры:' : 'Спикеры'}</span>
         {speakers.map((s) => {
           const label = speakerLabel(s.id, names);
           if (editing === s.id) {

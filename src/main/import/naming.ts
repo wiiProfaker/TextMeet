@@ -38,8 +38,19 @@ export function fitLength(text: string, max: number): string {
   return out;
 }
 
-/** «Созвон с Ириной.mp4» → «Созвон с Ириной»; пустое — «Встреча ДД.ММ.ГГГГ ЧЧ:ММ» по дате записи. */
+/** Расширение файла: после последней точки 1–5 букв и цифр, среди них хоть одна буква («.m4a», «.mp3»; не «.05»). */
+const EXTENSION = /\.([\p{L}\d]{1,5})$/u;
+/** Пробелы и невидимые знаки (\p{Cf}: нулевой ширины и т. п.) по краям названия. */
+const EDGES = /^[\s\p{Cf}]+|[\s\p{Cf}]+$/gu;
+
+/**
+ * «Созвон с Ириной.mp4» → «Созвон с Ириной»; «Встреча 2026.10.05» — точки не расширение, название целиком; пустое или
+ * из одних невидимых знаков — «Встреча ДД.ММ.ГГГГ ЧЧ:ММ» по дате записи.
+ */
 export function titleFromFileName(fileName: string, recordedAt: Date): string {
-  const title = fitLength(fileName.replace(/\.[^.]*$/, '').trim(), MAX_TITLE_LENGTH).trim();
+  const name = fileName.trim();
+  const extension = EXTENSION.exec(name);
+  const base = extension && /\p{L}/u.test(extension[1]!) ? name.slice(0, extension.index) : name;
+  const title = fitLength(base.replace(EDGES, ''), MAX_TITLE_LENGTH).replace(EDGES, '');
   return title === '' ? defaultMeetingTitle(recordedAt) : title;
 }

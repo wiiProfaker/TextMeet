@@ -89,7 +89,7 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
 
   /** ←/→, Home, End в строке вкладок: вкладка открывается сразу, фокус — на ней. */
   const tabKeys = (event: KeyboardEvent<HTMLDivElement>) => {
-    const next = tabAfterKey(tab, event.key);
+    const next = tabAfterKey(tab, event.key, { alt: event.altKey, ctrl: event.ctrlKey, meta: event.metaKey });
     if (!next) return;
     event.preventDefault();
     onTabChange(next);
@@ -226,9 +226,30 @@ export function SettingsPane({ state, info, onChange, onError, tab, onTabChange 
               )}
             </div>
           </div>
+          <div className="fld tight">
+            <div className="lb">Обновления</div>
+            <div className="ctl">
+              <Toggle
+                checked={settings.checkUpdates}
+                label="Проверять, не вышла ли новая версия"
+                hint="Раз в день программа спрашивает GitHub о новой версии. Ничего о вас не отправляется."
+                onChange={(value) =>
+                  setInstantly({ checkUpdates: value }, () => window.textmeet.setCheckUpdates(value))
+                }
+              />
+            </div>
+          </div>
           {info && (
             <footer className="about">
-              TextMeet {info.version} · журнал ошибок: {info.logFile}
+              TextMeet {info.version} ·{' '}
+              <button
+                type="button"
+                className="lnk"
+                onClick={() => window.textmeet.openLicenses().catch((err: unknown) => setError(errorText(err)))}
+              >
+                Лицензии
+              </button>{' '}
+              · журнал ошибок: {info.logFile}
             </footer>
           )}
         </Panel>

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { DEFAULT_AI_PROMPT } from '../../shared/ai-prompt';
@@ -50,6 +50,7 @@ function deps(lib: string, over: Partial<ExportDeps> = {}): ExportDeps & { clipb
       clipboard.push(data);
     },
     exportDir: () => null,
+    confirmReplace: async () => true,
     aiPrompt: async () => null,
     rememberExportDir: async () => undefined,
     documentsDir: () => out,
@@ -202,6 +203,80 @@ describe('saveMeeting', () => {
     const dir = makeTempDir('textmeet-export-docx-');
     await saveMeeting(deps(lib, { chooseSavePath: async () => join(dir, 'итоги') }), id, 'docx');
     expect(readFileSync(join(dir, 'итоги.docx')).subarray(0, 2).toString()).toBe('PK');
+  });
+
+  it('asks before replacing an existing file when the extension was appended', async () => {
+    const { lib, id } = await meetingWithText();
+    const dir = makeTempDir('textmeet-export-replace-');
+    const existing = join(dir, 'Итоги.docx');
+    writeFileSync(existing, 'old');
+    const asked: string[] = [];
+    const rememberExportDir = vi.fn(async () => undefined);
+    const refuse = deps(lib, {
+      chooseSavePath: async () => join(dir, 'Итоги'),
+      confirmReplace: async (path) => {
+        asked.push(path);
+        return false;
+      },
+      rememberExportDir,
+    });
+    expect(await saveMeeting(refuse, id, 'docx')).toEqual({ saved: false });
+    expect(asked).toEqual([existing]);
+    expect(readFileSync(existing, 'utf8')).toBe('old');
+    expect(rememberExportDir).not.toHaveBeenCalled();
+
+    const accept = deps(lib, { chooseSavePath: async () => join(dir, 'Итоги'), confirmReplace: async () => true });
+    expect(await saveMeeting(accept, id, 'docx')).toEqual({ saved: true });
+    expect(readFileSync(existing).subarray(0, 2).toString()).toBe('PK');
+  });
+
+  it('does not ask when the dialog returned the name with the extension', async () => {
+    const { lib, id } = await meetingWithText();
+    const dir = makeTempDir('textmeet-export-replace-');
+    writeFileSync(join(dir, 'Итоги.docx'), 'old');
+    const confirmReplace = vi.fn(async () => false);
+    const d = deps(lib, { chooseSavePath: async () => join(dir, 'Итоги.docx'), confirmReplace });
+    expect(await saveMeeting(d, id, 'docx')).toEqual({ saved: true });
+    expect(confirmReplace).not.toHaveBeenCalled();
+  });
+
+  it('does not ask when there is no file with the appended extension', async () => {
+    const { lib, id } = await meetingWithText();
+    const dir = makeTempDir('textmeet-export-replace-');
+    const confirmReplace = vi.fn(async () => false);
+    const d = deps(lib, { chooseSavePath: async () => join(dir, 'Итоги'), confirmReplace });
+    expect(await saveMeeting(d, id, 'txt')).toEqual({ saved: true });
+    expect(confirmReplace).not.toHaveBeenCalled();
+  });
+
+  it('writes the export atomically: a failed write leaves no half file', async () => {
+    const { lib, id } = await meetingWithText();
+    const dir = makeTempDir('textmeet-export-atomic-');
+    const target = join(dir, 'итоги.txt');
+    writeFileSync(target, 'old');
+    const d = deps(lib, {
+      chooseSavePath: async () => target,
+      rename: async () => {
+        throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+      },
+    });
+    await expect(saveMeeting(d, id, 'txt')).rejects.toThrow('Не удалось сохранить файл');
+    expect(readFileSync(target, 'utf8')).toBe('old');
+    expect(readdirSync(dir)).toEqual(['итоги.txt']);
+  });
+
+  it('a file held by another program (Word) is said plainly', async () => {
+    const { lib, id } = await meetingWithText();
+    const dir = makeTempDir('textmeet-export-busy-');
+    const target = join(dir, 'итоги.docx');
+    writeFileSync(target, 'old');
+    const d = deps(lib, {
+      chooseSavePath: async () => target,
+      rename: async () => {
+        throw Object.assign(new Error('EPERM: operation not permitted, rename'), { code: 'EPERM' });
+      },
+    });
+    await expect(saveMeeting(d, id, 'docx')).rejects.toThrow('Не удалось сохранить файл: файл занят другой программой');
   });
 
   it('a failed write is said plainly and the folder is not remembered', async () => {

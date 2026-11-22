@@ -1,6 +1,7 @@
 import { promises as fsp } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import {
+  app,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -10,6 +11,8 @@ import {
   type WebContents,
 } from 'electron';
 import { z } from 'zod';
+import type { AvailableUpdate } from '../shared/update';
+import { RELEASES_PAGE_PREFIX, visibleUpdate } from './updates/update-check';
 import {
   IPC,
   type AppInfo,
@@ -62,6 +65,10 @@ export interface IpcDeps {
   recorderContents(): WebContents | null;
   appInfo(): AppInfo;
   onRecorderReady(): void;
+  /** Проверка новой версии: что найдено; changed — сказать окну, что показывать. */
+  updates: { found(): AvailableUpdate | null; changed(update: AvailableUpdate | null): void };
+  /** Сердцебиение окна записи — сторожу зависания. */
+  onRecorderAlive(): void;
   /** Горячая клавиша сменилась — обновить подсказку в меню трея. */
   hotkeyChanged(): void;
   /** Встреча изменилась — окно перечитает список встреч. */
@@ -139,8 +146,12 @@ const TranscribeRequestSchema = z.object({
   model: AsrModelIdSchema.nullable(),
 });
 
+/** Список лицензий (scripts/build-notices.mjs; electron-builder кладёт его в resources/). */
+const NOTICES_FILE = 'THIRD-PARTY-NOTICES.txt';
+
 const RecorderSchemas = {
   [IPC.recorderReady]: z.undefined(),
+  [IPC.recorderAlive]: z.undefined(),
   [IPC.recorderStarted]: z.object({
     meetingId: MeetingIdSchema,
     tracks: z.array(z.object({ kind: RecordedTrackKindSchema, startedAt: z.number().finite() })).min(1),
@@ -277,6 +288,25 @@ export function registerIpc(deps: IpcDeps): void {
     return settingsState();
   });
 
+  // «Вышла новая версия» (решения Плана 8, §4.4).
+  const shownUpdate = () => visibleUpdate(deps.updates.found(), deps.settings.get());
+  handle(IPC.setCheckUpdates, async (arg) => {
+    await deps.settings.update({ checkUpdates: z.boolean().parse(arg) });
+    deps.updates.changed(shownUpdate());
+    return settingsState();
+  });
+  handle(IPC.getUpdate, () => shownUpdate());
+  handle(IPC.dismissUpdate, async (arg) => {
+    await deps.settings.update({ dismissedUpdate: z.string().min(1).max(50).parse(arg) });
+    deps.updates.changed(shownUpdate());
+  });
+  handle(IPC.openUpdate, async () => {
+    // Только ссылка, прошедшая проверку (страница выпусков нашего репозитория).
+    const update = shownUpdate();
+    if (!update || !update.url.startsWith(RELEASES_PAGE_PREFIX)) return;
+    await shell.openExternal(update.url);
+  });
+
   handle(IPC.setAiPrompt, async (arg) => {
     const aiPrompt = storedAiPrompt(AiPromptSchema.parse(arg));
     try {
@@ -301,6 +331,12 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   handle(IPC.openLibraryDir, () => openLibraryFolder(deps.libraryDir()));
+  handle(IPC.openLicenses, async () => {
+    // Собранная программа — рядом с app.asar (extraResources), разработка — корень приложения.
+    const file = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), NOTICES_FILE);
+    const failure = await shell.openPath(file);
+    if (failure) throw new Error(`Не удалось открыть список лицензий: ${failure}`);
+  });
 
   handle(IPC.openMeetingDir, (arg) => openMeetingFolder(meetingDir(deps.libraryDir(), MeetingIdSchema.parse(arg))));
 
@@ -559,6 +595,7 @@ export function registerIpc(deps: IpcDeps): void {
   });
 
   onRecorder(IPC.recorderReady, () => deps.onRecorderReady());
+  onRecorder(IPC.recorderAlive, () => deps.onRecorderAlive());
   onRecorder(IPC.recorderStarted, (message) => deps.controller.onStarted(message));
   onRecorder(IPC.recorderStartFailed, (message) => deps.controller.onStartFailed(message));
   onRecorder(IPC.recorderChunk, (message) => {

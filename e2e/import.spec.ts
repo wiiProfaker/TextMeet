@@ -35,6 +35,27 @@ async function chooseFilesInTurn(app: ElectronApplication, batches: string[][]):
   }, batches);
 }
 
+/** Первое добавление файлов ждёт, пока тест не вызовет globalThis.releaseImport() в main. */
+async function holdFirstImport(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ ipcMain }) => {
+    // Обработчик программы подменить снаружи нечем: ipcMain отдаёт его только через внутренний список.
+    const handlers = (ipcMain as unknown as { _invokeHandlers: Map<string, (...args: unknown[]) => unknown> })._invokeHandlers;
+    const original = handlers.get('import:files');
+    if (!original) throw new Error('Нет обработчика import:files');
+    let held = false;
+    const gate = new Promise<void>((resolve) => {
+      (globalThis as { releaseImport?: () => void }).releaseImport = resolve;
+    });
+    handlers.set('import:files', async (...args: unknown[]) => {
+      if (!held) {
+        held = true;
+        await gate;
+      }
+      return original(...args);
+    });
+  });
+}
+
 /**
  * Бросить файлы в окно: paths — файлы с диска (у File, выбранного через поле файла, есть путь, как у перетащенного
  * из папки), names — файлы без пути (из архива, вложение письма).
@@ -127,12 +148,15 @@ test('a refusal stays while the next files are checked; the button is free once 
   await writeFile(pdf, 'не видео');
   const videos = ['a.mp4', 'b.mp4', 'c.mp4', 'd.mp4'].map((name) => join(root, name));
   for (const video of videos) await videoWithSound(video, 1);
-  // Первая группа проверяется долго (несколько файлов) — вторую добавляют, пока она ещё идёт.
+  // Вторую группу добавляют, пока первая ещё проверяется: первая ждёт, пока тест не отпустит её (на быстрой машине она
+  // успевала закончиться раньше второго нажатия, а новое добавление по задумке стирает прежнее сообщение).
   await chooseFilesInTurn(app, [[pdf, ...videos.slice(0, 3)], [videos[3] ?? '']]);
+  await holdFirstImport(app);
 
   const button = page.getByRole('button', { name: 'Импорт файла' });
   await button.click();
   await button.click({ timeout: 2_000 });
+  await app.evaluate(() => (globalThis as { releaseImport?: () => void }).releaseImport?.());
   await expect.poll(() => meetingIds(libraryDir), { timeout: 20_000 }).toHaveLength(4);
   await expect(page.getByRole('alert')).toHaveText(
     'Добавлено 3 файла из 4. Не удалось добавить «отчёт.pdf»: не получилось прочитать звук из файла.',

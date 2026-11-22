@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AI_PROMPT_MAX, AiPromptSchema, DEFAULT_AI_PROMPT, resolveAiPrompt, storedAiPrompt, withAiPrompt } from './ai-prompt';
+import { AI_PROMPT_MAX, AiPromptSchema, DEFAULT_AI_PROMPT, pasteCut, resolveAiPrompt, storedAiPrompt, withAiPrompt } from './ai-prompt';
 
 describe('DEFAULT_AI_PROMPT', () => {
   it('explains who is who and asks for the summary parts', () => {
@@ -58,5 +58,14 @@ describe('withAiPrompt', () => {
   it('adds nothing for an empty or blank prompt', () => {
     expect(withAiPrompt('', 'текст')).toBe('текст');
     expect(withAiPrompt(' \n\t', 'текст')).toBe('текст');
+  });
+});
+
+describe('pasteCut', () => {
+  it('tells when a paste does not fit into the field', () => {
+    expect(pasteCut({ length: 3990, selected: 0, pasted: 20 })).toBe(true);
+    expect(pasteCut({ length: 3990, selected: 10, pasted: 20 })).toBe(false);
+    expect(pasteCut({ length: 0, selected: 0, pasted: AI_PROMPT_MAX })).toBe(false);
+    expect(pasteCut({ length: 0, selected: 0, pasted: AI_PROMPT_MAX + 1 })).toBe(true);
   });
 });

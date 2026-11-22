@@ -73,6 +73,8 @@ export function catalogErrorsAfter(errors: CatalogErrors, source: 'load' | 'acti
 /** Что показать: ответ на нажатие важнее ошибки чтения. */
 export const catalogErrorText = (errors: CatalogErrors): string | null => errors.action ?? errors.load;
 
-/** Подпись скачивания в карточке. */
-export const downloadText = (done: number, total: number): string =>
-  total > 0 ? `Скачиваем — ${formatDownloaded(done, total)}` : 'Скачиваем…';
+/** Подпись скачивания в карточке; queued — модель качает очередь расшифровки (её «Расшифровать»). */
+export function downloadText(done: number, total: number, queued = false): string {
+  const what = queued ? 'Скачивается для расшифровки встречи' : 'Скачиваем';
+  return total > 0 ? `${what} — ${formatDownloaded(done, total)}` : `${what}…`;
+}

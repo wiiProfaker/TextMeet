@@ -136,7 +136,9 @@ const TRANSCRIPTION_FILES: readonly ModelFile[] = [
   {
     group: 'voices',
     path: 'speaker-embedding/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx',
-    url: `${SHERPA_RELEASES}/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx`,
+    // Копия с Hugging Face, закреплённая коммитом: в выпусках sherpa-onnx файл 2026-11-19 заменили новой выгрузкой
+    // (другой размер и сумма) — по той ссылке скачивание падало бы как «файл повреждён».
+    url: 'https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/0743f301363dec56491a490f6d6cbc9d67f9a3bf/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx',
     size: 26_485_263,
     sha256: 'c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5',
   },

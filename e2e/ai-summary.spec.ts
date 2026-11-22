@@ -237,15 +237,20 @@ async function launchWithSummary(): Promise<LaunchedApp> {
 }
 
 /** Размер окна — и дождаться, пока страница его получила (рамка окна — несколько десятков точек). */
+/**
+ * Окно не бывает больше экрана: на машинах CI экран Mac бывает шириной 1024, и окно 1300 ужимается до него.
+ * Поэтому ждём ширину, которую система реально может дать.
+ */
 async function setWindowSize({ app, page }: LaunchedApp, width: number, height: number): Promise<void> {
-  await app.evaluate(
-    ({ BrowserWindow }, size) =>
-      BrowserWindow.getAllWindows()
-        .find((w) => /[\/]main[\/]index\.html/.test(w.webContents.getURL()))
-        ?.setSize(size.width, size.height),
-    { width, height },
-  );
-  await expect.poll(() => page.evaluate((w) => Math.abs(window.innerWidth - w), width)).toBeLessThan(40);
+  const target = await app.evaluate(({ BrowserWindow, screen }, size) => {
+    const area = screen.getPrimaryDisplay().workAreaSize;
+    const fitted = { width: Math.min(size.width, area.width), height: Math.min(size.height, area.height) };
+    BrowserWindow.getAllWindows()
+      .find((w) => /[\/]main[\/]index\.html/.test(w.webContents.getURL()))
+      ?.setSize(fitted.width, fitted.height);
+    return fitted.width;
+  }, { width, height });
+  await expect.poll(() => page.evaluate((w) => Math.abs(window.innerWidth - w), target)).toBeLessThan(40);
 }
 
 const text = (page: Page) => page.getByRole('region', { name: 'Текст встречи' });
